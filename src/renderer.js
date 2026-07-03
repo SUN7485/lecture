@@ -188,16 +188,25 @@
 
   function renderAssets() {
     if (!assets.length) {
-      assetList.innerHTML = '<p class="hint">Click <b>Add Images</b> to load pictures here, then drag them onto the page.</p>';
+      assetList.innerHTML = '<p class="hint">Click <b>🖼 Image</b> to load pictures, then drag them onto a slide — or double-click a picture to drop it on the current slide.</p>';
       return;
     }
     assetList.innerHTML = '';
     for (const a of assets) {
       const el = document.createElement('div');
       el.className = 'asset';
+      el.title = 'Drag onto a slide — or double-click to add it to the current slide';
       el.innerHTML = `<button class="asset-del" title="Remove this image from the list">×</button>` +
         `<img src="${a.url}"><div class="name">${escapeHtml(a.name)}</div>`;
       el.addEventListener('pointerdown', (e) => startAssetDrag(e, a));
+      // Double-click = drop it on the current slide (no dragging needed).
+      el.addEventListener('dblclick', () => {
+        if (!editor) { status('Open a lecture first.'); return; }
+        const slide = currentSlideEl();
+        editor.insertImageInto(a.url, a.name, slide);
+        if (slide) { activeSlide = slide; scrollToSlide(slide); updateSlideInfo(); }
+        status('Added image to the current slide. Drag a corner to resize.');
+      });
       // The × removes the tile; keep its clicks from starting a drag.
       const del = el.querySelector('.asset-del');
       del.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -434,6 +443,24 @@
       currentFile = auto;
       loadIntoIframe(auto.content, auto.dir);
       status('Opened: ' + auto.filePath);
+      return;
+    }
+    // Offer to reopen the last lecture straight from the empty screen.
+    const last = await window.api.getLastFile();
+    if (last) {
+      const name = last.filePath.split(/[\\/]/).pop();
+      const btn = document.createElement('button');
+      btn.className = 'big';
+      btn.style.marginLeft = '10px';
+      btn.textContent = '↩ Reopen ' + name;
+      btn.title = last.filePath;
+      btn.addEventListener('click', () => {
+        currentFile = last;
+        loadIntoIframe(last.content, last.dir);
+        status('Opened: ' + last.filePath);
+      });
+      const holder = document.querySelector('.empty-inner');
+      if (holder) holder.appendChild(btn);
     }
   })();
 })();

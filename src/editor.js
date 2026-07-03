@@ -864,6 +864,24 @@
       if (img.complete) this.select(img);
     }
 
+    // Insert an image without dragging: drop it into the given slide's content
+    // area (or the slide itself, or the body). Used by double-clicking a panel
+    // tile — friendlier than the cross-iframe drag.
+    insertImageInto(url, name, slide) {
+      const container = (slide && slide.querySelector('.content')) || slide || this.doc.body;
+      const slot = this.doc.createElement('figure');
+      slot.className = 've-slot';
+      const img = this.doc.createElement('img');
+      img.src = url;
+      if (name) img.alt = name;
+      slot.appendChild(img);
+      container.appendChild(slot);
+      this._pushHistory();
+      img.addEventListener('load', () => this.select(img), { once: true });
+      if (img.complete) this.select(img);
+      return img;
+    }
+
     // ---------- export ----------
     getCleanHtml() {
       const clone = this.doc.documentElement.cloneNode(true);

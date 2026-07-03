@@ -5,6 +5,19 @@ const os = require('os');
 
 let mainWindow;
 
+// Remember the last lecture opened so we can offer to reopen it next launch.
+function lastFilePath() { return path.join(app.getPath('userData'), 'last-file.json'); }
+function rememberFile(filePath) {
+  try { fs.writeFileSync(lastFilePath(), JSON.stringify({ filePath }), 'utf8'); } catch (_) {}
+}
+function readLastFile() {
+  try {
+    const { filePath } = JSON.parse(fs.readFileSync(lastFilePath(), 'utf8'));
+    if (filePath && fs.existsSync(filePath)) return filePath;
+  } catch (_) {}
+  return null;
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -44,13 +57,22 @@ ipcMain.handle('open-html', async () => {
   if (res.canceled || !res.filePaths.length) return null;
   const filePath = res.filePaths[0];
   const content = fs.readFileSync(filePath, 'utf8');
+  rememberFile(filePath);
   return { filePath, dir: path.dirname(filePath), content };
+});
+
+// ---- Reopen the last lecture (offered on the empty screen) ----
+ipcMain.handle('get-last-file', () => {
+  const filePath = readLastFile();
+  if (!filePath) return null;
+  return { filePath, dir: path.dirname(filePath), content: fs.readFileSync(filePath, 'utf8') };
 });
 
 // ---- Auto-open (tests / reopen-last-file) ----
 ipcMain.handle('auto-open', () => {
   const p = process.env.LVE_OPEN;
   if (!p || !fs.existsSync(p)) return null;
+  rememberFile(p);
   return { filePath: p, dir: path.dirname(p), content: fs.readFileSync(p, 'utf8') };
 });
 
