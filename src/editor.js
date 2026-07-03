@@ -1,0 +1,758 @@
+/*
+ * LectureEditor — operates on a same-origin iframe document.
+ * Features: drag-to-insert images (flow based), select, resize, align, replace, delete,
+ * undo/redo (HTML snapshots). Runs entirely in the renderer; no injection into the iframe.
+ */
+(function () {
+  const EDITOR_CSS = `
+    html, body { height: auto !important; min-height: 0 !important; }
+    .ve-slot { margin: 12px 0; text-align: center; }
+    .ve-slot.ve-align-left { text-align: left; }
+    .ve-slot.ve-align-right { text-align: right; }
+    .ve-slot img { max-width: 100%; height: auto; }
+    .ve-selected { outline: 2px solid #2f6df6 !important; outline-offset: 1px; }
+    .ve-editing { outline: 2px dashed #8b5cf6 !important; outline-offset: 2px; cursor: text; }
+    .ve-insert-line {
+      position: absolute; height: 3px; background: #2f6df6; border-radius: 2px;
+      pointer-events: none; z-index: 2147483000; box-shadow: 0 0 6px rgba(47,109,246,.6);
+    }
+    .ve-overlay { position: absolute; pointer-events: none; z-index: 2147483001; }
+    .ve-handle {
+      position: absolute; width: 14px; height: 14px; background: #fff;
+      border: 2px solid #2f6df6; border-radius: 50%; pointer-events: auto;
+      transform: translate(-50%, -50%); touch-action: none;
+    }
+    .ve-handle.nw, .ve-handle.se { cursor: nwse-resize; }
+    .ve-handle.ne, .ve-handle.sw { cursor: nesw-resize; }
+    .ve-handle.n, .ve-handle.s { cursor: ns-resize; }
+    .ve-handle.e, .ve-handle.w { cursor: ew-resize; }
+    .ve-tag { padding: 4px 6px; color: #9aa4b8; }
+    .ve-palette {
+      position: absolute; z-index: 2147483003; display: grid;
+      grid-template-columns: repeat(6, 24px); gap: 6px; background: #1f2430;
+      padding: 10px; border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.35);
+    }
+    .ve-swatch { width: 24px; height: 24px; border-radius: 5px; cursor: pointer; border: 2px solid rgba(255,255,255,.25); }
+    .ve-swatch:hover { border-color: #fff; }
+    .ve-palette input[type="color"] { grid-column: span 3; width: 100%; height: 26px; padding: 0; border: none; background: none; cursor: pointer; }
+    .ve-toolbar {
+      position: absolute; display: flex; gap: 4px; background: #1f2430; color: #fff;
+      padding: 4px 6px; border-radius: 8px; font: 12px -apple-system, "Segoe UI", sans-serif;
+      pointer-events: auto; z-index: 2147483002; box-shadow: 0 4px 12px rgba(0,0,0,.3);
+      white-space: nowrap;
+    }
+    .ve-toolbar button {
+      background: #333a49; color: #fff; border: none; border-radius: 5px;
+      padding: 4px 8px; cursor: pointer; font: inherit;
+    }
+    .ve-toolbar button:hover { background: #45506a; }
+    .ve-toolbar button.danger:hover { background: #c0392b; }
+  `;
+
+  const BLOCK_TAGS = new Set(['P','DIV','H1','H2','H3','H4','H5','H6','UL','OL','LI','SECTION','ARTICLE','TABLE','BLOCKQUOTE','PRE','FIGURE','HR','IMG']);
+
+  class LectureEditor {
+    constructor() {
+      this.doc = null;
+      this.win = null;
+      this.selected = null;
+      this.overlay = null;
+      this.toolbar = null;
+      this.insertLine = null;
+      this.undoStack = [];
+      this.redoStack = [];
+      this.onChange = () => {};
+      this._raf = null;
+    }
+
+    attach(iframe) {
+      this.iframe = iframe;
+      this.doc = iframe.contentDocument;
+      this.win = iframe.contentWindow;
+
+      // Inject editor styles.
+      const style = this.doc.createElement('style');
+      style.id = 've-styles';
+      style.textContent = EDITOR_CSS;
+      this.doc.head.appendChild(style);
+
+      // Size the iframe to its content so the app window scrolls naturally
+      // (no scrollbar-inside-a-scrollbar).
+      this._sizeToContent();
+      if (this.win.ResizeObserver) {
+        this._ro = new this.win.ResizeObserver(() => this._sizeToContent());
+        this._ro.observe(this.doc.documentElement);
+        if (this.doc.body) this._ro.observe(this.doc.body);
+      }
+
+      // Make existing images editable too.
+      this.doc.addEventListener('click', (e) => this._onDocClick(e), true);
+      this.doc.addEventListener('dblclick', (e) => this._onDblClick(e));
+      this.win.addEventListener('scroll', () => this._reposition(), true);
+      this.win.addEventListener('resize', () => this._reposition());
+      this.doc.addEventListener('keydown', (e) => this._onKey(e));
+
+      this.undoStack = [this._snapshot()];
+      this.redoStack = [];
+      this._emit();
+    }
+
+    _sizeToContent() {
+      if (!this.doc || !this.doc.body || !this.iframe) return;
+      const cs = this.win.getComputedStyle(this.doc.body);
+      const h = this.doc.body.scrollHeight
+        + (parseFloat(cs.marginTop) || 0)
+        + (parseFloat(cs.marginBottom) || 0);
+      this.iframe.style.height = Math.max(400, Math.ceil(h)) + 'px';
+      // Wide lectures (slide decks) get the full width they ask for; the
+      // stage scrolls horizontally instead of cutting the slide off.
+      const w = Math.max(this.doc.documentElement.scrollWidth, this.doc.body.scrollWidth);
+      if (w > this.iframe.clientWidth + 2) this.iframe.style.width = w + 'px';
+    }
+
+    // ---------- snapshots / undo ----------
+    _snapshot() {
+      // Clone and strip editor UI so undo/redo never re-materializes ghost
+      // toolbars/handles into the document.
+      const clone = this.doc.body.cloneNode(true);
+      clone.querySelectorAll('.ve-overlay, .ve-toolbar, .ve-insert-line').forEach(n => n.remove());
+      clone.querySelectorAll('.ve-selected').forEach(n => n.classList.remove('ve-selected'));
+      clone.querySelectorAll('[contenteditable], .ve-editing').forEach(n => {
+        n.removeAttribute('contenteditable');
+        n.classList.remove('ve-editing');
+      });
+      return clone.innerHTML;
+    }
+    _pushHistory() {
+      this.undoStack.push(this._snapshot());
+      if (this.undoStack.length > 100) this.undoStack.shift();
+      this.redoStack = [];
+      this._emit();
+    }
+    undo() {
+      if (this.undoStack.length <= 1) return;
+      this.redoStack.push(this.undoStack.pop());
+      this.doc.body.innerHTML = this.undoStack[this.undoStack.length - 1];
+      this._deselect();
+      this._emit();
+    }
+    redo() {
+      if (!this.redoStack.length) return;
+      const html = this.redoStack.pop();
+      this.undoStack.push(html);
+      this.doc.body.innerHTML = html;
+      this._deselect();
+      this._emit();
+    }
+    canUndo() { return this.undoStack.length > 1; }
+    canRedo() { return this.redoStack.length > 0; }
+    _emit() { this.onChange({ canUndo: this.canUndo(), canRedo: this.canRedo() }); }
+
+    _onKey(e) {
+      // While editing text, let the browser handle typing and native undo.
+      if (this._editingEl) {
+        if (e.key === 'Escape') { e.preventDefault(); this._editingEl.blur(); }
+        return;
+      }
+      if (this._placeType && e.key === 'Escape') {
+        e.preventDefault();
+        this.cancelPlace();
+        this.onPlaced && this.onPlaced(null);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        this.onSaveRequest && this.onSaveRequest();
+        return;
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && this.selected) {
+        e.preventDefault();
+        this.deleteSelected();
+      } else if (e.key === 'Escape' && this.selected) {
+        this._deselect();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        e.shiftKey ? this.redo() : this.undo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        this.redo();
+      }
+    }
+
+    // ---------- text editing (double-click, PowerPoint style) ----------
+    _onDblClick(e) {
+      if (e.target.closest('img, .ve-slot, .ve-toolbar, .ve-overlay, .ve-handle')) return;
+      const el = e.target.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th, figcaption, pre');
+      if (!el || el === this._editingEl) return;
+      this._startTextEdit(el);
+    }
+
+    _startTextEdit(el) {
+      this._deselect();
+      if (this._editingEl) this._editingEl.blur();
+      this._editingEl = el;
+      el.setAttribute('contenteditable', 'true');
+      el.classList.add('ve-editing');
+      el.focus();
+
+      // Mini format bar: Bold / Italic / Underline (Ctrl+B/I/U work too).
+      const bar = this.doc.createElement('div');
+      bar.className = 've-toolbar';
+      bar.innerHTML = `
+        <button data-c="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+        <button data-c="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+        <button data-c="underline" title="Underline (Ctrl+U)"><u>U</u></button>`;
+      bar.addEventListener('mousedown', (e) => e.preventDefault());
+      bar.addEventListener('click', (e) => {
+        const b = e.target.closest('button');
+        if (b) this.doc.execCommand(b.dataset.c, false, null);
+      });
+      const r = el.getBoundingClientRect();
+      bar.style.left = (r.left + this.win.scrollX) + 'px';
+      bar.style.top = Math.max(0, r.top + this.win.scrollY - 40) + 'px';
+      this.doc.body.appendChild(bar);
+      this._editBar = bar;
+
+      const end = () => {
+        el.removeAttribute('contenteditable');
+        el.classList.remove('ve-editing');
+        this._editingEl = null;
+        if (this._editBar) { this._editBar.remove(); this._editBar = null; }
+        this._pushHistory();
+      };
+      el.addEventListener('blur', end, { once: true });
+    }
+
+    // ---------- insert placement mode (+ Text / ─ Line / ⊞ Table) ----------
+    beginPlace(type) {
+      this._placeType = type;
+      this.doc.body.style.cursor = 'crosshair';
+    }
+
+    cancelPlace() {
+      this._placeType = null;
+      this.doc.body.style.cursor = '';
+    }
+
+    _placeAt(type, clientX, clientY) {
+      const target = this._findInsertTarget(clientX + this.win.scrollX, clientY + this.win.scrollY);
+      const isAr = (this.doc.documentElement.lang || '').toLowerCase().startsWith('ar')
+        || this.doc.documentElement.dir === 'rtl';
+      let el;
+      if (type === 'text') {
+        // A plain <p> — it inherits the lecture's own fonts/styles from CSS.
+        el = this.doc.createElement('p');
+        el.textContent = isAr ? 'اكتب النص هنا' : 'Type your text here';
+      } else if (type === 'line') {
+        el = this.doc.createElement('hr');
+        const c = this.themeColors()[0] || '#444444';
+        el.style.cssText = `border:none;border-top:3px solid ${c};margin:12px 0;`;
+      } else if (type === 'table') {
+        el = this._makeTable(isAr);
+      }
+      if (!el) return;
+
+      if (target && target.el) {
+        const ref = target.el;
+        const before = target.replace ? true : target.before;
+        ref.parentElement.insertBefore(el, before ? ref : ref.nextSibling);
+      } else {
+        this.doc.body.appendChild(el);
+      }
+      this._pushHistory();
+      if (type === 'text') {
+        this._startTextEdit(el);
+        const rng = this.doc.createRange();
+        rng.selectNodeContents(el);
+        const sel = this.win.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(rng);
+      } else {
+        this.select(el);
+      }
+      this.onPlaced && this.onPlaced(type);
+    }
+
+    _makeTable(isAr) {
+      const t = this.doc.createElement('table');
+      // Inherit the document's own table styling when it exists; otherwise
+      // add simple visible borders so the table isn't invisible.
+      const probe = this.doc.querySelector('td, th');
+      const styled = probe && this.win.getComputedStyle(probe).borderTopStyle !== 'none';
+      if (!styled) t.style.cssText = 'width:100%;border-collapse:collapse;';
+      const mk = (tag, txt) => {
+        const c = this.doc.createElement(tag);
+        c.textContent = txt;
+        if (!styled) c.style.cssText = 'border:1px solid #999;padding:4px 8px;';
+        return c;
+      };
+      const head = this.doc.createElement('tr');
+      for (let i = 1; i <= 3; i++) head.appendChild(mk('th', (isAr ? 'عنوان ' : 'Header ') + i));
+      t.appendChild(head);
+      for (let r = 0; r < 2; r++) {
+        const tr = this.doc.createElement('tr');
+        for (let i = 0; i < 3; i++) tr.appendChild(mk('td', ' '));
+        t.appendChild(tr);
+      }
+      return t;
+    }
+
+    // Colors declared as CSS variables in the lecture (its own identity).
+    themeColors() {
+      const out = [];
+      for (const sheet of this.doc.styleSheets) {
+        let rules;
+        try { rules = sheet.cssRules; } catch (_) { continue; }
+        for (const rule of rules || []) {
+          if (!rule.style) continue;
+          for (const name of rule.style) {
+            if (name.startsWith('--')) {
+              const v = rule.style.getPropertyValue(name).trim();
+              if (/^#|^rgb|^hsl/i.test(v)) out.push(v);
+            }
+          }
+        }
+      }
+      return [...new Set(out)].slice(0, 9);
+    }
+
+    // ---------- selection (any element, PowerPoint style) ----------
+    _onDocClick(e) {
+      if (!e.target.closest) return;
+      if (e.target.closest('.ve-toolbar, .ve-handle, .ve-overlay, .ve-palette')) return;
+      if (this._placeType) {
+        e.preventDefault();
+        e.stopPropagation();
+        const t = this._placeType;
+        this.cancelPlace();
+        this._placeAt(t, e.clientX, e.clientY);
+        return;
+      }
+      // Clicking inside text being edited: leave the caret alone.
+      if (this._editingEl && e.target.closest('[contenteditable]')) return;
+      const img = e.target.closest('img');
+      if (img) {
+        e.preventDefault();
+        this.select(img);
+        return;
+      }
+      const block = this._selectableBlock(e.target);
+      if (block) this.select(block);
+      else this._deselect();
+    }
+
+    // Smallest sensible element under the click: text blocks, tables,
+    // placeholders, or "leaf" boxes (divs with no block children).
+    _selectableBlock(t) {
+      const TEXTY = 'p, h1, h2, h3, h4, h5, h6, li, table, figure, blockquote, pre, hr';
+      let el = t.nodeType === 1 ? t : t.parentElement;
+      while (el && el !== this.doc.body) {
+        if (el.matches(TEXTY)) return el;
+        if (el.matches('[class*="placeholder"]')) return el;
+        if ((el.tagName === 'DIV' || el.tagName === 'SPAN') &&
+            !el.querySelector('p,h1,h2,h3,h4,h5,h6,li,table,div,ul,ol,img')) return el;
+        el = el.parentElement;
+      }
+      return null;
+    }
+
+    _selectableParent(el) {
+      let p = el.closest('.ve-slot') || el;
+      p = p.parentElement;
+      while (p && p !== this.doc.body) {
+        if (p.matches('p,h1,h2,h3,h4,h5,h6,li,table,figure,blockquote,pre,ul,ol,div,section,article')) return p;
+        p = p.parentElement;
+      }
+      return null;
+    }
+
+    select(el) {
+      this._deselect();
+      this.selected = el;
+      el.classList.add('ve-selected');
+      this._buildOverlay();
+      this._reposition();
+    }
+
+    _deselect() {
+      if (this.selected) this.selected.classList.remove('ve-selected');
+      this.selected = null;
+      if (this.overlay) { this.overlay.remove(); this.overlay = null; }
+      if (this.toolbar) { this.toolbar.remove(); this.toolbar = null; }
+      this._closePalette();
+    }
+
+    _buildOverlay() {
+      const doc = this.doc;
+      const isImg = this.selected.tagName === 'IMG';
+      this.overlay = doc.createElement('div');
+      this.overlay.className = 've-overlay';
+      if (isImg) {
+        // 8 handles like PowerPoint: corners keep proportions, edges stretch.
+        ['nw','n','ne','e','se','s','sw','w'].forEach(pos => {
+          const h = doc.createElement('div');
+          h.className = 've-handle ' + pos;
+          h.dataset.pos = pos;
+          h.addEventListener('pointerdown', (e) => this._startResize(e, pos));
+          this.overlay.appendChild(h);
+        });
+      }
+      doc.body.appendChild(this.overlay);
+
+      this.toolbar = doc.createElement('div');
+      this.toolbar.className = 've-toolbar';
+      const inSlide = this._slideOf(this.selected);
+      const dupBtn = inSlide ? `<button data-act="dupslide" title="Duplicate this slide">⧉ Slide</button>` : '';
+      if (isImg) {
+        this.toolbar.innerHTML = `
+          <button data-act="left" title="Align left">⬅</button>
+          <button data-act="center" title="Center">⬍</button>
+          <button data-act="right" title="Align right">➡</button>
+          <button data-act="replace" title="Replace image">Replace</button>
+          <button data-act="parent" title="Select the box that contains this">⬆ Box</button>
+          ${dupBtn}
+          <button data-act="delete" class="danger" title="Delete">🗑 Delete</button>`;
+      } else {
+        const label = this.selected.tagName.toLowerCase() +
+          (this.selected.classList.length ? '.' + this.selected.classList[0] : '');
+        const isTable = !!this.selected.closest('table');
+        const tableBtns = isTable ? `
+          <button data-act="rowadd" title="Add a row">+Row</button>
+          <button data-act="coladd" title="Add a column">+Col</button>
+          <button data-act="rowdel" title="Remove the last row">−Row</button>
+          <button data-act="coldel" title="Remove the last column">−Col</button>` : '';
+        this.toolbar.innerHTML = `
+          <span class="ve-tag">${label}</span>
+          <button data-act="color" title="Text color">🎨</button>
+          <button data-act="fill" title="Fill / background color">🖌</button>
+          ${tableBtns}
+          ${dupBtn}
+          <button data-act="parent" title="Select the container of this element">⬆ Container</button>
+          <button data-act="delete" class="danger" title="Delete (or press Del)">🗑 Delete</button>`;
+      }
+      this.toolbar.addEventListener('mousedown', (e) => e.preventDefault());
+      this.toolbar.addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        const act = btn && btn.dataset.act;
+        if (!act) return;
+        if (act === 'delete') this.deleteSelected();
+        else if (act === 'replace') this.onReplaceRequest && this.onReplaceRequest(this.selected);
+        else if (act === 'parent') {
+          const p = this._selectableParent(this.selected);
+          if (p) this.select(p);
+        }
+        else if (act === 'color') this._showPalette('color');
+        else if (act === 'fill') this._showPalette('background');
+        else if (act === 'dupslide') this.duplicateSlide();
+        else if (act.startsWith('row') || act.startsWith('col')) this._tableOp(act);
+        else this.align(act);
+      });
+      doc.body.appendChild(this.toolbar);
+    }
+
+    // ---------- color palette ----------
+    _showPalette(mode) {
+      this._closePalette();
+      if (!this.selected) return;
+      const doc = this.doc;
+      const pal = doc.createElement('div');
+      pal.className = 've-palette';
+      const colors = [...new Set([
+        ...this.themeColors(),
+        '#000000', '#ffffff', '#d32f2f', '#1976d2', '#388e3c', '#f9a825'
+      ])].slice(0, 12);
+      colors.forEach(c => {
+        const sw = doc.createElement('div');
+        sw.className = 've-swatch';
+        sw.style.background = c;
+        sw.title = c;
+        sw.addEventListener('click', () => this._applyColor(mode, c));
+        pal.appendChild(sw);
+      });
+      const custom = doc.createElement('input');
+      custom.type = 'color';
+      custom.title = 'Custom color…';
+      custom.addEventListener('change', () => this._applyColor(mode, custom.value));
+      pal.appendChild(custom);
+      pal.style.left = this.toolbar.style.left;
+      pal.style.top = (parseFloat(this.toolbar.style.top) + 38) + 'px';
+      doc.body.appendChild(pal);
+      this._palette = pal;
+    }
+
+    _closePalette() {
+      if (this._palette) { this._palette.remove(); this._palette = null; }
+    }
+
+    _applyColor(mode, c) {
+      const el = this.selected;
+      if (!el) return;
+      if (el.tagName === 'HR') el.style.borderTopColor = c;
+      else if (mode === 'color') el.style.color = c;
+      else el.style.background = c;
+      this._closePalette();
+      this._pushHistory();
+    }
+
+    // ---------- tables ----------
+    _tableOp(op) {
+      const t = this.selected && this.selected.closest && this.selected.closest('table');
+      if (!t || !t.rows.length) return;
+      const rows = t.rows;
+      if (op === 'rowadd') {
+        const last = rows[rows.length - 1];
+        const tr = last.cloneNode(true);
+        Array.from(tr.cells).forEach(c => { c.textContent = ' '; });
+        last.parentNode.insertBefore(tr, last.nextSibling);
+      } else if (op === 'rowdel' && rows.length > 1) {
+        rows[rows.length - 1].remove();
+      } else if (op === 'coladd') {
+        Array.from(rows).forEach(row => {
+          const src = row.cells[row.cells.length - 1];
+          const c = src.cloneNode(false);
+          c.textContent = ' ';
+          row.appendChild(c);
+        });
+      } else if (op === 'coldel') {
+        Array.from(rows).forEach(row => {
+          if (row.cells.length > 1) row.cells[row.cells.length - 1].remove();
+        });
+      }
+      this._reposition();
+      this._pushHistory();
+    }
+
+    // ---------- slides ----------
+    _slideOf(el) {
+      let n = el;
+      while (n && n.parentElement && n.parentElement !== this.doc.body) n = n.parentElement;
+      if (!n || n === this.doc.body || n.nodeType !== 1) return null;
+      return n.offsetHeight > 150 ? n : null;
+    }
+
+    duplicateSlide() {
+      const s = this._slideOf(this.selected);
+      if (!s) return;
+      const c = s.cloneNode(true);
+      c.querySelectorAll('.ve-selected').forEach(n => n.classList.remove('ve-selected'));
+      c.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
+      s.after(c);
+      this._pushHistory();
+      this.select(c);
+      this.onRequestScroll && this.onRequestScroll(c.offsetTop);
+    }
+
+    _reposition() {
+      if (!this.selected || !this.overlay) return;
+      const r = this.selected.getBoundingClientRect();
+      const sx = this.win.scrollX, sy = this.win.scrollY;
+      const left = r.left + sx, top = r.top + sy;
+      Object.assign(this.overlay.style, {
+        left: left + 'px', top: top + 'px',
+        width: r.width + 'px', height: r.height + 'px'
+      });
+      const spots = {
+        nw: [0, 0], n: [r.width / 2, 0], ne: [r.width, 0], e: [r.width, r.height / 2],
+        se: [r.width, r.height], s: [r.width / 2, r.height], sw: [0, r.height], w: [0, r.height / 2]
+      };
+      for (const h of this.overlay.children) {
+        const [x, y] = spots[h.dataset.pos] || [0, 0];
+        h.style.left = x + 'px';
+        h.style.top = y + 'px';
+      }
+      this.toolbar.style.left = left + 'px';
+      this.toolbar.style.top = Math.max(0, top - 40) + 'px';
+    }
+
+    // ---------- resize ----------
+    _startResize(e, pos) {
+      e.preventDefault();
+      e.stopPropagation();
+      const img = this.selected;
+      if (!img) return;
+      const handle = e.currentTarget;
+      const startX = e.clientX, startY = e.clientY;
+      const r0 = img.getBoundingClientRect();
+      const startW = r0.width, startH = r0.height;
+      const kind = pos.length === 2 ? 'corner' : (pos === 'e' || pos === 'w') ? 'x' : 'y';
+      const dirX = (pos === 'ne' || pos === 'se' || pos === 'e') ? 1 : -1;
+      const dirY = (pos === 'se' || pos === 'sw' || pos === 's') ? 1 : -1;
+      // Edge handles stretch one axis freely — freeze the other axis first
+      // so the image fills exactly the space you pull it over.
+      if (kind === 'x') img.style.height = Math.round(startH) + 'px';
+      if (kind === 'y') img.style.width = Math.round(startW) + 'px';
+      // Pointer capture: the handle keeps receiving moves even if the cursor
+      // races ahead of it or leaves the page.
+      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+
+      let done = false;
+      const move = (ev) => {
+        if (kind === 'corner') {
+          const w = Math.max(40, startW + (ev.clientX - startX) * dirX);
+          img.style.width = Math.round(w) + 'px';
+          img.style.height = 'auto';
+        } else if (kind === 'x') {
+          const w = Math.max(40, startW + (ev.clientX - startX) * dirX);
+          img.style.width = Math.round(w) + 'px';
+        } else {
+          const h = Math.max(30, startH + (ev.clientY - startY) * dirY);
+          img.style.height = Math.round(h) + 'px';
+        }
+        this._reposition();
+      };
+      const up = () => {
+        if (done) return;
+        done = true;
+        handle.removeEventListener('pointermove', move);
+        this._pushHistory();
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', up, { once: true });
+      handle.addEventListener('lostpointercapture', up, { once: true });
+    }
+
+    align(dir) {
+      if (!this.selected) return;
+      const slot = this.selected.closest('.ve-slot');
+      if (slot) {
+        slot.classList.remove('ve-align-left','ve-align-right');
+        if (dir === 'left') slot.classList.add('ve-align-left');
+        else if (dir === 'right') slot.classList.add('ve-align-right');
+      }
+      this._reposition();
+      this._pushHistory();
+    }
+
+    deleteSelected() {
+      if (!this.selected) return;
+      const slot = this.selected.closest('.ve-slot') || this.selected;
+      slot.remove();
+      this._deselect();
+      this._pushHistory();
+    }
+
+    replaceSelected(url) {
+      if (!this.selected) return;
+      this.selected.src = url;
+      this._reposition();
+      this._pushHistory();
+    }
+
+    // ---------- drag-to-insert ----------
+    // Called from renderer during a panel drag. Coordinates are in iframe-document space.
+    showInsertAt(docX, docY) {
+      const target = this._findInsertTarget(docX, docY);
+      if (!target) { this._hideInsert(); return; }
+      if (!this.insertLine) {
+        this.insertLine = this.doc.createElement('div');
+        this.insertLine.className = 've-insert-line';
+        this.doc.body.appendChild(this.insertLine);
+      }
+      const { el, before, replace } = target;
+      const r = el.getBoundingClientRect();
+      const sx = this.win.scrollX, sy = this.win.scrollY;
+      if (replace) {
+        // Highlight the whole placeholder — the image will take its place.
+        Object.assign(this.insertLine.style, {
+          left: (r.left + sx) + 'px', top: (r.top + sy) + 'px',
+          width: r.width + 'px', height: r.height + 'px',
+          background: 'rgba(47,109,246,.18)', border: '2px solid #2f6df6',
+          borderRadius: '8px', boxShadow: 'none'
+        });
+      } else {
+        const y = (before ? r.top : r.bottom) + sy;
+        Object.assign(this.insertLine.style, {
+          left: (r.left + sx) + 'px', top: (y - 1.5) + 'px',
+          width: r.width + 'px', height: '3px',
+          background: '#2f6df6', border: 'none', borderRadius: '2px',
+          boxShadow: '0 0 6px rgba(47,109,246,.6)'
+        });
+      }
+      this._pendingTarget = target;
+    }
+
+    _hideInsert() {
+      if (this.insertLine) { this.insertLine.remove(); this.insertLine = null; }
+      this._pendingTarget = null;
+    }
+
+    _findInsertTarget(docX, docY) {
+      const win = this.win;
+      const clientX = docX - win.scrollX;
+      const clientY = docY - win.scrollY;
+      let node = this.doc.elementFromPoint(clientX, clientY);
+      // Dropping onto a reserved image placeholder replaces it entirely.
+      if (node && node.closest) {
+        const ph = node.closest('[class*="placeholder"]');
+        if (ph && ph !== this.doc.body) return { el: ph, replace: true };
+      }
+      if (!node) {
+        // Below all content — insert after last block child.
+        const kids = Array.from(this.doc.body.children).filter(n => this._isBlock(n));
+        const last = kids[kids.length - 1];
+        return last ? { el: last, before: false } : null;
+      }
+      // Climb to a direct-ish block element.
+      let el = node;
+      while (el && el !== this.doc.body && !this._isBlock(el)) el = el.parentElement;
+      if (!el || el === this.doc.body) {
+        const kids = Array.from(this.doc.body.children).filter(n => this._isBlock(n));
+        const last = kids[kids.length - 1];
+        return last ? { el: last, before: false } : null;
+      }
+      const r = el.getBoundingClientRect();
+      const before = clientY < r.top + r.height / 2;
+      return { el, before };
+    }
+
+    _isBlock(el) {
+      return el.nodeType === 1 && BLOCK_TAGS.has(el.tagName) && !el.closest('.ve-overlay, .ve-toolbar');
+    }
+
+    dropInsert(url, name) {
+      const t = this._pendingTarget;
+      const slot = this.doc.createElement('figure');
+      slot.className = 've-slot';
+      const img = this.doc.createElement('img');
+      img.src = url;
+      if (name) img.alt = name;
+      slot.appendChild(img);
+
+      if (t && t.replace) {
+        // Fill the reserved space exactly; the user can stretch from there.
+        const r = t.el.getBoundingClientRect();
+        img.style.width = Math.round(r.width) + 'px';
+        img.style.height = Math.round(r.height) + 'px';
+        slot.style.margin = '0';
+        t.el.parentElement.insertBefore(slot, t.el);
+        t.el.remove();
+      } else if (t) {
+        if (t.before) t.el.parentElement.insertBefore(slot, t.el);
+        else t.el.parentElement.insertBefore(slot, t.el.nextSibling);
+      } else {
+        this.doc.body.appendChild(slot);
+      }
+      this._hideInsert();
+      this._pushHistory();
+      // Auto-select the new image once it loads for immediate resizing.
+      img.addEventListener('load', () => this.select(img), { once: true });
+      // Fallback if already cached.
+      if (img.complete) this.select(img);
+    }
+
+    // ---------- export ----------
+    getCleanHtml() {
+      const clone = this.doc.documentElement.cloneNode(true);
+      // Strip editor artifacts.
+      clone.querySelectorAll('#ve-styles, .ve-overlay, .ve-toolbar, .ve-insert-line').forEach(n => n.remove());
+      clone.querySelectorAll('.ve-selected').forEach(n => n.classList.remove('ve-selected'));
+      clone.querySelectorAll('[contenteditable], .ve-editing').forEach(n => {
+        n.removeAttribute('contenteditable');
+        n.classList.remove('ve-editing');
+      });
+      return '<!DOCTYPE html>\n' + clone.outerHTML;
+    }
+  }
+
+  window.LectureEditor = LectureEditor;
+})();

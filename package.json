@@ -1,0 +1,15 @@
+{
+  "name": "lecture-visual-editor",
+  "version": "0.1.0",
+  "description": "Open an HTML lecture, drag & drop images visually, export to PDF. No code editing.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "playwright-core": "^1.61.1"
+  }
+}

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Lecture Visual Editor</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="toolbar">
+    <span class="brand">📘 Lecture Visual Editor</span>
+    <button id="btn-open">Open HTML</button>
+    <button id="btn-add-images">Add Images</button>
+    <span class="sep"></span>
+    <button id="btn-add-text" title="Insert a text block (uses the lecture's own fonts)">+ Text</button>
+    <button id="btn-add-line" title="Insert a divider line">─ Line</button>
+    <button id="btn-add-table" title="Insert a table">⊞ Table</button>
+    <span class="spacer"></span>
+    <button id="btn-undo" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
+    <button id="btn-redo" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
+    <span class="spacer"></span>
+    <button id="btn-save">Save HTML</button>
+    <button id="btn-export" class="primary">Export PDF</button>
+  </div>
+
+  <div id="body">
+    <aside id="panel">
+      <div class="panel-header">📁 Images</div>
+      <div id="asset-list">
+        <p class="hint">Click <b>Add Images</b> to load pictures here, then drag them onto the page.</p>
+      </div>
+    </aside>
+
+    <main id="stage">
+      <div id="empty-state">
+        <div class="empty-inner">
+          <h1>Open a lecture to begin</h1>
+          <p>Your HTML renders exactly like the browser. Then drag images in, resize, and export to PDF.</p>
+          <button id="btn-open-2" class="primary big">Open HTML file</button>
+        </div>
+      </div>
+      <iframe id="canvas" hidden></iframe>
+    </main>
+  </div>
+
+  <div id="statusbar"><span id="status">Ready.</span></div>
+
+  <script src="editor.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
