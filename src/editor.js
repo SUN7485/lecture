@@ -108,6 +108,7 @@
       // stage scrolls horizontally instead of cutting the slide off.
       const w = Math.max(this.doc.documentElement.scrollWidth, this.doc.body.scrollWidth);
       if (w > this.iframe.clientWidth + 2) this.iframe.style.width = w + 'px';
+      this.onContentResize && this.onContentResize();
     }
 
     // ---------- snapshots / undo ----------
@@ -135,6 +136,7 @@
       this.doc.body.innerHTML = this.undoStack[this.undoStack.length - 1];
       this._deselect();
       this._emit();
+      this.onSlidesChanged && this.onSlidesChanged(null);
     }
     redo() {
       if (!this.redoStack.length) return;
@@ -143,6 +145,7 @@
       this.doc.body.innerHTML = html;
       this._deselect();
       this._emit();
+      this.onSlidesChanged && this.onSlidesChanged(null);
     }
     canUndo() { return this.undoStack.length > 1; }
     canRedo() { return this.redoStack.length > 0; }
@@ -524,22 +527,88 @@
 
     // ---------- slides ----------
     _slideOf(el) {
+      if (!el) return null;
       let n = el;
       while (n && n.parentElement && n.parentElement !== this.doc.body) n = n.parentElement;
       if (!n || n === this.doc.body || n.nodeType !== 1) return null;
       return n.offsetHeight > 150 ? n : null;
     }
 
-    duplicateSlide() {
-      const s = this._slideOf(this.selected);
-      if (!s) return;
-      const c = s.cloneNode(true);
+    // All top-level "slide" blocks, in document order. Excludes only the
+    // editor's own overlay UI — NOT slides that merely carry a ve- state
+    // class like `ve-selected` (that mistake made selected slides invisible).
+    slides() {
+      return Array.from(this.doc.body.children).filter(el =>
+        el.nodeType === 1 &&
+        !el.matches('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-palette') &&
+        el.offsetHeight > 150 && el.offsetWidth > 200);
+    }
+
+    _cleanClone(el) {
+      const c = el.cloneNode(true);
       c.querySelectorAll('.ve-selected').forEach(n => n.classList.remove('ve-selected'));
+      c.querySelectorAll('.ve-editing').forEach(n => n.classList.remove('ve-editing'));
       c.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
+      c.querySelectorAll('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-palette').forEach(n => n.remove());
+      return c;
+    }
+
+    duplicateSlide(ref) {
+      const s = ref || this._slideOf(this.selected) || this.slides()[0];
+      if (!s) return null;
+      const c = this._cleanClone(s);
       s.after(c);
       this._pushHistory();
       this.select(c);
-      this.onRequestScroll && this.onRequestScroll(c.offsetTop);
+      this.onSlidesChanged && this.onSlidesChanged(c);
+      return c;
+    }
+
+    // Add a blank slide: clone the reference slide (to inherit its exact
+    // styling, dimensions and footer), then wipe its editable content.
+    addSlide(ref) {
+      const s = ref || this._slideOf(this.selected) || this.slides().slice(-1)[0];
+      const isAr = (this.doc.documentElement.lang || '').toLowerCase().startsWith('ar')
+        || this.doc.documentElement.dir === 'rtl';
+      let c;
+      if (s) {
+        c = this._cleanClone(s);
+        const content = c.querySelector('.content');
+        if (content) {
+          content.innerHTML = '';
+          const p = this.doc.createElement('p');
+          p.textContent = isAr ? 'اكتب المحتوى هنا…' : 'Type content here…';
+          content.appendChild(p);
+        }
+        const h1 = c.querySelector('h1');
+        if (h1) h1.textContent = isAr ? 'عنوان الشريحة الجديدة' : 'New slide title';
+        const h2 = c.querySelector('h2');
+        if (h2) h2.textContent = isAr ? 'العنوان الفرعي' : 'Subtitle';
+        // Drop leftover images/tables from the cloned body of the slide.
+        c.querySelectorAll('.content img, .content table, .ve-slot').forEach(n => n.remove());
+        s.after(c);
+      } else {
+        // No detectable slide (plain document): append a simple section.
+        c = this.doc.createElement('div');
+        c.innerHTML = `<h2>${isAr ? 'عنوان جديد' : 'New heading'}</h2><p>${isAr ? 'نص…' : 'Text…'}</p>`;
+        this.doc.body.appendChild(c);
+      }
+      this._pushHistory();
+      this.select(c);
+      this.onSlidesChanged && this.onSlidesChanged(c);
+      return c;
+    }
+
+    deleteSlide(ref) {
+      const s = ref || this._slideOf(this.selected);
+      if (!s) return;
+      const all = this.slides();
+      const idx = all.indexOf(s);
+      s.remove();
+      this._deselect();
+      this._pushHistory();
+      const next = this.slides()[Math.max(0, idx - 1)];
+      this.onSlidesChanged && this.onSlidesChanged(next || null);
     }
 
     _reposition() {

@@ -7,42 +7,78 @@
 </head>
 <body>
   <div id="toolbar">
-    <span class="brand">📘 Lecture Visual Editor</span>
-    <button id="btn-open">Open HTML</button>
-    <button id="btn-add-images">Add Images</button>
-    <span class="sep"></span>
-    <button id="btn-add-text" title="Insert a text block (uses the lecture's own fonts)">+ Text</button>
-    <button id="btn-add-line" title="Insert a divider line">─ Line</button>
-    <button id="btn-add-table" title="Insert a table">⊞ Table</button>
+    <span class="brand">📘 Lecture&nbsp;Editor</span>
+
+    <div class="group">
+      <button id="btn-open" title="Open a lecture HTML file">📂 Open</button>
+      <button id="btn-save" title="Save HTML (Ctrl+S)">💾 Save</button>
+      <button id="btn-export" class="primary" title="Export to PDF">⬇ PDF</button>
+    </div>
+
+    <div class="group">
+      <span class="glabel">Insert</span>
+      <button id="btn-add-text" title="Insert a text block (uses the lecture's own fonts)">＋Text</button>
+      <button id="btn-add-line" title="Insert a divider line">─ Line</button>
+      <button id="btn-add-table" title="Insert a table">⊞ Table</button>
+      <button id="btn-add-images" title="Load images into the panel">🖼 Image</button>
+    </div>
+
+    <div class="group">
+      <span class="glabel">Slide</span>
+      <button id="btn-slide-add" title="Add a new blank slide after the current one">＋ Slide</button>
+      <button id="btn-slide-dup" title="Duplicate the current slide">⧉ Duplicate</button>
+      <button id="btn-slide-del" class="danger-outline" title="Delete the current slide">🗑 Slide</button>
+    </div>
+
+    <div class="group">
+      <button id="btn-undo" title="Undo (Ctrl+Z)" disabled>↶</button>
+      <button id="btn-redo" title="Redo (Ctrl+Y)" disabled>↷</button>
+    </div>
+
     <span class="spacer"></span>
-    <button id="btn-undo" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
-    <button id="btn-redo" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
-    <span class="spacer"></span>
-    <button id="btn-save">Save HTML</button>
-    <button id="btn-export" class="primary">Export PDF</button>
+
+    <div class="group zoom">
+      <button id="btn-zoom-out" title="Zoom out">−</button>
+      <button id="btn-zoom-label" title="Reset to 100%">100%</button>
+      <button id="btn-zoom-in" title="Zoom in">＋</button>
+      <button id="btn-zoom-fit" title="Fit to width">Fit</button>
+    </div>
   </div>
 
   <div id="body">
     <aside id="panel">
-      <div class="panel-header">📁 Images</div>
-      <div id="asset-list">
-        <p class="hint">Click <b>Add Images</b> to load pictures here, then drag them onto the page.</p>
+      <div class="panel-section slides-section">
+        <div class="panel-header">🗂 Slides <span id="slide-count" class="count"></span></div>
+        <div id="slide-list">
+          <p class="hint">Open a lecture to see its slides here.</p>
+        </div>
+      </div>
+      <div class="panel-section images-section">
+        <div class="panel-header">🖼 Images</div>
+        <div id="asset-list">
+          <p class="hint">Click <b>🖼 Image</b> to load pictures, then drag them onto the page.</p>
+        </div>
       </div>
     </aside>
 
     <main id="stage">
       <div id="empty-state">
         <div class="empty-inner">
+          <div class="empty-logo">📘</div>
           <h1>Open a lecture to begin</h1>
-          <p>Your HTML renders exactly like the browser. Then drag images in, resize, and export to PDF.</p>
-          <button id="btn-open-2" class="primary big">Open HTML file</button>
+          <p>Your HTML renders exactly like the browser. Drag images in, edit text, add slides, and export a pixel-perfect PDF.</p>
+          <button id="btn-open-2" class="primary big">📂 Open HTML file</button>
         </div>
       </div>
-      <iframe id="canvas" hidden></iframe>
+      <div id="zoom-wrap" hidden><iframe id="canvas"></iframe></div>
     </main>
   </div>
 
-  <div id="statusbar"><span id="status">Ready.</span></div>
+  <div id="statusbar">
+    <span id="status">Ready.</span>
+    <span class="spacer"></span>
+    <span id="slide-info"></span>
+  </div>
 
   <script src="editor.js"></script>
   <script src="renderer.js"></script>

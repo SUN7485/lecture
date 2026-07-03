@@ -3,15 +3,23 @@
   const $ = (sel) => document.querySelector(sel);
 
   const iframe = $('#canvas');
+  const zoomWrap = $('#zoom-wrap');
+  const stage = $('#stage');
   const emptyState = $('#empty-state');
   const assetList = $('#asset-list');
+  const slideList = $('#slide-list');
+  const slideCount = $('#slide-count');
+  const slideInfo = $('#slide-info');
   const statusEl = $('#status');
   const btnUndo = $('#btn-undo');
   const btnRedo = $('#btn-redo');
+  const btnZoomLabel = $('#btn-zoom-label');
 
   let editor = null;
   let currentFile = null;   // { filePath, dir, content }
   let assets = [];          // { url, name, path }
+  let zoom = 1;
+  let activeSlide = null;   // the slide element considered "current"
 
   function status(msg) { statusEl.textContent = msg; }
 
@@ -48,20 +56,107 @@
           ? 'Type your text — click anywhere else when done.'
           : 'Inserted. Click it to style, move up a container, or delete.');
       };
-      editor.onRequestScroll = (top) => {
-        document.querySelector('#stage').scrollTop = Math.max(0, top - 100);
-      };
       editor.onSaveRequest = () => saveHtml();
+      editor.onContentResize = () => applyZoom();
+      editor.onSlidesChanged = (focus) => {
+        refreshSlideList();
+        if (focus) { activeSlide = focus; scrollToSlide(focus); }
+        updateSlideInfo();
+      };
       editor.attach(iframe);
       window.__editor = editor;       // hook for automated tests
       window.__addAssets = addAssets; // hook for automated tests
-      status('Ready. Drag an image in, double-click text to edit, or use + Text / ─ Line / ⊞ Table.');
+      applyZoom();
+      refreshSlideList();
+      updateSlideInfo();
+      status('Ready. Drag an image in, double-click text to edit, add slides, or zoom to work comfortably.');
     };
 
     emptyState.hidden = true;
-    iframe.hidden = false;
+    zoomWrap.hidden = false;
     iframe.srcdoc = htmlWithBase;
   }
+
+  // ---------- Zoom ----------
+  function applyZoom() {
+    if (!editor) return;
+    iframe.style.transform = `scale(${zoom})`;
+    zoomWrap.style.width = Math.ceil(iframe.offsetWidth * zoom) + 'px';
+    zoomWrap.style.height = Math.ceil(iframe.offsetHeight * zoom) + 'px';
+    btnZoomLabel.textContent = Math.round(zoom * 100) + '%';
+  }
+  function setZoom(z) {
+    zoom = Math.min(3, Math.max(0.25, z));
+    applyZoom();
+  }
+  function fitZoom() {
+    if (!editor) return;
+    const avail = stage.clientWidth - 48;
+    setZoom(Math.min(1.5, avail / iframe.offsetWidth));
+  }
+
+  // ---------- Slide navigator ----------
+  function slideTitle(el, i) {
+    const h = el.querySelector('h1, h2, [style*="font-size"]');
+    const t = (h && h.textContent.trim()) || '';
+    return t ? t.slice(0, 40) : 'Slide ' + (i + 1);
+  }
+  function refreshSlideList() {
+    if (!editor) return;
+    const slides = editor.slides();
+    slideCount.textContent = slides.length ? '(' + slides.length + ')' : '';
+    if (!slides.length) {
+      slideList.innerHTML = '<p class="hint">No slides detected — this looks like a plain document.</p>';
+      return;
+    }
+    slideList.innerHTML = '';
+    slides.forEach((s, i) => {
+      const item = document.createElement('div');
+      item.className = 'slide-item' + (s === activeSlide ? ' active' : '');
+      item.innerHTML = `<span class="num">${i + 1}</span><span class="title"></span>`;
+      item.querySelector('.title').textContent = slideTitle(s, i);
+      item.addEventListener('click', () => { activeSlide = s; scrollToSlide(s); markActive(); updateSlideInfo(); });
+      slideList.appendChild(item);
+    });
+  }
+  function markActive() {
+    const slides = editor.slides();
+    Array.from(slideList.children).forEach((item, i) => {
+      item.classList.toggle('active', slides[i] === activeSlide);
+    });
+  }
+  function scrollToSlide(s) {
+    // s.offsetTop is in the iframe's unscaled coords; multiply by zoom and
+    // add the wrap's offset within the stage.
+    const top = zoomWrap.offsetTop + s.offsetTop * zoom;
+    stage.scrollTop = Math.max(0, top - 24);
+  }
+  // Which slide sits under the middle of the viewport right now.
+  function currentSlideEl() {
+    if (editor.selected) { const s = editor._slideOf(editor.selected); if (s) return s; }
+    const slides = editor.slides();
+    if (!slides.length) return null;
+    const viewMid = (stage.scrollTop + stage.clientHeight / 2 - zoomWrap.offsetTop) / zoom;
+    let best = slides[0], bestD = Infinity;
+    slides.forEach(s => {
+      const mid = s.offsetTop + s.offsetHeight / 2;
+      const d = Math.abs(mid - viewMid);
+      if (d < bestD) { bestD = d; best = s; }
+    });
+    return best;
+  }
+  function updateSlideInfo() {
+    if (!editor) { slideInfo.textContent = ''; return; }
+    const slides = editor.slides();
+    if (!slides.length) { slideInfo.textContent = ''; return; }
+    activeSlide = currentSlideEl();
+    const idx = slides.indexOf(activeSlide);
+    slideInfo.textContent = `Slide ${idx + 1} / ${slides.length}`;
+    markActive();
+  }
+  stage.addEventListener('scroll', () => {
+    if (editor) updateSlideInfo();
+  });
 
   function injectBase(html, baseHref) {
     const baseTag = `<base href="${baseHref}">`;
@@ -171,16 +266,18 @@
     tile.addEventListener('lostpointercapture', (ev) => finish(ev, false), { once: true });
   }
 
-  // Convert app-window client coords to iframe-document coords (or null if outside).
+  // Convert app-window client coords to iframe-document coords (or null if
+  // outside). The iframe is CSS-scaled by `zoom`, so screen deltas are divided
+  // by zoom to get the document's own (unscaled) coordinates.
   function toIframeDoc(clientX, clientY) {
-    const rect = iframe.getBoundingClientRect();
+    const rect = iframe.getBoundingClientRect(); // already scaled on screen
     if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
       return null;
     }
     const win = editor.win;
     return {
-      x: (clientX - rect.left) + win.scrollX,
-      y: (clientY - rect.top) + win.scrollY
+      x: (clientX - rect.left) / zoom + win.scrollX,
+      y: (clientY - rect.top) / zoom + win.scrollY
     };
   }
 
@@ -273,12 +370,48 @@
   btnUndo.addEventListener('click', () => editor && editor.undo());
   btnRedo.addEventListener('click', () => editor && editor.redo());
 
+  // Slide operations act on the current slide (selected, else viewport-center).
+  $('#btn-slide-add').addEventListener('click', () => {
+    if (!editor) { status('Open a lecture first.'); return; }
+    editor.addSlide(currentSlideEl());
+    status('New slide added. Edit its title and content.');
+  });
+  $('#btn-slide-dup').addEventListener('click', () => {
+    if (!editor) { status('Open a lecture first.'); return; }
+    editor.duplicateSlide(currentSlideEl());
+    status('Slide duplicated.');
+  });
+  $('#btn-slide-del').addEventListener('click', () => {
+    if (!editor) { status('Open a lecture first.'); return; }
+    const s = currentSlideEl();
+    if (!s) { status('No slide to delete.'); return; }
+    const n = editor.slides().length;
+    if (n <= 1) { status('Cannot delete the only slide.'); return; }
+    editor.deleteSlide(s);
+    status('Slide deleted.');
+  });
+
+  // Zoom controls.
+  $('#btn-zoom-in').addEventListener('click', () => setZoom(zoom + 0.1));
+  $('#btn-zoom-out').addEventListener('click', () => setZoom(zoom - 0.1));
+  $('#btn-zoom-label').addEventListener('click', () => setZoom(1));
+  $('#btn-zoom-fit').addEventListener('click', fitZoom);
+  // Ctrl + wheel to zoom, like every design tool.
+  stage.addEventListener('wheel', (e) => {
+    if (!editor || !(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    setZoom(zoom + (e.deltaY < 0 ? 0.1 : -0.1));
+  }, { passive: false });
+
   // App-level keyboard shortcuts (when focus isn't inside the iframe).
   window.addEventListener('keydown', (e) => {
     if (!editor) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? editor.redo() : editor.undo(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); editor.redo(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveHtml(); }
+    else if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); setZoom(zoom + 0.1); }
+    else if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); setZoom(zoom - 0.1); }
+    else if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); setZoom(1); }
     else if (e.key === 'Delete' && editor.selected) { editor.deleteSelected(); }
   });
 
