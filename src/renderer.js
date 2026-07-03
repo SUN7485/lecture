@@ -69,7 +69,7 @@
       applyZoom();
       refreshSlideList();
       updateSlideInfo();
-      status('Ready. Drag an image in, double-click text to edit, add slides, or zoom to work comfortably.');
+      status('Ready. Double-click any text (or select it and press ✏ Edit text) to change the words. Drag images in, add slides, zoom to work comfortably.');
     };
 
     emptyState.hidden = true;
@@ -195,10 +195,21 @@
     for (const a of assets) {
       const el = document.createElement('div');
       el.className = 'asset';
-      el.innerHTML = `<img src="${a.url}"><div class="name">${escapeHtml(a.name)}</div>`;
+      el.innerHTML = `<button class="asset-del" title="Remove this image from the list">×</button>` +
+        `<img src="${a.url}"><div class="name">${escapeHtml(a.name)}</div>`;
       el.addEventListener('pointerdown', (e) => startAssetDrag(e, a));
+      // The × removes the tile; keep its clicks from starting a drag.
+      const del = el.querySelector('.asset-del');
+      del.addEventListener('pointerdown', (e) => e.stopPropagation());
+      del.addEventListener('click', (e) => { e.stopPropagation(); removeAsset(a); });
       assetList.appendChild(el);
     }
+  }
+
+  function removeAsset(a) {
+    assets = assets.filter(x => x.path !== a.path);
+    renderAssets();
+    status('Removed image from the list. (Images already placed on the page stay.)');
   }
 
   function escapeHtml(s) {

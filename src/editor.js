@@ -4,12 +4,19 @@
  * undo/redo (HTML snapshots). Runs entirely in the renderer; no injection into the iframe.
  */
 (function () {
-  const EDITOR_CSS = `
-    html, body { height: auto !important; min-height: 0 !important; }
+  // Layout CSS that INSERTED content depends on. This must survive PDF export,
+  // so it lives in its own <style id="ve-export-css"> that getCleanHtml keeps.
+  // (Putting these in the interactive-only sheet caused dropped images to lose
+  //  their max-width in the exported PDF and blow up to natural size.)
+  const EXPORT_CSS = `
     .ve-slot { margin: 12px 0; text-align: center; }
     .ve-slot.ve-align-left { text-align: left; }
     .ve-slot.ve-align-right { text-align: right; }
     .ve-slot img { max-width: 100%; height: auto; }
+  `;
+
+  const EDITOR_CSS = `
+    html, body { height: auto !important; min-height: 0 !important; }
     .ve-selected { outline: 2px solid #2f6df6 !important; outline-offset: 1px; }
     .ve-editing { outline: 2px dashed #8b5cf6 !important; outline-offset: 2px; cursor: text; }
     .ve-insert-line {
@@ -46,6 +53,8 @@
       padding: 4px 8px; cursor: pointer; font: inherit;
     }
     .ve-toolbar button:hover { background: #45506a; }
+    .ve-toolbar button.primary { background: #2f6df6; }
+    .ve-toolbar button.primary:hover { background: #4a82ff; }
     .ve-toolbar button.danger:hover { background: #c0392b; }
   `;
 
@@ -70,7 +79,14 @@
       this.doc = iframe.contentDocument;
       this.win = iframe.contentWindow;
 
-      // Inject editor styles.
+      // Inject editor styles. Two sheets:
+      //  - #ve-export-css: layout rules inserted content needs; KEPT on export.
+      //  - #ve-styles: interactive-only chrome (handles/toolbar/outlines); stripped.
+      const exportStyle = this.doc.createElement('style');
+      exportStyle.id = 've-export-css';
+      exportStyle.textContent = EXPORT_CSS;
+      this.doc.head.appendChild(exportStyle);
+
       const style = this.doc.createElement('style');
       style.id = 've-styles';
       style.textContent = EDITOR_CSS;
@@ -100,10 +116,15 @@
     _sizeToContent() {
       if (!this.doc || !this.doc.body || !this.iframe) return;
       const cs = this.win.getComputedStyle(this.doc.body);
-      const h = this.doc.body.scrollHeight
+      const bodyH = this.doc.body.scrollHeight
         + (parseFloat(cs.marginTop) || 0)
         + (parseFloat(cs.marginBottom) || 0);
-      this.iframe.style.height = Math.max(400, Math.ceil(h)) + 'px';
+      // Take the taller of body vs. documentElement, plus a 2px buffer. If the
+      // iframe is even a pixel shorter than its content, the inner document
+      // grows its own scrollbar — and because the lecture is RTL that scrollbar
+      // lands on the LEFT, a confusing second bar next to the stage's own.
+      const h = Math.max(bodyH, this.doc.documentElement.scrollHeight);
+      this.iframe.style.height = Math.max(400, Math.ceil(h) + 2) + 'px';
       // Wide lectures (slide decks) get the full width they ask for; the
       // stage scrolls horizontally instead of cutting the slide off.
       const w = Math.max(this.doc.documentElement.scrollWidth, this.doc.body.scrollWidth);
@@ -183,9 +204,24 @@
     }
 
     // ---------- text editing (double-click, PowerPoint style) ----------
+    // An element whose words can be edited in place: a real text block, a
+    // table cell, or a "leaf" box that only holds text.
+    _isTextEditable(el) {
+      if (!el || el.nodeType !== 1) return false;
+      if (el.matches('p, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, figcaption, pre, dt, dd, caption, summary')) return true;
+      if ((el.tagName === 'DIV' || el.tagName === 'SPAN') &&
+          !el.querySelector('p,h1,h2,h3,h4,h5,h6,li,table,div,ul,ol,img') &&
+          el.textContent.trim().length) return true;
+      return false;
+    }
+
     _onDblClick(e) {
       if (e.target.closest('img, .ve-slot, .ve-toolbar, .ve-overlay, .ve-handle')) return;
-      const el = e.target.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th, figcaption, pre');
+      let el = e.target.closest('p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th, figcaption, pre, dt, dd, caption, summary');
+      if (!el) {
+        const leaf = this._selectableBlock(e.target);
+        if (this._isTextEditable(leaf)) el = leaf;
+      }
       if (!el || el === this._editingEl) return;
       this._startTextEdit(el);
     }
@@ -198,17 +234,32 @@
       el.classList.add('ve-editing');
       el.focus();
 
-      // Mini format bar: Bold / Italic / Underline (Ctrl+B/I/U work too).
+      // If focus didn't land a caret inside (e.g. we entered via the toolbar
+      // button, not a double-click), drop the caret at the end of the text.
+      const sel = this.win.getSelection();
+      if (!sel.anchorNode || !el.contains(sel.anchorNode)) {
+        const rng = this.doc.createRange();
+        rng.selectNodeContents(el);
+        rng.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(rng);
+      }
+
+      // Mini format bar: Bold / Italic / Underline + an explicit Done so it's
+      // obvious how to finish (Ctrl+B/I/U and clicking away work too).
       const bar = this.doc.createElement('div');
       bar.className = 've-toolbar';
       bar.innerHTML = `
         <button data-c="bold" title="Bold (Ctrl+B)"><b>B</b></button>
         <button data-c="italic" title="Italic (Ctrl+I)"><i>I</i></button>
-        <button data-c="underline" title="Underline (Ctrl+U)"><u>U</u></button>`;
+        <button data-c="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+        <button data-done="1" title="Finish editing (or click anywhere else)">✓ Done</button>`;
       bar.addEventListener('mousedown', (e) => e.preventDefault());
       bar.addEventListener('click', (e) => {
         const b = e.target.closest('button');
-        if (b) this.doc.execCommand(b.dataset.c, false, null);
+        if (!b) return;
+        if (b.dataset.done) { el.blur(); return; }
+        this.doc.execCommand(b.dataset.c, false, null);
       });
       const r = el.getBoundingClientRect();
       bar.style.left = (r.left + this.win.scrollX) + 'px';
@@ -424,8 +475,11 @@
           <button data-act="coladd" title="Add a column">+Col</button>
           <button data-act="rowdel" title="Remove the last row">−Row</button>
           <button data-act="coldel" title="Remove the last column">−Col</button>` : '';
+        const editBtn = this._isTextEditable(this.selected)
+          ? `<button data-act="edit" class="primary" title="Edit the words (or double-click the text)">✏ Edit text</button>` : '';
         this.toolbar.innerHTML = `
           <span class="ve-tag">${label}</span>
+          ${editBtn}
           <button data-act="color" title="Text color">🎨</button>
           <button data-act="fill" title="Fill / background color">🖌</button>
           ${tableBtns}
@@ -439,6 +493,7 @@
         const act = btn && btn.dataset.act;
         if (!act) return;
         if (act === 'delete') this.deleteSelected();
+        else if (act === 'edit') this._startTextEdit(this.selected);
         else if (act === 'replace') this.onReplaceRequest && this.onReplaceRequest(this.selected);
         else if (act === 'parent') {
           const p = this._selectableParent(this.selected);
