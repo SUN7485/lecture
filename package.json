@@ -4,12 +4,38 @@
   "description": "Open an HTML lecture, drag & drop images visually, export to PDF. No code editing.",
   "main": "src/main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder",
+    "pack": "electron-builder --dir"
   },
-  "author": "",
+  "author": "SUN7485",
   "license": "MIT",
+  "build": {
+    "appId": "com.sun7485.lecturevisualeditor",
+    "productName": "Lecture Visual Editor",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Lecture Visual Editor"
+    }
+  },
   "devDependencies": {
     "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
     "playwright-core": "^1.61.1"
   }
 }
