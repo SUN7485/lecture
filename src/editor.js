@@ -802,17 +802,31 @@
       if (!this._canFloat(unit)) return;
       e.preventDefault();
       e.stopPropagation();
-      const slide = this._slideOf(unit);
-      const startX = e.clientX, startY = e.clientY;
+      let slide = this._slideOf(unit);
+      const allSlides = this.slides(); // cached: slide set is stable during a drag
+      let startX = e.clientX, startY = e.clientY;
       const prevTouch = unit.style.touchAction;
       unit.style.touchAction = 'none';
       try { el.setPointerCapture(e.pointerId); } catch (_) {}
 
       let moved = false, base = null;
       const move = (ev) => {
-        const dx = ev.clientX - startX, dy = ev.clientY - startY;
+        let dx = ev.clientX - startX, dy = ev.clientY - startY;
         if (!moved && Math.abs(dx) + Math.abs(dy) < 3) return;
         if (!moved) { moved = true; base = this._floatUnit(unit, slide); }
+        // Cross-slide: if the cursor crossed into another slide, re-home the
+        // unit there and re-anchor at its current on-screen spot (no jump).
+        const over = this._slideAtPoint(ev.clientX, ev.clientY, allSlides);
+        if (over && over !== slide && over !== unit && !over.contains(unit)) {
+          const rect = unit.getBoundingClientRect();
+          const cs = this.win.getComputedStyle(over);
+          if (cs.position === 'static') over.style.position = 'relative';
+          over.appendChild(unit);
+          slide = over;
+          base = this._floatUnit(unit, slide, rect);
+          startX = ev.clientX; startY = ev.clientY;
+          dx = 0; dy = 0;
+        }
         // Snap in client space (1:1 with style left/top since nothing between
         // the unit and its offset parent is transformed), then map back.
         const snap = this._applySnap(unit, slide, base.clientLeft + dx, base.clientTop + dy, base.w, base.h);
@@ -839,11 +853,23 @@
       el.addEventListener('lostpointercapture', up, { once: true });
     }
 
+    // Find the top-level slide whose box contains a client point (for
+    // cross-slide dragging). Null if the cursor is in the gap between slides.
+    _slideAtPoint(cx, cy, list) {
+      for (const s of (list || this.slides())) {
+        const r = s.getBoundingClientRect();
+        if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) return s;
+      }
+      return null;
+    }
+
     // Lift a unit (the .ve-slot figure, or a bare img) out of the document flow
     // into absolute positioning within its slide. Returns the starting client
     // rect + the style left/top we assigned, so the drag can map deltas back.
-    _floatUnit(unit, slide) {
-      const ur = unit.getBoundingClientRect();
+    // `preRect` (optional) is the on-screen rect to anchor to — used when
+    // re-homing into another slide, read BEFORE the re-parent so there's no jump.
+    _floatUnit(unit, slide, preRect) {
+      const ur = preRect || unit.getBoundingClientRect();
       if (!unit.style.width) unit.style.width = Math.round(ur.width) + 'px';
       unit.style.margin = '0';
       unit.style.position = 'absolute';
