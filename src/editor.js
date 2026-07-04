@@ -18,7 +18,12 @@
   const EDITOR_CSS = `
     html, body { height: auto !important; min-height: 0 !important; }
     .ve-selected { outline: 2px solid #2f6df6 !important; outline-offset: 1px; }
+    img.ve-selected, .ve-slot.ve-selected { cursor: move; }
     .ve-editing { outline: 2px dashed #8b5cf6 !important; outline-offset: 2px; cursor: text; }
+    /* Alignment / snap guides shown while free-dragging an image. */
+    .ve-guide { position: absolute; background: #f5288f; pointer-events: none; z-index: 2147483001; }
+    .ve-guide.v { width: 1px; }
+    .ve-guide.h { height: 1px; }
     .ve-insert-line {
       position: absolute; height: 3px; background: #2f6df6; border-radius: 2px;
       pointer-events: none; z-index: 2147483000; box-shadow: 0 0 6px rgba(47,109,246,.6);
@@ -137,7 +142,7 @@
       // Clone and strip editor UI so undo/redo never re-materializes ghost
       // toolbars/handles into the document.
       const clone = this.doc.body.cloneNode(true);
-      clone.querySelectorAll('.ve-overlay, .ve-toolbar, .ve-insert-line').forEach(n => n.remove());
+      clone.querySelectorAll('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-guide').forEach(n => n.remove());
       clone.querySelectorAll('.ve-selected').forEach(n => n.classList.remove('ve-selected'));
       clone.querySelectorAll('[contenteditable], .ve-editing').forEach(n => {
         n.removeAttribute('contenteditable');
@@ -373,6 +378,8 @@
     // ---------- selection (any element, PowerPoint style) ----------
     _onDocClick(e) {
       if (!e.target.closest) return;
+      // A just-finished free-drag ends with a click; keep the current selection.
+      if (this._justDragged) { this._justDragged = false; e.preventDefault(); e.stopPropagation(); return; }
       if (e.target.closest('.ve-toolbar, .ve-handle, .ve-overlay, .ve-palette')) return;
       if (this._placeType) {
         e.preventDefault();
@@ -429,6 +436,11 @@
     }
 
     _deselect() {
+      if (this._dragImg && this._dragDown) {
+        this._dragImg.removeEventListener('pointerdown', this._dragDown);
+      }
+      this._dragImg = null;
+      this._dragDown = null;
       if (this.selected) this.selected.classList.remove('ve-selected');
       this.selected = null;
       if (this.overlay) { this.overlay.remove(); this.overlay = null; }
@@ -450,6 +462,11 @@
           h.addEventListener('pointerdown', (e) => this._startResize(e, pos));
           this.overlay.appendChild(h);
         });
+        // Grab the image body (anywhere but a handle) to free-drag it around
+        // the slide. First drag lifts it out of the flow into absolute position.
+        this._dragImg = this.selected;
+        this._dragDown = (e) => this._startDrag(e);
+        this._dragImg.addEventListener('pointerdown', this._dragDown);
       }
       doc.body.appendChild(this.overlay);
 
@@ -459,6 +476,7 @@
       const dupBtn = inSlide ? `<button data-act="dupslide" title="Duplicate this slide">⧉ Slide</button>` : '';
       if (isImg) {
         this.toolbar.innerHTML = `
+          <span class="ve-tag" title="Drag the image to move it anywhere on the slide">✥ drag to move</span>
           <button data-act="left" title="Align left">⬅</button>
           <button data-act="center" title="Center">⬍</button>
           <button data-act="right" title="Align right">➡</button>
@@ -595,7 +613,7 @@
     slides() {
       return Array.from(this.doc.body.children).filter(el =>
         el.nodeType === 1 &&
-        !el.matches('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-palette') &&
+        !el.matches('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-palette, .ve-guide') &&
         el.offsetHeight > 150 && el.offsetWidth > 200);
     }
 
@@ -604,7 +622,7 @@
       c.querySelectorAll('.ve-selected').forEach(n => n.classList.remove('ve-selected'));
       c.querySelectorAll('.ve-editing').forEach(n => n.classList.remove('ve-editing'));
       c.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
-      c.querySelectorAll('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-palette').forEach(n => n.remove());
+      c.querySelectorAll('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-palette, .ve-guide').forEach(n => n.remove());
       return c;
     }
 
@@ -735,6 +753,152 @@
       handle.addEventListener('lostpointercapture', up, { once: true });
     }
 
+    // ---------- free-floating drag (move image anywhere on the slide) ----------
+    // Pointer capture on the image, exactly like resize: the drag lives entirely
+    // inside the iframe so screen deltas are already in the document's own coords
+    // (no zoom math) and the parent window never steals the pointer.
+    _startDrag(e) {
+      if (e.button !== 0 || !this.selected) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const img = this.selected;
+      const unit = img.closest('.ve-slot') || img;
+      const slide = this._slideOf(unit);
+      const startX = e.clientX, startY = e.clientY;
+      const prevTouch = unit.style.touchAction;
+      unit.style.touchAction = 'none';
+      try { img.setPointerCapture(e.pointerId); } catch (_) {}
+
+      let moved = false, base = null;
+      const move = (ev) => {
+        const dx = ev.clientX - startX, dy = ev.clientY - startY;
+        if (!moved && Math.abs(dx) + Math.abs(dy) < 3) return;
+        if (!moved) { moved = true; base = this._floatUnit(unit, slide); }
+        // Snap in client space (1:1 with style left/top since nothing between
+        // the unit and its offset parent is transformed), then map back.
+        const snap = this._applySnap(unit, slide, base.clientLeft + dx, base.clientTop + dy, base.w, base.h);
+        unit.style.left = Math.round(base.styleLeft + (snap.left - base.clientLeft)) + 'px';
+        unit.style.top = Math.round(base.styleTop + (snap.top - base.clientTop)) + 'px';
+        this._reposition();
+      };
+      const up = () => {
+        img.removeEventListener('pointermove', move);
+        unit.style.touchAction = prevTouch;
+        this._clearGuides();
+        if (moved) {
+          // Swallow the click that fires on pointerup so it doesn't re-run
+          // selection logic; clear the flag next tick if no click arrives.
+          this._justDragged = true;
+          this.win.setTimeout(() => { this._justDragged = false; }, 0);
+          this._pushHistory();
+        }
+      };
+      img.addEventListener('pointermove', move);
+      img.addEventListener('pointerup', up, { once: true });
+      img.addEventListener('lostpointercapture', up, { once: true });
+    }
+
+    // Lift a unit (the .ve-slot figure, or a bare img) out of the document flow
+    // into absolute positioning within its slide. Returns the starting client
+    // rect + the style left/top we assigned, so the drag can map deltas back.
+    _floatUnit(unit, slide) {
+      const ur = unit.getBoundingClientRect();
+      if (!unit.style.width) unit.style.width = Math.round(ur.width) + 'px';
+      unit.style.margin = '0';
+      unit.style.position = 'absolute';
+      unit.dataset.veFloat = '1';
+      // Make the slide the positioning context so coords stay slide-local and
+      // survive PDF export (slides are fixed-size body children).
+      if (slide) {
+        const cs = this.win.getComputedStyle(slide);
+        if (cs.position === 'static') slide.style.position = 'relative';
+      }
+      const parent = unit.offsetParent || slide || this.doc.body;
+      const pr = parent.getBoundingClientRect();
+      const styleLeft = ur.left - pr.left - parent.clientLeft + parent.scrollLeft;
+      const styleTop = ur.top - pr.top - parent.clientTop + parent.scrollTop;
+      unit.style.left = Math.round(styleLeft) + 'px';
+      unit.style.top = Math.round(styleTop) + 'px';
+      return { styleLeft, styleTop, clientLeft: ur.left, clientTop: ur.top, w: ur.width, h: ur.height };
+    }
+
+    // Given a proposed client-space top-left, snap the unit's edges/centers to
+    // the slide's edges/center and to sibling elements, drawing pink guides for
+    // whichever axis snapped. Returns the (possibly nudged) client top-left.
+    _applySnap(unit, slide, cl, ct, w, h) {
+      this._clearGuides();
+      const TH = 6;
+      const vx = [], hy = [];
+      if (slide) {
+        const sr = slide.getBoundingClientRect();
+        vx.push(sr.left, sr.left + sr.width / 2, sr.right);
+        hy.push(sr.top, sr.top + sr.height / 2, sr.bottom);
+        for (const sib of this._snapSiblings(slide, unit)) {
+          const r = sib.getBoundingClientRect();
+          vx.push(r.left, r.left + r.width / 2, r.right);
+          hy.push(r.top, r.top + r.height / 2, r.bottom);
+        }
+      }
+      const ax = [cl, cl + w / 2, cl + w];
+      const ay = [ct, ct + h / 2, ct + h];
+      const pick = (anchors, lines) => {
+        let best = null;
+        for (const a of anchors) for (const line of lines) {
+          const d = line - a;
+          if (Math.abs(d) <= TH && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, line };
+        }
+        return best;
+      };
+      const bx = pick(ax, vx), by = pick(ay, hy);
+      if (bx) this._drawGuide('v', bx.line, slide);
+      if (by) this._drawGuide('h', by.line, slide);
+      return { left: cl + (bx ? bx.d : 0), top: ct + (by ? by.d : 0) };
+    }
+
+    // Elements worth aligning to: the slide's direct children and its
+    // .content's children, minus the dragged unit and editor chrome.
+    _snapSiblings(slide, unit) {
+      const out = [];
+      const collect = (parent) => {
+        if (!parent) return;
+        for (const c of parent.children) {
+          if (c === unit || c.contains(unit)) continue;
+          if (c.matches && c.matches('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-guide, .ve-palette, style, script')) continue;
+          const r = c.getBoundingClientRect();
+          if (r.width < 4 || r.height < 4) continue;
+          out.push(c);
+        }
+      };
+      collect(slide);
+      collect(slide.querySelector('.content'));
+      return out;
+    }
+
+    _drawGuide(kind, clientPos, slide) {
+      const g = this.doc.createElement('div');
+      g.className = 've-guide ' + kind;
+      const sx = this.win.scrollX, sy = this.win.scrollY;
+      const sr = slide
+        ? slide.getBoundingClientRect()
+        : { top: -sy, left: -sx, width: this.doc.body.scrollWidth, height: this.doc.body.scrollHeight };
+      if (kind === 'v') {
+        g.style.left = (clientPos + sx) + 'px';
+        g.style.top = (sr.top + sy) + 'px';
+        g.style.height = sr.height + 'px';
+      } else {
+        g.style.top = (clientPos + sy) + 'px';
+        g.style.left = (sr.left + sx) + 'px';
+        g.style.width = sr.width + 'px';
+      }
+      this.doc.body.appendChild(g);
+      (this._guides || (this._guides = [])).push(g);
+    }
+
+    _clearGuides() {
+      if (this._guides) this._guides.forEach(g => g.remove());
+      this._guides = [];
+    }
+
     align(dir) {
       if (!this.selected) return;
       const slot = this.selected.closest('.ve-slot');
@@ -830,7 +994,7 @@
     }
 
     _isBlock(el) {
-      return el.nodeType === 1 && BLOCK_TAGS.has(el.tagName) && !el.closest('.ve-overlay, .ve-toolbar');
+      return el.nodeType === 1 && BLOCK_TAGS.has(el.tagName) && !el.closest('.ve-overlay, .ve-toolbar, .ve-guide');
     }
 
     dropInsert(url, name) {
@@ -886,7 +1050,7 @@
     getCleanHtml() {
       const clone = this.doc.documentElement.cloneNode(true);
       // Strip editor artifacts.
-      clone.querySelectorAll('#ve-styles, .ve-overlay, .ve-toolbar, .ve-insert-line').forEach(n => n.remove());
+      clone.querySelectorAll('#ve-styles, .ve-overlay, .ve-toolbar, .ve-insert-line, .ve-guide').forEach(n => n.remove());
       clone.querySelectorAll('.ve-selected').forEach(n => n.classList.remove('ve-selected'));
       clone.querySelectorAll('[contenteditable], .ve-editing').forEach(n => {
         n.removeAttribute('contenteditable');
