@@ -17,8 +17,7 @@
 
   const EDITOR_CSS = `
     html, body { height: auto !important; min-height: 0 !important; }
-    .ve-selected { outline: 2px solid #2f6df6 !important; outline-offset: 1px; }
-    img.ve-selected, .ve-slot.ve-selected { cursor: move; }
+    .ve-selected { outline: 2px solid #2f6df6 !important; outline-offset: 1px; cursor: move; }
     .ve-editing { outline: 2px dashed #8b5cf6 !important; outline-offset: 2px; cursor: text; }
     /* Alignment / snap guides shown while free-dragging an image. */
     .ve-guide { position: absolute; background: #f5288f; pointer-events: none; z-index: 2147483001; }
@@ -195,9 +194,9 @@
         return;
       }
       const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-      if (this.selected && this.selected.tagName === 'IMG' && arrows[e.key]) {
-        // Precise positioning: arrows nudge 1px, Shift+arrows 10px. Nudging an
-        // image floats it first (same as a drag would).
+      if (this.selected && arrows[e.key] && this._canFloat(this.selected.closest('.ve-slot') || this.selected)) {
+        // Precise positioning: arrows nudge 1px, Shift+arrows 10px. Nudging
+        // floats the element first (same as a drag would).
         e.preventDefault();
         const [ux, uy] = arrows[e.key];
         const step = e.shiftKey ? 10 : 1;
@@ -472,13 +471,17 @@
           h.addEventListener('pointerdown', (e) => this._startResize(e, pos));
           this.overlay.appendChild(h);
         });
-        // Grab the image body (anywhere but a handle) to free-drag it around
-        // the slide. First drag lifts it out of the flow into absolute position.
+      }
+      doc.body.appendChild(this.overlay);
+
+      // Any selectable element inside a slide can be free-dragged (not just
+      // images): press its body and move to lift it into absolute positioning.
+      const dragUnit = this.selected.closest('.ve-slot') || this.selected;
+      if (this._canFloat(dragUnit)) {
         this._dragImg = this.selected;
         this._dragDown = (e) => this._startDrag(e);
         this._dragImg.addEventListener('pointerdown', this._dragDown);
       }
-      doc.body.appendChild(this.overlay);
 
       this.toolbar = doc.createElement('div');
       this.toolbar.className = 've-toolbar';
@@ -511,12 +514,21 @@
           <button data-act="coldel" title="Remove the last column">−Col</button>` : '';
         const editBtn = this._isTextEditable(this.selected)
           ? `<button data-act="edit" class="primary" title="Edit the words (or double-click the text)">✏ Edit text</button>` : '';
+        const canFloat = this._canFloat(this.selected);
+        const dragHint = canFloat
+          ? `<span class="ve-tag" title="Drag to move it anywhere on the slide (arrow keys nudge)">✥ move</span>` : '';
+        const floated = this.selected.dataset.veFloat === '1';
+        const zBtns = floated ? `
+          <button data-act="front" title="Bring to front">⤒ Front</button>
+          <button data-act="back" title="Send to back">⤓ Back</button>` : '';
         this.toolbar.innerHTML = `
           <span class="ve-tag">${label}</span>
+          ${dragHint}
           ${editBtn}
           <button data-act="color" title="Text color">🎨</button>
           <button data-act="fill" title="Fill / background color">🖌</button>
           ${tableBtns}
+          ${zBtns}
           ${dupBtn}
           <button data-act="parent" title="Select the container of this element">⬆ Container</button>
           <button data-act="delete" class="danger" title="Delete (or press Del)">🗑 Delete</button>`;
@@ -774,17 +786,27 @@
     // Pointer capture on the image, exactly like resize: the drag lives entirely
     // inside the iframe so screen deltas are already in the document's own coords
     // (no zoom math) and the parent window never steals the pointer.
+    // An element that can be lifted into free positioning: anything selectable
+    // that lives inside a slide — but never a whole top-level slide itself.
+    _canFloat(unit) {
+      if (!unit || unit === this.doc.body || unit.nodeType !== 1) return false;
+      const slide = this._slideOf(unit);
+      if (slide && slide === unit) return false;
+      return true;
+    }
+
     _startDrag(e) {
       if (e.button !== 0 || !this.selected) return;
+      const el = this.selected;
+      const unit = el.closest('.ve-slot') || el;
+      if (!this._canFloat(unit)) return;
       e.preventDefault();
       e.stopPropagation();
-      const img = this.selected;
-      const unit = img.closest('.ve-slot') || img;
       const slide = this._slideOf(unit);
       const startX = e.clientX, startY = e.clientY;
       const prevTouch = unit.style.touchAction;
       unit.style.touchAction = 'none';
-      try { img.setPointerCapture(e.pointerId); } catch (_) {}
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
 
       let moved = false, base = null;
       const move = (ev) => {
@@ -799,7 +821,7 @@
         this._reposition();
       };
       const up = () => {
-        img.removeEventListener('pointermove', move);
+        el.removeEventListener('pointermove', move);
         unit.style.touchAction = prevTouch;
         this._clearGuides();
         if (moved) {
@@ -809,12 +831,12 @@
           this.win.setTimeout(() => { this._justDragged = false; }, 0);
           this._pushHistory();
           // Rebuild the overlay so the toolbar now offers Front/Back layering.
-          this.select(img);
+          this.select(el);
         }
       };
-      img.addEventListener('pointermove', move);
-      img.addEventListener('pointerup', up, { once: true });
-      img.addEventListener('lostpointercapture', up, { once: true });
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up, { once: true });
+      el.addEventListener('lostpointercapture', up, { once: true });
     }
 
     // Lift a unit (the .ve-slot figure, or a bare img) out of the document flow
@@ -924,9 +946,10 @@
     // shifts left/top. History is debounced so a burst of key presses collapses
     // into one undo step.
     _nudge(dx, dy) {
-      const img = this.selected;
-      if (!img || img.tagName !== 'IMG') return;
-      const unit = img.closest('.ve-slot') || img;
+      const el = this.selected;
+      if (!el) return;
+      const unit = el.closest('.ve-slot') || el;
+      if (!this._canFloat(unit)) return;
       if (unit.dataset.veFloat !== '1') this._floatUnit(unit, this._slideOf(unit));
       unit.style.left = Math.round((parseFloat(unit.style.left) || 0) + dx) + 'px';
       unit.style.top = Math.round((parseFloat(unit.style.top) || 0) + dy) + 'px';
