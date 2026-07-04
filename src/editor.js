@@ -194,6 +194,16 @@
         this.onSaveRequest && this.onSaveRequest();
         return;
       }
+      const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+      if (this.selected && this.selected.tagName === 'IMG' && arrows[e.key]) {
+        // Precise positioning: arrows nudge 1px, Shift+arrows 10px. Nudging an
+        // image floats it first (same as a drag would).
+        e.preventDefault();
+        const [ux, uy] = arrows[e.key];
+        const step = e.shiftKey ? 10 : 1;
+        this._nudge(ux * step, uy * step);
+        return;
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && this.selected) {
         e.preventDefault();
         this.deleteSelected();
@@ -475,11 +485,17 @@
       const inSlide = this._slideOf(this.selected);
       const dupBtn = inSlide ? `<button data-act="dupslide" title="Duplicate this slide">⧉ Slide</button>` : '';
       if (isImg) {
+        // Once an image is free-floating it can overlap others, so offer layering.
+        const floated = (this.selected.closest('.ve-slot') || this.selected).dataset.veFloat === '1';
+        const zBtns = floated ? `
+          <button data-act="front" title="Bring to front">⤒ Front</button>
+          <button data-act="back" title="Send to back">⤓ Back</button>` : '';
         this.toolbar.innerHTML = `
-          <span class="ve-tag" title="Drag the image to move it anywhere on the slide">✥ drag to move</span>
+          <span class="ve-tag" title="Drag the image to move it anywhere on the slide (arrow keys nudge)">✥ drag to move</span>
           <button data-act="left" title="Align left">⬅</button>
           <button data-act="center" title="Center">⬍</button>
           <button data-act="right" title="Align right">➡</button>
+          ${zBtns}
           <button data-act="replace" title="Replace image">Replace</button>
           <button data-act="parent" title="Select the box that contains this">⬆ Box</button>
           ${dupBtn}
@@ -519,6 +535,7 @@
         }
         else if (act === 'color') this._showPalette('color');
         else if (act === 'fill') this._showPalette('background');
+        else if (act === 'front' || act === 'back') this._zorder(act);
         else if (act === 'dupslide') this.duplicateSlide();
         else if (act.startsWith('row') || act.startsWith('col')) this._tableOp(act);
         else this.align(act);
@@ -791,6 +808,8 @@
           this._justDragged = true;
           this.win.setTimeout(() => { this._justDragged = false; }, 0);
           this._pushHistory();
+          // Rebuild the overlay so the toolbar now offers Front/Back layering.
+          this.select(img);
         }
       };
       img.addEventListener('pointermove', move);
@@ -819,6 +838,8 @@
       const styleTop = ur.top - pr.top - parent.clientTop + parent.scrollTop;
       unit.style.left = Math.round(styleLeft) + 'px';
       unit.style.top = Math.round(styleTop) + 'px';
+      // Baseline layer: above the slide's content, never behind its background.
+      if (!unit.style.zIndex) unit.style.zIndex = '1';
       return { styleLeft, styleTop, clientLeft: ur.left, clientTop: ur.top, w: ur.width, h: ur.height };
     }
 
@@ -897,6 +918,48 @@
     _clearGuides() {
       if (this._guides) this._guides.forEach(g => g.remove());
       this._guides = [];
+    }
+
+    // Arrow-key nudge for a selected image. Floats it on first nudge, then
+    // shifts left/top. History is debounced so a burst of key presses collapses
+    // into one undo step.
+    _nudge(dx, dy) {
+      const img = this.selected;
+      if (!img || img.tagName !== 'IMG') return;
+      const unit = img.closest('.ve-slot') || img;
+      if (unit.dataset.veFloat !== '1') this._floatUnit(unit, this._slideOf(unit));
+      unit.style.left = Math.round((parseFloat(unit.style.left) || 0) + dx) + 'px';
+      unit.style.top = Math.round((parseFloat(unit.style.top) || 0) + dy) + 'px';
+      this._reposition();
+      this.win.clearTimeout(this._nudgeTimer);
+      this._nudgeTimer = this.win.setTimeout(() => this._pushHistory(), 400);
+    }
+
+    // Layer a floated image above/below the other floated images in its slide.
+    // Z stays >= 1 so an image is never pushed behind the slide's background.
+    _zorder(dir) {
+      const img = this.selected;
+      if (!img) return;
+      const unit = img.closest('.ve-slot') || img;
+      if (unit.dataset.veFloat !== '1') this._floatUnit(unit, this._slideOf(unit));
+      const scope = this._slideOf(unit) || this.doc.body;
+      const units = Array.from(scope.querySelectorAll('[data-ve-float="1"]'));
+      const zOf = (u) => parseInt(u.style.zIndex, 10) || 1;
+      if (dir === 'front') {
+        const max = Math.max(1, ...units.map(zOf));
+        unit.style.zIndex = String(max + 1);
+      } else {
+        const others = units.filter(u => u !== unit);
+        const minOther = others.length ? Math.min(...others.map(zOf)) : 1;
+        if (minOther <= 1) {
+          // No room below: lift everyone else up one and drop this to the floor.
+          others.forEach(u => { u.style.zIndex = String(zOf(u) + 1); });
+          unit.style.zIndex = '1';
+        } else {
+          unit.style.zIndex = String(minOther - 1);
+        }
+      }
+      this._pushHistory();
     }
 
     align(dir) {
