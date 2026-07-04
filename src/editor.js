@@ -898,12 +898,14 @@
       this._clearGuides();
       const TH = 6;
       const vx = [], hy = [];
+      const sibs = [];
       if (slide) {
         const sr = slide.getBoundingClientRect();
         vx.push(sr.left, sr.left + sr.width / 2, sr.right);
         hy.push(sr.top, sr.top + sr.height / 2, sr.bottom);
         for (const sib of this._snapSiblings(slide, unit)) {
           const r = sib.getBoundingClientRect();
+          sibs.push(r);
           vx.push(r.left, r.left + r.width / 2, r.right);
           hy.push(r.top, r.top + r.height / 2, r.bottom);
         }
@@ -919,9 +921,72 @@
         return best;
       };
       const bx = pick(ax, vx), by = pick(ay, hy);
+      let outLeft = cl + (bx ? bx.d : 0);
+      let outTop = ct + (by ? by.d : 0);
       if (bx) this._drawGuide('v', bx.line, slide);
       if (by) this._drawGuide('h', by.line, slide);
-      return { left: cl + (bx ? bx.d : 0), top: ct + (by ? by.d : 0) };
+      // Equal-spacing (distribution): if an axis didn't already edge-snap, try
+      // centering the unit between its two flanking neighbors so the gaps match.
+      const dist = this._distSnap(sibs, cl, ct, w, h, TH);
+      if (!bx && dist.x) { outLeft = dist.x.left; this._drawSpacingX(dist.x, outLeft, outTop, w, h); }
+      if (!by && dist.y) { outTop = dist.y.top; this._drawSpacingY(dist.y, outLeft, outTop, w, h); }
+      return { left: outLeft, top: outTop };
+    }
+
+    // Equal-gap snap: find the nearest neighbour on each side (that shares the
+    // unit's row/column) and, if the unit is close to the midpoint between
+    // them, snap so the two gaps are equal — like Figma's spacing guides.
+    _distSnap(sibs, cl, ct, w, h, TH) {
+      const out = { x: null, y: null };
+      const uT = ct, uB = ct + h, uL = cl, uR = cl + w;
+      // Horizontal: the closest neighbour lying ENTIRELY on each side of the
+      // unit while sharing its row (vertical overlap). Overlapping full-width
+      // blocks are ignored so they don't hijack the gap.
+      let L = null, R = null;
+      sibs.forEach(r => {
+        if (r.top >= uB || r.bottom <= uT) return;        // not on this row
+        if (r.right <= uL) { if (!L || r.right > L.right) L = r; }       // fully left
+        else if (r.left >= uR) { if (!R || r.left < R.left) R = r; }     // fully right
+      });
+      if (L && R && R.left - L.right > w) {
+        const target = (L.right + R.left - w) / 2;
+        if (Math.abs(cl - target) <= TH) out.x = { left: target, L, R };
+      }
+      // Vertical: the closest neighbour entirely above/below sharing the column.
+      let T = null, B = null;
+      sibs.forEach(r => {
+        if (r.left >= uR || r.right <= uL) return;         // not in this column
+        if (r.bottom <= uT) { if (!T || r.bottom > T.bottom) T = r; }    // fully above
+        else if (r.top >= uB) { if (!B || r.top < B.top) B = r; }        // fully below
+      });
+      if (T && B && B.top - T.bottom > h) {
+        const target = (T.bottom + B.top - h) / 2;
+        if (Math.abs(ct - target) <= TH) out.y = { top: target, T, B };
+      }
+      return out;
+    }
+
+    // Two pink bars marking the (now equal) horizontal gaps on either side.
+    _drawSpacingX(info, left, top, w, h) {
+      const cy = top + h / 2;
+      this._guideSeg(info.L.right, cy - 1, left - info.L.right, 2);
+      this._guideSeg(left + w, cy - 1, info.R.left - (left + w), 2);
+    }
+    _drawSpacingY(info, left, top, w, h) {
+      const cx = left + w / 2;
+      this._guideSeg(cx - 1, info.T.bottom, 2, top - info.T.bottom);
+      this._guideSeg(cx - 1, top + h, 2, info.B.top - (top + h));
+    }
+
+    _guideSeg(clientX, clientY, w, h) {
+      const g = this.doc.createElement('div');
+      g.className = 've-guide';
+      g.style.left = (clientX + this.win.scrollX) + 'px';
+      g.style.top = (clientY + this.win.scrollY) + 'px';
+      g.style.width = Math.max(1, w) + 'px';
+      g.style.height = Math.max(1, h) + 'px';
+      this.doc.body.appendChild(g);
+      (this._guides || (this._guides = [])).push(g);
     }
 
     // Elements worth aligning to: the slide's direct children and its
