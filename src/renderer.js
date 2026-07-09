@@ -18,6 +18,7 @@
   let editor = null;
   let currentFile = null;   // { filePath, dir, content }
   let assets = [];          // { url, name, path }
+  let brandFonts = null;    // cached [{ name, b64 }] from main, loaded on first use
   let zoom = 1;
   let activeSlide = null;   // the slide element considered "current"
 
@@ -28,6 +29,7 @@
     const res = await window.api.openHtml();
     if (!res) return;
     currentFile = res;
+    window.__currentFile = res;   // so the Enrich drawer can cache next to the file
     loadIntoIframe(res.content, res.dir);
     status('Opened: ' + res.filePath);
   }
@@ -69,6 +71,7 @@
       applyZoom();
       refreshSlideList();
       updateSlideInfo();
+      updateBrandBtn(); // reflect whether the opened file already carries the theme
       status('Ready. Double-click any text (or select it and press ✏ Edit text) to change the words. Drag images in, add slides, zoom to work comfortably.');
     };
 
@@ -113,11 +116,73 @@
     slides.forEach((s, i) => {
       const item = document.createElement('div');
       item.className = 'slide-item' + (s === activeSlide ? ' active' : '');
-      item.innerHTML = `<span class="num">${i + 1}</span><span class="title"></span>`;
+      item.dataset.i = i;
+      item.innerHTML =
+        `<span class="drag" title="Drag to reorder">⠿</span>` +
+        `<span class="num">${i + 1}</span>` +
+        `<span class="title"></span>` +
+        `<span class="reorder">` +
+          `<button class="up" title="Move up"${i === 0 ? ' disabled' : ''}>▲</button>` +
+          `<button class="down" title="Move down"${i === slides.length - 1 ? ' disabled' : ''}>▼</button>` +
+        `</span>`;
       item.querySelector('.title').textContent = slideTitle(s, i);
-      item.addEventListener('click', () => { activeSlide = s; scrollToSlide(s); markActive(); updateSlideInfo(); });
+      // Click the row (but not a control) to make it the current slide.
+      item.addEventListener('click', (e) => {
+        if (e.target.closest('button, .drag')) return;
+        activeSlide = s; scrollToSlide(s); markActive(); updateSlideInfo();
+      });
+      item.querySelector('.up').addEventListener('click', (e) => { e.stopPropagation(); editor.moveSlide(s, i - 1); });
+      item.querySelector('.down').addEventListener('click', (e) => { e.stopPropagation(); editor.moveSlide(s, i + 1); });
+      item.querySelector('.drag').addEventListener('pointerdown', (e) => startSlideDrag(e, s, item));
       slideList.appendChild(item);
     });
+  }
+
+  // Drag a slide up/down the navigator to renumber it. Same pointer-capture
+  // trick as the asset drag: every move/up comes to us regardless of hover.
+  function startSlideDrag(e, slide, item) {
+    if (!editor) return;
+    const slides = editor.slides();
+    if (slides.length < 2) return;
+    e.preventDefault();
+    try { item.setPointerCapture(e.pointerId); } catch (_) {}
+    item.classList.add('dragging');
+    status('Drag up or down, then release to drop.');
+
+    const items = () => Array.from(slideList.children);
+    const clearMarks = () => items().forEach(c => c.classList.remove('drop-above', 'drop-below'));
+    const others = slides.filter(s => s !== slide);
+    let targetK = null;
+
+    const move = (ev) => {
+      const list = items();
+      let k = 0;
+      for (const o of others) {
+        const it = list[slides.indexOf(o)];
+        const r = it.getBoundingClientRect();
+        if (ev.clientY > r.top + r.height / 2) k++;
+      }
+      targetK = k;
+      clearMarks();
+      if (k < others.length) list[slides.indexOf(others[k])].classList.add('drop-above');
+      else list[slides.indexOf(others[others.length - 1])].classList.add('drop-below');
+      const lr = slideList.getBoundingClientRect();
+      if (ev.clientY < lr.top + 24) slideList.scrollTop -= 12;
+      else if (ev.clientY > lr.bottom - 24) slideList.scrollTop += 12;
+    };
+
+    let done = false;
+    const finish = (commit) => {
+      if (done) return; done = true;
+      item.removeEventListener('pointermove', move);
+      item.classList.remove('dragging');
+      clearMarks();
+      if (commit && targetK != null) editor.moveSlide(slide, targetK);
+    };
+    item.addEventListener('pointermove', move);
+    item.addEventListener('pointerup', () => finish(true), { once: true });
+    item.addEventListener('pointercancel', () => finish(false), { once: true });
+    item.addEventListener('lostpointercapture', () => finish(true), { once: true });
   }
   function markActive() {
     const slides = editor.slides();
@@ -167,6 +232,159 @@
       return html.replace(/<html[^>]*>/i, (m) => m + '<head>' + baseTag + '</head>');
     }
     return '<head>' + baseTag + '</head>' + html;
+  }
+
+  // ---------- Import slides from another lecture (merge) ----------
+  // Top-level sizable children = slides, same rule the canvas uses.
+  function detectSlidesInDoc(doc) {
+    return Array.from(doc.body.children).filter(el =>
+      el.nodeType === 1 && el.offsetHeight > 150 && el.offsetWidth > 200);
+  }
+
+  // Rewrite a single element's inline `url(...)` refs to absolute file URLs.
+  function fixStyleUrls(el, baseHref) {
+    const s = el.getAttribute && el.getAttribute('style');
+    if (!s || s.indexOf('url(') < 0) return;
+    el.setAttribute('style', s.replace(/url\((['"]?)([^'")]+)\1\)/gi, (m, q, u) => {
+      if (/^(data:|https?:|file:)/i.test(u)) return m;
+      try { return 'url(' + q + new URL(u, baseHref).href + q + ')'; } catch (_) { return m; }
+    }));
+  }
+
+  // Make a slide's relative asset URLs absolute so they keep resolving after the
+  // slide is merged into a lecture that lives in a different folder.
+  function absolutizeUrls(root, baseHref) {
+    fixStyleUrls(root, baseHref);
+    root.querySelectorAll('img').forEach(img => {
+      const raw = img.getAttribute('src');
+      if (raw && !/^(data:|https?:|file:)/i.test(raw)) img.setAttribute('src', img.src);
+    });
+    root.querySelectorAll('[style*="url("]').forEach(el => fixStyleUrls(el, baseHref));
+  }
+
+  // <style>/<link> from the source's <head>, so imported slides aren't naked
+  // if the two lectures were built with different CSS.
+  function collectImportedHead(doc, baseHref) {
+    const out = [];
+    doc.querySelectorAll('style').forEach(s => {
+      if (s.id && /^ve-/.test(s.id)) return;
+      out.push(s.outerHTML);
+    });
+    doc.querySelectorAll('link[rel~="stylesheet"]').forEach(l => {
+      const href = l.getAttribute('href');
+      if (href) { try { l.setAttribute('href', new URL(href, baseHref).href); } catch (_) {} }
+      out.push(l.outerHTML);
+    });
+    return out;
+  }
+
+  // Render the source file in a throwaway hidden iframe so we can detect its
+  // slides by layout (offset sizes), exactly like the main canvas does.
+  function loadSourceSlides(html, dir) {
+    return new Promise((resolve) => {
+      const baseHref = 'file:///' + dir.replace(/\\/g, '/') + '/';
+      const frame = document.createElement('iframe');
+      Object.assign(frame.style, {
+        position: 'fixed', left: '-10000px', top: '0',
+        width: '1280px', height: '900px', border: '0', visibility: 'hidden'
+      });
+      let settled = false;
+      const done = (val) => { if (settled) return; settled = true; frame.remove(); resolve(val); };
+      frame.onload = () => setTimeout(() => {
+        try {
+          const doc = frame.contentDocument;
+          const slides = detectSlidesInDoc(doc).map((el, i) => {
+            absolutizeUrls(el, baseHref);
+            return { title: slideTitle(el, i), w: el.offsetWidth, h: el.offsetHeight, html: el.outerHTML };
+          });
+          done({ slides, heads: collectImportedHead(doc, baseHref) });
+        } catch (_) { done(null); }
+      }, 60);
+      frame.srcdoc = injectBase(html, baseHref);
+      document.body.appendChild(frame);
+      setTimeout(() => done(null), 8000); // safety net if onload never fires
+    });
+  }
+
+  async function importSlidesFlow() {
+    if (!editor) { status('Open a lecture first.'); return; }
+    const res = await window.api.importHtml();
+    if (!res) return;
+    status('Reading slides from ' + res.filePath + '…');
+    const data = await loadSourceSlides(res.content, res.dir);
+    if (!data || !data.slides.length) { status('No slides detected in that file.'); return; }
+    openImportModal(res, data);
+  }
+
+  let importModal = null;
+  function closeImportModal() { if (importModal) { importModal.remove(); importModal = null; } }
+
+  function openImportModal(res, data) {
+    closeImportModal();
+    const name = res.filePath.split(/[\\/]/).pop();
+    const destSlides = editor.slides();
+    const cur = currentSlideEl();
+    const curIdx = destSlides.indexOf(cur);
+    const dw = destSlides[0] && destSlides[0].offsetWidth;
+    const dh = destSlides[0] && destSlides[0].offsetHeight;
+    const mismatch = dw && data.slides.some(s => Math.abs(s.w - dw) > 6 || Math.abs(s.h - dh) > 6);
+
+    const rows = data.slides.map((s, i) =>
+      `<label class="imp-item"><input type="checkbox" data-i="${i}" checked>` +
+      `<span class="imp-num">${i + 1}</span><span class="imp-title"></span></label>`).join('');
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML =
+      `<div class="modal">` +
+        `<div class="modal-head">📥 Import slides from <b></b></div>` +
+        `<div class="modal-body">` +
+          `<div class="imp-where">` +
+            `<label><input type="radio" name="imp-pos" value="after"${curIdx >= 0 ? ' checked' : ''}> ` +
+              `After current slide${curIdx >= 0 ? ' (' + (curIdx + 1) + ')' : ''}</label>` +
+            `<label><input type="radio" name="imp-pos" value="end"${curIdx < 0 ? ' checked' : ''}> At the end</label>` +
+          `</div>` +
+          `<div class="imp-tools"><button data-all>Select all</button><button data-none>Select none</button>` +
+            (mismatch ? `<span class="imp-warn">⚠ Slide size differs from this deck — layout / one-page-per-slide PDF may be affected.</span>` : '') +
+          `</div>` +
+          `<div class="imp-list">${rows}</div>` +
+        `</div>` +
+        `<div class="modal-foot">` +
+          `<button data-cancel>Cancel</button>` +
+          `<button class="primary" data-confirm>Import</button>` +
+        `</div>` +
+      `</div>`;
+    document.body.appendChild(backdrop);
+    importModal = backdrop;
+    // Fill titles/name as text so lecture content can't inject markup.
+    backdrop.querySelector('.modal-head b').textContent = name;
+    backdrop.querySelectorAll('.imp-item').forEach((row, i) => {
+      row.querySelector('.imp-title').textContent = data.slides[i].title;
+    });
+
+    const confirmBtn = backdrop.querySelector('[data-confirm]');
+    const checks = () => Array.from(backdrop.querySelectorAll('.imp-list input[type=checkbox]'));
+    const updateConfirm = () => {
+      const n = checks().filter(c => c.checked).length;
+      confirmBtn.textContent = n ? `Import ${n} slide${n > 1 ? 's' : ''}` : 'Import';
+      confirmBtn.disabled = !n;
+    };
+    backdrop.querySelector('[data-all]').addEventListener('click', () => { checks().forEach(c => c.checked = true); updateConfirm(); });
+    backdrop.querySelector('[data-none]').addEventListener('click', () => { checks().forEach(c => c.checked = false); updateConfirm(); });
+    backdrop.querySelector('.imp-list').addEventListener('change', updateConfirm);
+    const cancel = () => { closeImportModal(); status('Import cancelled.'); };
+    backdrop.querySelector('[data-cancel]').addEventListener('click', cancel);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) cancel(); });
+    confirmBtn.addEventListener('click', () => {
+      const chosen = checks().filter(c => c.checked).map(c => data.slides[+c.dataset.i]);
+      if (!chosen.length) return;
+      const pos = backdrop.querySelector('input[name=imp-pos]:checked').value;
+      const afterSlide = pos === 'after' ? (cur || destSlides.slice(-1)[0]) : destSlides.slice(-1)[0];
+      editor.importSlides(chosen.map(s => s.html), afterSlide, data.heads, name);
+      closeImportModal();
+      status(`Imported ${chosen.length} slide(s) from ${name}.`);
+    });
+    updateConfirm();
   }
 
   // ---------- Asset panel ----------
@@ -387,6 +605,71 @@
     beginPlace('table', 'Click where the table should go… (Esc cancels)'));
   $('#btn-save').addEventListener('click', saveHtml);
   $('#btn-export').addEventListener('click', exportPdf);
+
+  // ---------- MiM brand identity (one-click fonts + palette) ----------
+  const btnBrand = $('#btn-brand');
+  function updateBrandBtn() {
+    const on = !!(editor && editor.hasBrandTheme());
+    btnBrand.classList.toggle('active', on);
+    btnBrand.textContent = on ? '✨ MiM Identity ✓' : '✨ MiM Identity';
+    btnBrand.title = on
+      ? 'MiM identity applied — real ministry fonts + official palette. Click to revert to the original.'
+      : 'Apply the full MiM identity — real ministry fonts + official color palette. Click again to revert.';
+  }
+  btnBrand.addEventListener('click', async () => {
+    if (!editor) { status('Open a lecture first.'); return; }
+    if (editor.hasBrandTheme()) {
+      editor.removeBrandTheme();
+      updateBrandBtn();
+      status('Reverted to the original fonts and colors.');
+      return;
+    }
+    if (!brandFonts) {
+      status('Loading ministry fonts…');
+      try { brandFonts = await window.api.getFonts(); } catch (_) { brandFonts = []; }
+    }
+    editor.applyBrandTheme(brandFonts);
+    updateBrandBtn();
+    status(brandFonts.length
+      ? 'Applied MiM identity — real fonts + official palette (off-brand gold → ministry pink). Click again to compare with the original.'
+      : 'Applied MiM palette. (Fonts folder not found — colors only.)');
+  });
+
+  // ---------- Lecture Studio (docked AI enrichment panel) ----------
+  $('#btn-enrich').addEventListener('click', () => {
+    if (!editor) { status('Open a lecture first.'); return; }
+    if (window.Studio) window.Studio.toggle();
+  });
+
+  // Scroll the stage so a node inside the editor iframe is centered — used by
+  // Studio to bring a ghost preview into view. getBoundingClientRect inside the
+  // iframe is content-local, so map it through the iframe's on-screen position
+  // and effective zoom.
+  function revealInStage(node) {
+    if (!node || !editor || !editor.iframe) return;
+    const ifr = editor.iframe;
+    const ir = ifr.getBoundingClientRect();
+    const scale = ir.width / (ifr.offsetWidth || ir.width) || 1;
+    let nr;
+    try { nr = node.getBoundingClientRect(); } catch (_) { return; }
+    const sr = stage.getBoundingClientRect();
+    const screenY = ir.top + nr.top * scale;
+    const target = stage.scrollTop + (screenY - sr.top) - stage.clientHeight / 2 + (nr.height * scale) / 2;
+    stage.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+  }
+  window.__revealInStage = revealInStage;
+
+  // ---------- Brand Kit (custom fonts + palette) ----------
+  $('#btn-brandkit').addEventListener('click', () => {
+    if (!editor) { status('Open a lecture first.'); return; }
+    if (window.BrandKit) window.BrandKit.open();
+  });
+
+  // ---------- Settings (API keys) ----------
+  $('#btn-settings').addEventListener('click', () => {
+    if (window.Settings) window.Settings.open();
+  });
+
   btnUndo.addEventListener('click', () => editor && editor.undo());
   btnRedo.addEventListener('click', () => editor && editor.redo());
 
@@ -401,6 +684,8 @@
     editor.duplicateSlide(currentSlideEl());
     status('Slide duplicated.');
   });
+  $('#btn-slide-import').addEventListener('click', importSlidesFlow);
+  window.__importFlow = importSlidesFlow; // hook for automated tests
   $('#btn-slide-del').addEventListener('click', () => {
     if (!editor) { status('Open a lecture first.'); return; }
     const s = currentSlideEl();
@@ -441,6 +726,7 @@
     const auto = await window.api.autoOpen();
     if (auto) {
       currentFile = auto;
+      window.__currentFile = auto;
       loadIntoIframe(auto.content, auto.dir);
       status('Opened: ' + auto.filePath);
       return;
@@ -456,6 +742,7 @@
       btn.title = last.filePath;
       btn.addEventListener('click', () => {
         currentFile = last;
+        window.__currentFile = last;
         loadIntoIframe(last.content, last.dir);
         status('Opened: ' + last.filePath);
       });

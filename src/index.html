@@ -24,9 +24,22 @@
     </div>
 
     <div class="group">
+      <span class="glabel">Brand</span>
+      <button id="btn-brand" title="Apply the full MiM identity — real ministry fonts + official color palette. Click again to revert.">✨ MiM Identity</button>
+      <button id="btn-brandkit" title="Bring your own brand: upload fonts and recolor this lecture's palette, save it as a reusable kit.">🎨 Brand Kit</button>
+    </div>
+
+    <div class="group">
+      <span class="glabel">AI</span>
+      <button id="btn-enrich" title="Lecture Studio — scan the lecture, review AI suggestions, and generate only what you approve.">🎬 Studio</button>
+      <button id="btn-settings" title="API keys &amp; settings">⚙️</button>
+    </div>
+
+    <div class="group">
       <span class="glabel">Slide</span>
       <button id="btn-slide-add" title="Add a new blank slide after the current one">＋ Slide</button>
       <button id="btn-slide-dup" title="Duplicate the current slide">⧉ Duplicate</button>
+      <button id="btn-slide-import" title="Import slides from another HTML lecture and merge them in">📥 Import</button>
       <button id="btn-slide-del" class="danger-outline" title="Delete the current slide">🗑 Slide</button>
     </div>
 
@@ -80,7 +93,21 @@
     <span id="slide-info"></span>
   </div>
 
+  <script>
+    // MathJax renders equations to self-contained SVG, offline and free.
+    window.MathJax = { startup: { typeset: false }, svg: { fontCache: 'none' } };
+  </script>
+  <script src="../node_modules/mathjax/es5/tex-svg.js"></script>
   <script src="editor.js"></script>
+  <script src="enrich/charts.js"></script>
+  <script src="enrich/diagrams.js"></script>
+  <script src="enrich/pipeline.js"></script>
+  <script src="studio/panel.js"></script>
+  <script src="studio/diagramEditor.js"></script>
+  <script src="studio/imageCard.js"></script>
+  <script src="studio/wand.js"></script>
+  <script src="settings.js"></script>
+  <script src="brandkit.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

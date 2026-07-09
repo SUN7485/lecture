@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy this file to config.json (gitignored) and fill in your keys. NVIDIA powers text/diagram/chart reasoning (GLM); Gemini powers photo generation. Charts and equations work with NO keys at all.",
+  "nvidia": {
+    "apiKey": "nvapi-...",
+    "baseUrl": "https://integrate.api.nvidia.com/v1",
+    "textModel": "z-ai/glm-5.2",
+    "_reviewModel_hint": "Optional. GLM-5.2 is a slow reasoner; set a fast instruct model here for the whole-lecture review pass, e.g. 'meta/llama-3.3-70b-instruct'. Empty = use textModel.",
+    "reviewModel": ""
+  },
+  "gemini": {
+    "apiKey": "",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+    "imageModel": "imagen-3.0-generate-002"
+  }
+}

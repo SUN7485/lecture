@@ -13,6 +13,7 @@
     .ve-slot.ve-align-left { text-align: left; }
     .ve-slot.ve-align-right { text-align: right; }
     .ve-slot img { max-width: 100%; height: auto; }
+    .ve-slot figcaption { font-size: 13px; color: #555; text-align: center; margin-top: 6px; }
   `;
 
   const EDITOR_CSS = `
@@ -60,9 +61,67 @@
     .ve-toolbar button.primary { background: #2f6df6; }
     .ve-toolbar button.primary:hover { background: #4a82ff; }
     .ve-toolbar button.danger:hover { background: #c0392b; }
+    .ve-toolbar button.wand { background: #6d4bd6; }
+    .ve-toolbar button.wand:hover { background: #855ff0; }
+    /* Wand menu: point-of-work AI actions, styled like the color palette. */
+    .ve-wandmenu {
+      position: absolute; z-index: 2147483003; display: flex; flex-direction: column;
+      gap: 4px; background: #1f2430; color: #fff; padding: 6px; border-radius: 10px;
+      box-shadow: 0 6px 18px rgba(0,0,0,.35); min-width: 180px;
+      font: 12px -apple-system, "Segoe UI", sans-serif;
+    }
+    .ve-wandmenu button {
+      background: #333a49; color: #fff; border: none; border-radius: 6px;
+      padding: 7px 9px; cursor: pointer; font: inherit; text-align: start;
+      display: flex; justify-content: space-between; gap: 10px; align-items: center;
+    }
+    .ve-wandmenu button:hover { background: #45506a; }
+    .ve-wandmenu .ve-wcost { font-size: 10px; color: #9aa4b8; }
+    .ve-wandmenu .ve-wcost.paid { color: #e0b060; }
+    /* Studio ghost preview: a live, in-place preview of a generated visual. */
+    .ve-ghost { position: relative; outline: 2px dashed var(--purple, #7c3aed); outline-offset: 3px; opacity: .85; pointer-events: none; animation: ve-ghost-in .18s ease; }
+    .ve-ghost::after { content: "معاينة"; position: absolute; top: -3px; inset-inline-start: -3px; background: var(--purple, #7c3aed); color: #fff; font: 600 11px "Segoe UI", system-ui, sans-serif; padding: 2px 9px; border-radius: 7px; z-index: 6; pointer-events: none; }
+    .ve-ghost-hidden { display: none !important; }
+    @keyframes ve-ghost-in { from { opacity: 0; transform: translateY(4px); } to { opacity: .85; transform: none; } }
   `;
 
   const BLOCK_TAGS = new Set(['P','DIV','H1','H2','H3','H4','H5','H6','UL','OL','LI','SECTION','ARTICLE','TABLE','BLOCKQUOTE','PRE','FIGURE','HR','IMG']);
+
+  // ---- MiM (Ministry of Industry) brand identity ----
+  // Fonts: each file key maps to a real family + weight. We register every
+  // weight under the clean family name AND under the "…Regular" alias the
+  // existing lectures already ask for — so old decks that say
+  // `font-family:'Lyon Arabic Regular'; font-weight:bold` pick the *real* Bold
+  // file instead of Windows fake-bolding a Regular. Keys match src/fonts/*.otf.
+  const BRAND_FONTS = {
+    'diodrum-extralight': { fam: 'Diodrum Arabic', weight: 200 },
+    'diodrum-light':      { fam: 'Diodrum Arabic', weight: 300 },
+    'diodrum-regular':    { fam: 'Diodrum Arabic', weight: 400 },
+    'diodrum-medium':     { fam: 'Diodrum Arabic', weight: 500 },
+    'diodrum-semibold':   { fam: 'Diodrum Arabic', weight: 600 },
+    'diodrum-bold':       { fam: 'Diodrum Arabic', weight: 700 },
+    'lyon-regular':       { fam: 'Lyon Arabic Text', weight: 400 },
+    'lyon-semibold':      { fam: 'Lyon Arabic Text', weight: 600 },
+    'lyon-bold':          { fam: 'Lyon Arabic Text', weight: 700 },
+    'lyon-black':         { fam: 'Lyon Arabic Text', weight: 900 },
+  };
+  const FONT_ALIASES = {
+    'Diodrum Arabic': ['Diodrum Arabic Regular'],
+    'Lyon Arabic Text': ['Lyon Arabic Regular'],
+  };
+
+  // Official MiM palette (brand book, pages 30–34). The lecture already uses
+  // var(--purple)/var(--cyan)/var(--gold) etc., so overriding :root recolors
+  // everything. Note --gold is deliberately mapped to MiM Pink #BFA19F: gold
+  // is NOT a ministry color; pink is the real third accent. Purple-tint tokens
+  // let hardcoded fades (e.g. the title-button shadow) track the base color.
+  const BRAND_PALETTE_CSS = `:root{
+  --purple:#413258; --cyan:#1AD9C7; --pink:#BFA19F; --gold:#BFA19F;
+  --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
+  --grey-dark:#666666; --grey-mid:#B3B3B3; --grey-light:#E6E6E6;
+  --purple-70:rgba(65,50,88,.70); --purple-40:rgba(65,50,88,.40);
+  --purple-15:rgba(65,50,88,.15); --purple-08:rgba(65,50,88,.08);
+}`;
 
   class LectureEditor {
     constructor() {
@@ -142,6 +201,10 @@
       // toolbars/handles into the document.
       const clone = this.doc.body.cloneNode(true);
       clone.querySelectorAll('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-guide').forEach(n => n.remove());
+      // Studio ghost previews are transient — never let one survive into an
+      // undo/redo snapshot (or it would resurrect on undo).
+      clone.querySelectorAll('.ve-ghost').forEach(n => n.remove());
+      clone.querySelectorAll('.ve-ghost-hidden').forEach(n => n.classList.remove('ve-ghost-hidden'));
       clone.querySelectorAll('.ve-selected').forEach(n => n.classList.remove('ve-selected'));
       clone.querySelectorAll('[contenteditable], .ve-editing').forEach(n => {
         n.removeAttribute('contenteditable');
@@ -150,6 +213,10 @@
       return clone.innerHTML;
     }
     _pushHistory() {
+      // Figure numbers («شكل N») follow document order; recompute before every
+      // snapshot so insert/delete/move keeps them correct — and undo/redo
+      // states always carry consistent numbering.
+      try { this.renumberFigures(); } catch (_) {}
       this.undoStack.push(this._snapshot());
       if (this.undoStack.length > 100) this.undoStack.shift();
       this.redoStack = [];
@@ -389,7 +456,7 @@
       if (!e.target.closest) return;
       // A just-finished free-drag ends with a click; keep the current selection.
       if (this._justDragged) { this._justDragged = false; e.preventDefault(); e.stopPropagation(); return; }
-      if (e.target.closest('.ve-toolbar, .ve-handle, .ve-overlay, .ve-palette')) return;
+      if (e.target.closest('.ve-toolbar, .ve-handle, .ve-overlay, .ve-palette, .ve-wandmenu')) return;
       if (this._placeType) {
         e.preventDefault();
         e.stopPropagation();
@@ -404,6 +471,14 @@
       if (img) {
         e.preventDefault();
         this.select(img);
+        return;
+      }
+      // Generated charts/diagrams are <svg>; select the svg so it can be moved,
+      // aligned, layered and deleted exactly like an inserted image.
+      const svg = e.target.closest('svg');
+      if (svg) {
+        e.preventDefault();
+        this.select(svg);
         return;
       }
       const block = this._selectableBlock(e.target);
@@ -455,6 +530,7 @@
       if (this.overlay) { this.overlay.remove(); this.overlay = null; }
       if (this.toolbar) { this.toolbar.remove(); this.toolbar = null; }
       this._closePalette();
+      this._closeWandMenu();
     }
 
     _buildOverlay() {
@@ -514,6 +590,10 @@
           <button data-act="coldel" title="Remove the last column">−Col</button>` : '';
         const editBtn = this._isTextEditable(this.selected)
           ? `<button data-act="edit" class="primary" title="Edit the words (or double-click the text)">✏ Edit text</button>` : '';
+        // ✨ point-of-work AI: only offer it when the wand module finds an
+        // action for this selection (list→diagram, table→chart, formula, image).
+        const wandBtn = (window.Wand && window.Wand.actionsFor(this.selected).length)
+          ? `<button data-act="wand" class="wand" title="حوّل هذا العنصر بالذكاء (✨)">✨</button>` : '';
         const canFloat = this._canFloat(this.selected);
         const dragHint = canFloat
           ? `<span class="ve-tag" title="Drag to move it anywhere on the slide (arrow keys nudge)">✥ move</span>` : '';
@@ -524,6 +604,7 @@
         this.toolbar.innerHTML = `
           <span class="ve-tag">${label}</span>
           ${dragHint}
+          ${wandBtn}
           ${editBtn}
           <button data-act="color" title="Text color">🎨</button>
           <button data-act="fill" title="Fill / background color">🖌</button>
@@ -539,6 +620,7 @@
         const act = btn && btn.dataset.act;
         if (!act) return;
         if (act === 'delete') this.deleteSelected();
+        else if (act === 'wand') this._showWandMenu();
         else if (act === 'edit') this._startTextEdit(this.selected);
         else if (act === 'replace') this.onReplaceRequest && this.onReplaceRequest(this.selected);
         else if (act === 'parent') {
@@ -587,6 +669,49 @@
 
     _closePalette() {
       if (this._palette) { this._palette.remove(); this._palette = null; }
+    }
+
+    // ---------- wand menu (point-of-work AI) ----------
+    // A small popup of the actions Wand offers for the current selection. The
+    // heavy lifting (offline parse → pipeline proposal → Studio card + ghost)
+    // lives in studio/wand.js; the editor just renders the menu in the iframe.
+    _showWandMenu() {
+      this._closeWandMenu();
+      if (!this.selected || !window.Wand) return;
+      const acts = window.Wand.actionsFor(this.selected);
+      if (!acts.length) return;
+      const el = this.selected;                 // capture — actions run async
+      const doc = this.doc;
+      const menu = doc.createElement('div');
+      menu.className = 've-wandmenu';
+      acts.forEach(a => {
+        const b = doc.createElement('button');
+        b.innerHTML = `<span>${a.label}</span>` +
+          `<span class="ve-wcost${a.cost === 'paid' ? ' paid' : ''}">${a.cost === 'paid' ? '🪙 صورة' : 'مجاني'}</span>`;
+        b.addEventListener('click', () => { this._closeWandMenu(); window.Wand.run(a.id, el); });
+        menu.appendChild(b);
+      });
+      menu.style.left = this.toolbar.style.left;
+      menu.style.top = (parseFloat(this.toolbar.style.top) + 38) + 'px';
+      doc.body.appendChild(menu);
+      this._wandMenu = menu;
+    }
+    _closeWandMenu() {
+      if (this._wandMenu) { this._wandMenu.remove(); this._wandMenu = null; }
+    }
+
+    // Stamp (or reuse) a stable data-ve-id so a wand proposal can anchor its
+    // insert back to this exact element after DOM moves. Mirrors enrichTargets.
+    ensureTargetId(el) {
+      if (!el) return null;
+      let id = el.getAttribute('data-ve-id');
+      if (!id) { this._veId = (this._veId || 0) + 1; id = 'vw' + this._veId; el.setAttribute('data-ve-id', id); }
+      return id;
+    }
+    // Index of the slide containing el, in slides() order (-1 if none).
+    slideIndexOf(el) {
+      const s = this._slideOf(el);
+      return s ? this.slides().indexOf(s) : -1;
     }
 
     _applyColor(mode, c) {
@@ -642,7 +767,7 @@
     slides() {
       return Array.from(this.doc.body.children).filter(el =>
         el.nodeType === 1 &&
-        !el.matches('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-palette, .ve-guide') &&
+        !el.matches('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-palette, .ve-wandmenu, .ve-guide, .ve-ghost') &&
         el.offsetHeight > 150 && el.offsetWidth > 200);
     }
 
@@ -651,7 +776,8 @@
       c.querySelectorAll('.ve-selected').forEach(n => n.classList.remove('ve-selected'));
       c.querySelectorAll('.ve-editing').forEach(n => n.classList.remove('ve-editing'));
       c.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
-      c.querySelectorAll('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-palette, .ve-guide').forEach(n => n.remove());
+      c.querySelectorAll('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-palette, .ve-wandmenu, .ve-guide, .ve-ghost').forEach(n => n.remove());
+      c.querySelectorAll('.ve-ghost-hidden').forEach(n => n.classList.remove('ve-ghost-hidden'));
       return c;
     }
 
@@ -713,6 +839,69 @@
       this.onSlidesChanged && this.onSlidesChanged(next || null);
     }
 
+    // Reorder: move a slide to a new position. `targetIndex` is the desired
+    // 0-based index among the OTHER slides (i.e. where it lands once itself is
+    // taken out). Numbering everywhere derives from DOM order, so a single
+    // DOM move is all it takes — the navigator and "Slide N / M" follow.
+    moveSlide(slideEl, targetIndex) {
+      const slides = this.slides();
+      const from = slides.indexOf(slideEl);
+      if (from < 0 || slides.length < 2) return;
+      const rest = slides.filter(s => s !== slideEl);
+      const to = Math.max(0, Math.min(rest.length, targetIndex));
+      if (to === from) return;                 // already in place
+      const ref = rest[to] || null;            // insert before this (null = end)
+      if (ref) ref.before(slideEl);
+      else rest[rest.length - 1].after(slideEl);
+      this._pushHistory();
+      this.onSlidesChanged && this.onSlidesChanged(slideEl);
+    }
+
+    // Merge <style>/<link rel=stylesheet> from an imported file into our <head>,
+    // skipping any we already have (dedup by CSS text / href). Like the brand
+    // theme, these live in <head> so getCleanHtml keeps them for save + export.
+    _mergeImportedHead(headHtmlList, sourceName) {
+      const holder = this.doc.createElement('div');
+      for (const h of (headHtmlList || [])) {
+        holder.innerHTML = h;
+        const node = holder.firstElementChild;
+        if (!node) continue;
+        let dup = false;
+        if (node.tagName === 'STYLE') {
+          const txt = node.textContent.trim();
+          dup = Array.from(this.doc.head.querySelectorAll('style'))
+            .some(s => s.textContent.trim() === txt);
+        } else if (node.tagName === 'LINK') {
+          dup = Array.from(this.doc.head.querySelectorAll('link[rel~="stylesheet"]'))
+            .some(l => l.href === node.href);
+        }
+        if (dup) continue;
+        node.setAttribute('data-ve-import', sourceName || '1');
+        this.doc.head.appendChild(node);
+      }
+    }
+
+    // Merge slides from another lecture. `htmlList` = each slide's outerHTML
+    // (image URLs already absolutized by the caller); inserted after
+    // `afterSlide`, or appended if that's null. Returns the inserted elements.
+    importSlides(htmlList, afterSlide, headHtmlList, sourceName) {
+      if (!htmlList || !htmlList.length) return null;
+      this._mergeImportedHead(headHtmlList, sourceName);
+      const holder = this.doc.createElement('div');
+      holder.innerHTML = htmlList.join('\n');
+      const inserted = Array.from(holder.children);
+      if (!inserted.length) return null;
+      let anchor = afterSlide || this.slides().slice(-1)[0] || null;
+      for (const node of inserted) {
+        if (anchor) { anchor.after(node); anchor = node; }
+        else { this.doc.body.appendChild(node); anchor = node; }
+      }
+      this._pushHistory();
+      this.select(inserted[0]);
+      this.onSlidesChanged && this.onSlidesChanged(inserted[0]);
+      return inserted;
+    }
+
     _reposition() {
       if (!this.selected || !this.overlay) return;
       const r = this.selected.getBoundingClientRect();
@@ -733,6 +922,7 @@
       }
       this.toolbar.style.left = left + 'px';
       this.toolbar.style.top = Math.max(0, top - 40) + 'px';
+      this._closeWandMenu();   // avoid drift on scroll/resize; reopen from ✨
     }
 
     // ---------- resize ----------
@@ -997,7 +1187,7 @@
         if (!parent) return;
         for (const c of parent.children) {
           if (c === unit || c.contains(unit)) continue;
-          if (c.matches && c.matches('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-guide, .ve-palette, style, script')) continue;
+          if (c.matches && c.matches('.ve-overlay, .ve-toolbar, .ve-insert-line, .ve-guide, .ve-palette, .ve-wandmenu, style, script')) continue;
           const r = c.getBoundingClientRect();
           if (r.width < 4 || r.height < 4) continue;
           out.push(c);
@@ -1223,16 +1413,635 @@
       return img;
     }
 
+    // ---------- theme kits (MiM preset + customer-brought brands) ----------
+    // A "theme kit" is one managed <style id="ve-theme" data-kit="name"> in
+    // <head> holding @font-face (fonts as data: URLs) + a :root palette
+    // override. It survives undo/redo and is carried into save + PDF export by
+    // getCleanHtml (which never strips <head>). Only one kit is active at a
+    // time; MiM is just the built-in preset built on this same machinery.
+    //   kit = { name, fonts:[{family,weight,style,b64,ext}], vars:{'--x':'#..'} }
+    //         (or varsCss for a raw :root{} block, used by the MiM preset)
+    hasBrandTheme() {
+      const s = this.doc && this.doc.getElementById('ve-theme');
+      return !!(s && s.dataset.kit === 'MiM');
+    }
+    activeThemeKit() {
+      const s = this.doc && this.doc.getElementById('ve-theme');
+      return s ? (s.dataset.kit || 'custom') : null;
+    }
+
+    _fontFace(f) {
+      if (!f || !f.b64 || !f.family) return '';
+      const ext = (f.ext || 'otf').toLowerCase();
+      const fmt = ext === 'ttf' ? 'truetype' : ext === 'woff2' ? 'woff2' : ext === 'woff' ? 'woff' : 'opentype';
+      const mime = ext === 'ttf' ? 'font/ttf' : ext === 'woff2' ? 'font/woff2' : ext === 'woff' ? 'font/woff' : 'font/otf';
+      return `@font-face{font-family:'${String(f.family).replace(/'/g, '')}';` +
+        `font-weight:${f.weight || 400};font-style:${f.style || 'normal'};font-display:swap;` +
+        `src:url(data:${mime};base64,${f.b64}) format('${fmt}');}`;
+    }
+    _varsToCss(vars) {
+      if (!vars) return '';
+      const decls = Object.keys(vars).map(k => `${k}:${vars[k]};`).join('');
+      return decls ? `:root{${decls}}` : '';
+    }
+
+    applyThemeKit(kit) {
+      if (!this.doc || !kit) return;
+      const faces = (kit.fonts || []).map(f => this._fontFace(f)).filter(Boolean).join('\n');
+      const varsCss = kit.varsCss != null ? kit.varsCss : this._varsToCss(kit.vars);
+      let style = this.doc.getElementById('ve-theme');
+      if (!style) { style = this.doc.createElement('style'); style.id = 've-theme'; }
+      style.dataset.kit = kit.name || 'custom';
+      // Append last so its :root wins over the lecture's own :root.
+      style.textContent = faces + '\n' + varsCss;
+      this.doc.head.appendChild(style);
+      this._reflowAfterFonts();
+    }
+    removeThemeKit() {
+      const style = this.doc && this.doc.getElementById('ve-theme');
+      if (style) style.remove();
+      this._reflowAfterFonts();
+    }
+
+    // MiM preset — a one-click shortcut layered on the general kit system.
+    // `fonts` = [{ name:'diodrum-bold', b64:'…' }] read from src/fonts by main.
+    applyBrandTheme(rawFonts) {
+      const fonts = [];
+      for (const f of (rawFonts || [])) {
+        const spec = BRAND_FONTS[f.name];
+        if (!spec || !f.b64) continue;
+        for (const fam of [spec.fam, ...(FONT_ALIASES[spec.fam] || [])]) {
+          fonts.push({ family: fam, weight: spec.weight, style: 'normal', b64: f.b64, ext: 'otf' });
+        }
+      }
+      this.applyThemeKit({ name: 'MiM', fonts, varsCss: BRAND_PALETTE_CSS });
+    }
+    removeBrandTheme() { this.removeThemeKit(); }
+
+    // The CSS custom properties the loaded lecture declares (name + effective
+    // value). This is what a customer recolors — it works for ANY variable-based
+    // template without the app knowing the variable names in advance.
+    detectVars() {
+      const seen = new Map();
+      for (const sheet of this.doc.styleSheets) {
+        let rules; try { rules = sheet.cssRules; } catch (_) { continue; }
+        for (const rule of rules || []) {
+          if (!rule.style || !rule.selectorText) continue;
+          const sel = rule.selectorText;
+          if (!/:root/.test(sel) && sel !== 'html' && sel !== 'body') continue;
+          for (const name of rule.style) {
+            if (name.startsWith('--')) {
+              const v = rule.style.getPropertyValue(name).trim();
+              if (v && !seen.has(name)) seen.set(name, v);
+            }
+          }
+        }
+      }
+      const root = this.win.getComputedStyle(this.doc.documentElement);
+      const out = [];
+      for (const [name, declared] of seen) {
+        const eff = (root.getPropertyValue(name).trim()) || declared;
+        out.push({ name, value: eff, declared });
+      }
+      return out;
+    }
+
+    // Font families the lecture references — offered as alias targets so a
+    // customer can map "render this family with MY uploaded font".
+    detectFontFamilies() {
+      const fams = new Set();
+      const add = (v) => {
+        if (!v) return;
+        v.split(',').forEach(part => {
+          const f = part.trim().replace(/^['"]|['"]$/g, '');
+          if (f && !/^(inherit|initial|unset|sans-serif|serif|monospace|system-ui|-apple-system|cursive|fantasy)$/i.test(f)) fams.add(f);
+        });
+      };
+      for (const sheet of this.doc.styleSheets) {
+        let rules; try { rules = sheet.cssRules; } catch (_) { continue; }
+        for (const rule of rules || []) {
+          if (rule.style && rule.style.fontFamily) add(rule.style.fontFamily);
+        }
+      }
+      this.doc.querySelectorAll('[style*="font-family"]').forEach(el => add(el.style.fontFamily));
+      return [...fams].slice(0, 24);
+    }
+
+    // Swapping fonts changes text metrics; re-measure once they're ready so the
+    // iframe height (and zoom fit) stays correct.
+    _reflowAfterFonts() {
+      this._sizeToContent();
+      this._reposition();
+      try {
+        if (this.doc.fonts && this.doc.fonts.ready) {
+          this.doc.fonts.ready.then(() => { this._sizeToContent(); this._reposition(); });
+        }
+      } catch (_) {}
+    }
+
+    // ---------- enrichment (auto-generated charts / diagrams / images) --------
+    _isRtl() {
+      return (this.doc.documentElement.lang || '').toLowerCase().startsWith('ar')
+        || this.doc.documentElement.dir === 'rtl'
+        || this.win.getComputedStyle(this.doc.body).direction === 'rtl';
+    }
+
+    // Everything a generator needs to stay on-brand: the lecture's palette
+    // (resolved values), text direction, and a font stack that matches the deck.
+    themeContext() {
+      const rtl = this._isRtl();
+      // Resolve --var values to concrete colors so generated SVG is self-contained.
+      const root = this.win.getComputedStyle(this.doc.documentElement);
+      const named = ['--purple', '--cyan', '--gold', '--pink', '--dark'];
+      const resolved = named
+        .map(n => root.getPropertyValue(n).trim())
+        .filter(v => /^#|^rgb|^hsl/i.test(v));
+      const palette = [...new Set(resolved.length ? resolved : this.themeColors())];
+      const bodyFont = this.win.getComputedStyle(this.doc.body).fontFamily;
+      return {
+        rtl,
+        palette,
+        fontFamily: bodyFont || "'Diodrum Arabic','Cairo',sans-serif"
+      };
+    }
+
+    // A compact per-slide summary for the AI analysis pass. Text only — no HTML.
+    slidesDigest() {
+      return this.slides().map((s, i) => {
+        const h1 = (s.querySelector('h1') || {}).textContent || '';
+        const h2 = (s.querySelector('h2') || {}).textContent || '';
+        const content = s.querySelector('.content') || s;
+        const text = content.textContent.replace(/\s+/g, ' ').trim().slice(0, 700);
+        const placeholders = Array.from(s.querySelectorAll('[class*="placeholder"]')).map(p => ({
+          text: p.textContent.replace(/\s+/g, ' ').trim().slice(0, 220),
+          hasImg: !!p.querySelector('img')
+        }));
+        const tables = s.querySelectorAll('table').length;
+        return { i, h1: h1.trim(), h2: h2.trim(), text, placeholders, tables };
+      });
+    }
+
+    // Live enrichment candidates with real element references, so results can be
+    // applied back to the exact spot. Placeholders = image/diagram slots; tables
+    // = chart sources. A stable data-ve-id is stamped on each so the review
+    // drawer can address them.
+    enrichTargets() {
+      const out = [];
+      let n = 0;
+      this.slides().forEach((s, i) => {
+        s.querySelectorAll('[class*="placeholder"]').forEach(ph => {
+          if (!ph.getAttribute('data-ve-id')) ph.setAttribute('data-ve-id', 've' + (++n));
+          out.push({
+            id: ph.getAttribute('data-ve-id'), kind: 'placeholder', el: ph,
+            slideEl: s, slideIndex: i,
+            text: ph.textContent.replace(/\s+/g, ' ').trim(),
+            hasImg: !!ph.querySelector('img'),
+            done: ph.getAttribute('data-ve-done') === '1',
+            rect: { w: ph.offsetWidth || 0, h: ph.offsetHeight || 0 }
+          });
+        });
+        s.querySelectorAll('table').forEach(tb => {
+          if (tb.closest('[data-ve-figlist]')) return;   // the references table itself
+          if (!tb.getAttribute('data-ve-id')) tb.setAttribute('data-ve-id', 've' + (++n));
+          out.push({
+            id: tb.getAttribute('data-ve-id'), kind: 'table', el: tb,
+            slideEl: s, slideIndex: i,
+            done: tb.getAttribute('data-ve-done') === '1'
+          });
+        });
+      });
+      return out;
+    }
+
+    // Find a live target element again from its data-ve-id (survives DOM moves).
+    targetById(id) {
+      return this.doc.querySelector('[data-ve-id="' + CSS.escape(id) + '"]');
+    }
+
+    // Drop a generated visual into the document. `html` is an <svg>…</svg> or an
+    // <img>. It is wrapped in the same figure.ve-slot images use, so it inherits
+    // drag / align / layer / delete for free, and tagged data-ve-generated.
+    //   target: { mode:'replace'|'after'|'append', el?, slideEl?, kind? }
+    //   extra:  { caption } — a caption makes it a NUMBERED figure («شكل N — …»)
+    //           that participates in auto-renumbering and the references slide.
+    insertGenerated(html, target = {}, extra = {}) {
+      const tmp = this.doc.createElement('div');
+      tmp.innerHTML = String(html).trim();
+      const node = tmp.firstElementChild;
+      if (!node) return null;
+      if (node.tagName.toLowerCase() === 'svg') {
+        node.style.maxWidth = '100%';
+        node.style.height = 'auto';
+        node.removeAttribute('width');   // let it scale to the slot
+      }
+      const fig = this.doc.createElement('figure');
+      fig.className = 've-slot';
+      fig.setAttribute('data-ve-generated', target.kind || 'visual');
+      // Tie the figure back to its Studio proposal so it can be regenerated,
+      // retyped or removed later (not a one-shot insert).
+      if (target.propId) fig.setAttribute('data-ve-prop', target.propId);
+      fig.appendChild(node);
+      if (extra.caption) {
+        fig.setAttribute('data-ve-figure', '');
+        fig.setAttribute('data-ve-caption', extra.caption);
+        const cap = this.doc.createElement('figcaption');
+        fig.appendChild(cap);   // text filled by renumberFigures below
+      }
+
+      if (target.mode === 'replace' && target.el) {
+        target.el.parentElement.insertBefore(fig, target.el);
+        target.el.remove();
+      } else if (target.mode === 'after' && target.el) {
+        target.el.parentElement.insertBefore(fig, target.el.nextSibling);
+      } else {
+        // Append into a slide (whole-lecture "inside the slide" placement).
+        // Slides are fixed-height with overflow hidden, so cap the visual and
+        // let the user resize/move it rather than let it blow past the edge.
+        if (target.mode === 'append') {
+          const vis = fig.querySelector('img, svg');
+          if (vis) vis.style.maxHeight = (target.maxHeight || 260) + 'px';
+        }
+        const c = (target.slideEl && target.slideEl.querySelector('.content')) || target.slideEl || this.doc.body;
+        c.appendChild(fig);
+      }
+      this._pushHistory();
+      const inner = fig.querySelector('img, svg') || node;
+      if (inner.tagName === 'IMG' && !inner.complete) {
+        inner.addEventListener('load', () => { this._sizeToContent(); this.select(inner); }, { once: true });
+      } else {
+        this._sizeToContent();
+        this.select(inner);
+      }
+      this.onSlidesChanged && this.onSlidesChanged(null);
+      return inner;
+    }
+
+    // The already-inserted figure element for a Studio proposal (or null).
+    figureByProp(propId) {
+      return propId ? this.doc.querySelector('figure[data-ve-prop="' + CSS.escape(propId) + '"]') : null;
+    }
+
+    // Swap an inserted figure's visual IN PLACE — keeps its position, size and
+    // any drag/float the user applied. Used to regenerate / retype without
+    // losing where the figure sits. Returns the new inner element.
+    replaceFigureContent(propId, html, caption, kind) {
+      const fig = this.figureByProp(propId);
+      if (!fig) return null;
+      const tmp = this.doc.createElement('div');
+      tmp.innerHTML = String(html).trim();
+      const node = tmp.firstElementChild;
+      if (!node) return null;
+      if (node.tagName.toLowerCase() === 'svg') {
+        node.style.maxWidth = '100%';
+        node.style.height = 'auto';
+        node.removeAttribute('width');
+      }
+      const oldVis = fig.querySelector(':scope > img, :scope > svg');
+      if (oldVis) oldVis.replaceWith(node);
+      else fig.insertBefore(node, fig.firstChild);
+      if (kind) fig.setAttribute('data-ve-generated', kind);   // keep source label right after a retype
+      if (caption != null) this._setFigureCaptionEl(fig, caption);
+      this._pushHistory();
+      const inner = fig.querySelector('img, svg') || node;
+      if (inner.tagName === 'IMG' && !inner.complete) {
+        inner.addEventListener('load', () => { this._sizeToContent(); this.select(inner); }, { once: true });
+      } else { this._sizeToContent(); this.select(inner); }
+      this.onSlidesChanged && this.onSlidesChanged(null);
+      return inner;
+    }
+
+    // Remove an inserted figure from the document (undo of an insert).
+    removeFigure(propId) {
+      const fig = this.figureByProp(propId);
+      if (!fig) return false;
+      if (this.selected && fig.contains(this.selected)) this._deselect();
+      fig.remove();
+      this._pushHistory();
+      this.onSlidesChanged && this.onSlidesChanged(null);
+      return true;
+    }
+
+    _setFigureCaptionEl(fig, caption) {
+      if (caption) {
+        fig.setAttribute('data-ve-figure', '');
+        fig.setAttribute('data-ve-caption', caption);
+        if (!fig.querySelector('figcaption')) fig.appendChild(this.doc.createElement('figcaption'));
+      } else {
+        fig.removeAttribute('data-ve-figure');
+        fig.removeAttribute('data-ve-caption');
+        const cap = fig.querySelector('figcaption');
+        if (cap) cap.remove();
+      }
+    }
+
+    // Live-edit an inserted figure's caption (renumbers «شكل N» across the deck).
+    setFigureCaption(propId, caption) {
+      const fig = this.figureByProp(propId);
+      if (!fig) return false;
+      this._setFigureCaptionEl(fig, caption);
+      this._pushHistory();
+      return true;
+    }
+
+    // Build a figure.ve-slot wrapper (shared by the insert paths).
+    _makeFigure(html, o = {}) {
+      const tmp = this.doc.createElement('div');
+      tmp.innerHTML = String(html).trim();
+      const node = tmp.firstElementChild;
+      if (!node) return null;
+      if (node.tagName.toLowerCase() === 'svg') {
+        node.style.maxWidth = '100%';
+        node.style.height = 'auto';
+        node.removeAttribute('width');
+      }
+      const fig = this.doc.createElement('figure');
+      fig.className = 've-slot';
+      fig.setAttribute('data-ve-generated', o.kind || 'visual');
+      if (o.propId) fig.setAttribute('data-ve-prop', o.propId);
+      fig.appendChild(node);
+      if (o.caption) {
+        fig.setAttribute('data-ve-figure', '');
+        fig.setAttribute('data-ve-caption', o.caption);
+        fig.appendChild(this.doc.createElement('figcaption'));
+      }
+      return fig;
+    }
+
+    // Whole-lecture review "new slide" placement: a fresh slide holding just the
+    // generated figure, inserted right after its source slide. Clones the source
+    // slide's chrome (border, footer, fonts) so it's on-brand, then wipes the
+    // content. Marked data-ve-propslide so it can be regenerated/removed later.
+    insertGeneratedAsNewSlide(html, afterSlideEl, extra = {}) {
+      const fig = this._makeFigure(html, extra);
+      if (!fig) return null;
+      const ref = afterSlideEl || this.slides().slice(-1)[0];
+      let slide;
+      if (ref) {
+        slide = this._cleanClone(ref);
+        slide.querySelectorAll('.content img, .content table, .ve-slot, [data-ve-figure], [data-ve-generated]').forEach(n => n.remove());
+        slide.querySelectorAll('[data-ve-id], [data-ve-prop], [data-ve-done], [data-ve-propslide]').forEach(n => {
+          n.removeAttribute('data-ve-id'); n.removeAttribute('data-ve-prop');
+          n.removeAttribute('data-ve-done'); n.removeAttribute('data-ve-propslide');
+        });
+        const h2 = slide.querySelector('h2');
+        if (h2 && extra.caption) h2.textContent = extra.caption;
+        const content = slide.querySelector('.content') || slide;
+        content.innerHTML = '';
+        content.appendChild(fig);
+        ref.after(slide);
+      } else {
+        slide = this.doc.createElement('div');
+        slide.appendChild(fig);
+        this.doc.body.appendChild(slide);
+      }
+      if (extra.propId) slide.setAttribute('data-ve-propslide', extra.propId);
+      this._pushHistory();
+      const inner = fig.querySelector('img, svg');
+      if (inner && inner.tagName === 'IMG' && !inner.complete) {
+        inner.addEventListener('load', () => { this._sizeToContent(); this.select(inner); }, { once: true });
+      } else { this._sizeToContent(); if (inner) this.select(inner); }
+      this.onSlidesChanged && this.onSlidesChanged(slide);
+      return inner;
+    }
+
+    // The new slide created for a "new slide" extra (or null).
+    generatedSlideByProp(propId) {
+      return propId ? this.doc.querySelector('[data-ve-propslide="' + CSS.escape(propId) + '"]') : null;
+    }
+
+    // Anchor a whole-lecture "extra" to its SOURCE slide by element, not index —
+    // so inserting/removing other slides never makes it target the wrong slide.
+    // data-ve-src is a space-separated token list ([~=] matches one token).
+    markSourceSlide(slideEl, propId) {
+      if (!slideEl || !propId) return;
+      const toks = (slideEl.getAttribute('data-ve-src') || '').split(/\s+/).filter(Boolean);
+      if (!toks.includes(propId)) toks.push(propId);
+      slideEl.setAttribute('data-ve-src', toks.join(' '));
+    }
+    sourceSlideByProp(propId) {
+      return propId ? this.doc.querySelector('[data-ve-src~="' + propId + '"]') : null;
+    }
+
+    // Speaker notes — invisible per-slide text (Studio only). Never rendered
+    // into the slide body, never printed/exported visibly; stored as a plain
+    // attribute so it survives clone/save like any other data-ve-*.
+    setSpeakerNotes(slideEl, text) {
+      if (!slideEl) return;
+      const t = (text || '').trim();
+      if (t) slideEl.setAttribute('data-ve-notes', t);
+      else slideEl.removeAttribute('data-ve-notes');
+      this._pushHistory();
+    }
+    getSpeakerNotes(slideEl) {
+      return (slideEl && slideEl.getAttribute('data-ve-notes')) || '';
+    }
+    removeGeneratedSlide(propId) {
+      const slide = this.generatedSlideByProp(propId);
+      if (!slide) return false;
+      if (this.selected && slide.contains(this.selected)) this._deselect();
+      slide.remove();
+      this._pushHistory();
+      this.onSlidesChanged && this.onSlidesChanged(null);
+      return true;
+    }
+
+    // ---------- Studio ghost previews ----------
+    // A ghost is a live, in-place PREVIEW of a generated visual: a real figure
+    // (or a real new slide) dropped into the document exactly where an insert
+    // would land — so what the user previews IS what they get. It is tagged
+    // .ve-ghost so it is stripped from every history snapshot, save and export,
+    // is never numbered as a «شكل», and cannot be clicked/dragged. At most one
+    // ghost exists at a time. Apply performs the real insert (§pipeline.insert);
+    // discard just clears the ghost. Returns the ghost element for scroll-into-view.
+    //   g: { html, mode:'replace'|'after'|'append'|'newslide', el?, slideEl?,
+    //        afterSlideEl?, kind?, caption?, maxHeight? }
+    showGhost(g = {}) {
+      this.clearGhost();
+      const fig = this._makeFigure(g.html, { kind: g.kind, caption: g.caption });
+      if (!fig) return null;
+      // A ghost caption previews the label but must not join figure numbering.
+      fig.removeAttribute('data-ve-figure');
+      const cap = fig.querySelector('figcaption');
+      if (cap) cap.textContent = g.caption || '';
+
+      if (g.mode === 'newslide') {
+        const ref = g.afterSlideEl || this.slides().slice(-1)[0];
+        let slide;
+        if (ref) {
+          slide = this._cleanClone(ref);
+          slide.querySelectorAll('.content img, .content table, .ve-slot, [data-ve-figure], [data-ve-generated]').forEach(n => n.remove());
+          ['data-ve-id', 'data-ve-prop', 'data-ve-done', 'data-ve-propslide', 'data-ve-src'].forEach(a =>
+            slide.querySelectorAll('[' + a + ']').forEach(n => n.removeAttribute(a)));
+          const h2 = slide.querySelector('h2');
+          if (h2 && g.caption) h2.textContent = g.caption;
+          const content = slide.querySelector('.content') || slide;
+          content.innerHTML = '';
+          content.appendChild(fig);
+          ref.after(slide);
+        } else {
+          slide = this.doc.createElement('div');
+          slide.appendChild(fig);
+          this.doc.body.appendChild(slide);
+        }
+        slide.classList.add('ve-ghost');   // ribbon + strip on the slide, not the inner fig
+        this._ghost = slide;
+      } else if (g.mode === 'after' && g.el) {
+        fig.classList.add('ve-ghost');
+        g.el.parentElement.insertBefore(fig, g.el.nextSibling);
+        this._ghost = fig;
+      } else if (g.mode === 'replace' && g.el) {
+        fig.classList.add('ve-ghost');
+        g.el.parentElement.insertBefore(fig, g.el);
+        g.el.classList.add('ve-ghost-hidden');   // tuck the placeholder under the preview
+        this._ghost = fig;
+      } else {
+        fig.classList.add('ve-ghost');
+        const vis = fig.querySelector('img, svg');
+        if (vis) vis.style.maxHeight = (g.maxHeight || 260) + 'px';
+        const c = (g.slideEl && g.slideEl.querySelector('.content')) || g.slideEl || this.doc.body;
+        c.appendChild(fig);
+        this._ghost = fig;
+      }
+      this._sizeToContent();
+      return this._ghost;
+    }
+
+    clearGhost() {
+      let had = false;
+      this.doc.querySelectorAll('.ve-ghost').forEach(n => { n.remove(); had = true; });
+      this.doc.querySelectorAll('.ve-ghost-hidden').forEach(n => { n.classList.remove('ve-ghost-hidden'); had = true; });
+      this._ghost = null;
+      if (had) this._sizeToContent();
+      return had;
+    }
+
+    // ---------- numbered figures + references slide ----------
+    // «شكل N — caption» under every generated visual that carries a caption.
+    // Numbering follows document order and is recomputed before every history
+    // snapshot, so add/move/delete keeps the numbers correct automatically.
+    figures() {
+      return Array.from(this.doc.querySelectorAll('[data-ve-figure]'))
+        .filter(f => !f.closest('[data-ve-figlist]') && !f.classList.contains('ve-ghost') && !f.closest('.ve-ghost'));
+    }
+
+    renumberFigures() {
+      this.figures().forEach((fig, i) => {
+        const cap = fig.querySelector('figcaption');
+        if (!cap) return;
+        const base = fig.getAttribute('data-ve-caption') ||
+          cap.textContent.replace(/^\s*شكل\s+\d+\s*[—–-]\s*/, '').trim();
+        cap.textContent = `شكل ${i + 1} — ${base}`;
+      });
+    }
+
+    // Human label for where a generated figure came from (references table).
+    _figureSource(fig) {
+      const kind = fig.getAttribute('data-ve-generated');
+      return {
+        chart: 'رسم بياني من بيانات الدرس',
+        diagram: 'مخطط مولد من نص الدرس',
+        image: 'صورة مولدة بالذكاء الاصطناعي',
+        equation: 'معادلة مصاغة من الدرس'
+      }[kind] || 'عنصر مضاف';
+    }
+
+    // Build (or rebuild) the «قائمة الأشكال» slide at the end of the lecture:
+    // one table row per numbered figure — الشكل / العنوان / الشريحة / المصدر.
+    buildFiguresSlide() {
+      this.renumberFigures();
+      const figs = this.figures();
+      const old = this.doc.querySelector('[data-ve-figlist]');
+      if (!figs.length) {
+        if (old) { old.remove(); this._pushHistory(); this.onSlidesChanged && this.onSlidesChanged(null); }
+        return null;
+      }
+      const slides = this.slides().filter(s => !s.hasAttribute('data-ve-figlist'));
+      const ref = slides[slides.length - 1];
+
+      // Rows are computed against the CURRENT slide order.
+      const rows = figs.map((fig, i) => {
+        const slide = this._slideOf(fig);
+        const slideNo = slide ? slides.indexOf(slide) + 1 : '';
+        return {
+          n: i + 1,
+          title: fig.getAttribute('data-ve-caption') || '',
+          slideNo,
+          source: this._figureSource(fig)
+        };
+      });
+
+      let c;
+      if (ref) {
+        c = this._cleanClone(ref);
+        // The clone must not carry figures/ids of its own.
+        c.querySelectorAll('.ve-slot, [data-ve-figure]').forEach(n => n.remove());
+        c.querySelectorAll('[data-ve-id]').forEach(n => n.removeAttribute('data-ve-id'));
+        const h1 = c.querySelector('h1');
+        if (h1) h1.textContent = 'قائمة الأشكال';
+        const h2 = c.querySelector('h2');
+        if (h2) h2.textContent = 'مراجع الأشكال والرسوم التوضيحية الواردة في هذا الدرس';
+        const holder = c.querySelector('.content') || c;
+        holder.innerHTML = '';
+        holder.appendChild(this._figuresTable(rows));
+      } else {
+        c = this.doc.createElement('div');
+        c.innerHTML = '<h2>قائمة الأشكال</h2>';
+        c.appendChild(this._figuresTable(rows));
+      }
+      c.setAttribute('data-ve-figlist', '1');
+
+      if (old) old.replaceWith(c);
+      else if (ref) ref.after(c);
+      else this.doc.body.appendChild(c);
+      this._pushHistory();
+      this.onSlidesChanged && this.onSlidesChanged(c);
+      return c;
+    }
+
+    _figuresTable(rows) {
+      const t = this.doc.createElement('table');
+      // Inherit the lecture's own table styling when present (same trick as
+      // _makeTable); otherwise minimal visible borders.
+      const probe = this.doc.querySelector('td, th');
+      const styled = probe && this.win.getComputedStyle(probe).borderTopStyle !== 'none';
+      const cell = (tag, txt) => {
+        const c = this.doc.createElement(tag);
+        c.textContent = txt;
+        if (!styled) c.style.cssText = 'border:1px solid #999;padding:4px 10px;';
+        return c;
+      };
+      const head = this.doc.createElement('tr');
+      ['الشكل', 'العنوان', 'الشريحة', 'المصدر'].forEach(h => head.appendChild(cell('th', h)));
+      t.appendChild(head);
+      for (const r of rows) {
+        const tr = this.doc.createElement('tr');
+        tr.appendChild(cell('td', 'شكل ' + r.n));
+        tr.appendChild(cell('td', r.title));
+        tr.appendChild(cell('td', String(r.slideNo)));
+        tr.appendChild(cell('td', r.source));
+        t.appendChild(tr);
+      }
+      if (!styled) t.style.cssText = 'width:100%;border-collapse:collapse;';
+      return t;
+    }
+
     // ---------- export ----------
     getCleanHtml() {
       const clone = this.doc.documentElement.cloneNode(true);
       // Strip editor artifacts.
       clone.querySelectorAll('#ve-styles, .ve-overlay, .ve-toolbar, .ve-insert-line, .ve-guide').forEach(n => n.remove());
+      // Studio ghost previews must never reach a saved/exported file.
+      clone.querySelectorAll('.ve-ghost').forEach(n => n.remove());
+      clone.querySelectorAll('.ve-ghost-hidden').forEach(n => n.classList.remove('ve-ghost-hidden'));
       clone.querySelectorAll('.ve-selected').forEach(n => n.classList.remove('ve-selected'));
       clone.querySelectorAll('[contenteditable], .ve-editing').forEach(n => {
         n.removeAttribute('contenteditable');
         n.classList.remove('ve-editing');
       });
+      // Internal addressing — not needed in the export (figure metadata stays).
+      clone.querySelectorAll('[data-ve-id]').forEach(n => n.removeAttribute('data-ve-id'));
+      clone.querySelectorAll('[data-ve-src]').forEach(n => n.removeAttribute('data-ve-src'));
+      clone.querySelectorAll('[data-ve-done]').forEach(n => n.removeAttribute('data-ve-done'));
       return '<!DOCTYPE html>\n' + clone.outerHTML;
     }
   }

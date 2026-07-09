@@ -3,3 +3,11 @@ dist/
 *.log
 Thumbs.db
 .DS_Store
+
+# API keys — never commit. Copy config.example.json → config.json and fill in.
+config.json
+# Per-lecture enrichment cache (generated visuals) sits next to the source file.
+*.enrich.json
+
+# Claude Code tooling (handoffs, local settings) — not part of the project.
+.claude/

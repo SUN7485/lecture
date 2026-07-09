@@ -37,5 +37,8 @@
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3",
     "playwright-core": "^1.61.1"
+  },
+  "dependencies": {
+    "mathjax": "^3.2.2"
   }
 }
