@@ -97,7 +97,7 @@
     backdrop.querySelector('[data-new]').addEventListener('click', () => { kit = freshKit(getEditor()); modal.querySelector('#kit-name').value = ''; renderColors(); renderFonts(); });
     backdrop.querySelector('[data-del]').addEventListener('click', deleteSelected);
     backdrop.querySelector('[data-addfont]').addEventListener('click', addFonts);
-    backdrop.querySelector('[data-apply]').addEventListener('click', () => { applyNow(); setStatus('Brand kit applied.'); });
+    backdrop.querySelector('[data-apply]').addEventListener('click', () => applyNow());
     backdrop.querySelector('[data-revert]').addEventListener('click', () => { getEditor().removeThemeKit(); setStatus('Reverted to the lecture\'s original theme.'); refreshActive(); });
     backdrop.querySelector('[data-save]').addEventListener('click', saveKit);
     backdrop.querySelector('[data-close]').addEventListener('click', close);
@@ -188,6 +188,14 @@
     kit.name = kit.name || (modal.querySelector('#kit-name').value || '').trim() || 'custom';
     getEditor().applyThemeKit(kit);
     refreshActive();
+    const audit = getEditor().themeAudit();
+    if (audit) {
+      const fontMsg = audit.fontPct >= 90 ? `fonts cover ${audit.fontPct}% of text`
+        : audit.fontPct > 0 ? `⚠ fonts only cover ${audit.fontPct}% of text`
+        : '⚠ fonts embedded but no text uses them';
+      const colorMsg = `${audit.recolored.length}/${audit.recolored.length + audit.missed.length} colors remapped`;
+      setStatus(`Brand kit applied — ${fontMsg}, ${colorMsg}.`);
+    }
   }
   function liveApply() {
     clearTimeout(applyTimer);

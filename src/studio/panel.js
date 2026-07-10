@@ -128,6 +128,27 @@
     review.title = 'الذكاء يقرأ كل الشرائح ويقترح صورًا/مخططات حيث تفيد — بالخلفية، وأنت تحرّر.';
     box.appendChild(review);
 
+    // إيقاف — visible only while a review runs (stops before the next batch).
+    if (busy && reviewProg) {
+      box.appendChild(mkBtn('■ إيقاف المراجعة', 'sd-btn wide rej',
+        () => { P.cancelReview(); setStatus('سيتوقف بعد الدفعة الحالية…'); }));
+    }
+
+    // Failure ledger — never drop a failed range silently; offer a retry chip.
+    const fails = P.reviewFailures || [];
+    if (fails.length && !busy) {
+      const fbox = document.createElement('div');
+      fbox.className = 'sd-fails';
+      const head = document.createElement('div');
+      head.className = 'sd-failhead';
+      head.textContent = '⚠ تعذّرت مراجعة ' + fails.length + (fails.length === 1 ? ' نطاق' : ' نطاقات') + ' — أعد المحاولة:';
+      fbox.appendChild(head);
+      fails.forEach((f, i) => {
+        fbox.appendChild(mkBtn('↻ ' + f.label, 'sd-b sm', () => runRetryRange(i), busy));
+      });
+      box.appendChild(fbox);
+    }
+
     if (P.needsSuggest() && !P.suggested) {
       box.appendChild(mkBtn(`✨ اقترح لمواضع الصور (${c.pending})`, 'sd-btn wide',
         () => runSuggest(), !caps.text || busy));
@@ -505,8 +526,23 @@
     const r = await P.reviewLecture((done, total) => { reviewProg = { done, total }; renderActions(); });
     busy = false; reviewProg = null;
     if (!r.ok) setStatus('فشلت المراجعة: ' + r.error);
-    else setStatus(r.extras ? `المراجعة اقترحت ${r.extras} عنصرًا إضافيًا (بعلامة ➕).`
-      : 'المراجعة انتهت — لا إضافات مقترحة (المحاضرة واضحة).');
+    else {
+      const bits = [];
+      if (r.cancelled) bits.push('توقفت المراجعة');
+      bits.push(r.extras ? `اقتُرح ${r.extras} عنصرًا إضافيًا (بعلامة ➕)` : 'لا إضافات مقترحة');
+      if (r.failures) bits.push(`${r.failures} نطاق تعذّر — استخدم ↻ لإعادة المحاولة`);
+      setStatus(bits.join(' — '));
+    }
+    render();
+  }
+
+  // Retry one failed review range from the ledger (↻ chip).
+  async function runRetryRange(i) {
+    busy = true; renderActions();
+    const r = await P.retryFailedRange(i);
+    busy = false;
+    setStatus(r.ok ? (r.added ? `أُضيف ${r.added} عنصرًا من النطاق.` : 'تمت مراجعة النطاق — لا إضافات.')
+      : 'ما زال النطاق متعذّرًا: ' + (r.error || ''));
     render();
   }
   async function runSuggest() {

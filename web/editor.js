@@ -109,8 +109,6 @@
     'Diodrum Arabic': ['Diodrum Arabic Regular'],
     'Lyon Arabic Text': ['Lyon Arabic Regular'],
   };
-  // Serif-leaning family names render in Lyon; everything else in Diodrum.
-  const SERIF_HINT = /times|georgia|garamond|cambria|constantia|palatino|book|amiri|lora|playfair|merriweather|naskh|traditional|lyon/i;
 
   // Official MiM palette (brand book, pages 30–34). The lecture already uses
   // var(--purple)/var(--cyan)/var(--gold) etc., so overriding :root recolors
@@ -1505,99 +1503,24 @@
     // MiM preset — a one-click shortcut layered on the general kit system.
     // `fonts` = [{ name:'diodrum-bold', b64:'…' }] read from src/fonts by main.
     applyBrandTheme(rawFonts) {
-      // Index the raw font files: canonical family -> { weight: b64 }.
-      const byFam = {};
+      const fonts = [];
       for (const f of (rawFonts || [])) {
         const spec = BRAND_FONTS[f.name];
         if (!spec || !f.b64) continue;
-        (byFam[spec.fam] = byFam[spec.fam] || {})[spec.weight] = f.b64;
-      }
-
-      // Font weights the deck actually renders (sampled). 400 + 700 always
-      // ship: bold spans need the bold face even if the sample misses one.
-      const usedWeights = new Set([400, 700]);
-      let sampled = 0;
-      for (const el of this.doc.querySelectorAll('body *')) {
-        if (sampled >= 1500) break;
-        if (el.closest('.ve-overlay, .ve-toolbar, .ve-guide')) continue;
-        if (!el.firstChild || el.firstChild.nodeType !== 3 || !/\S/.test(el.firstChild.nodeValue)) continue;
-        sampled++;
-        usedWeights.add(parseInt(this.win.getComputedStyle(el).fontWeight, 10) || 400);
-      }
-
-      // Adoption: register brand faces under every family name the deck asks
-      // for (Cairo, Times New Roman, …) so foreign decks re-render in brand
-      // fonts without touching their CSS. MiM-native names and their legacy
-      // "…Regular" aliases keep working through the same map.
-      const aliasToCanon = {};
-      for (const canon of Object.keys(FONT_ALIASES)) {
-        for (const a of FONT_ALIASES[canon]) aliasToCanon[a] = canon;
-      }
-      const famMap = new Map(); // deck family -> canonical brand family
-      for (const fam of this.detectFontFamilies()) {
-        const canon = byFam[fam] ? fam
-          : aliasToCanon[fam] ? aliasToCanon[fam]
-          : SERIF_HINT.test(fam) ? 'Lyon Arabic Text' : 'Diodrum Arabic';
-        if (byFam[canon]) famMap.set(fam, canon);
-      }
-      // Deck with no detectable families (pure generic stacks): ship the
-      // canonical names so generated content still lands on brand fonts.
-      if (!famMap.size) for (const canon of Object.keys(byFam)) famMap.set(canon, canon);
-
-      const fonts = [];
-      for (const [docFam, canon] of famMap) {
-        const files = byFam[canon];
-        const avail = Object.keys(files).map(Number).sort((a, b) => a - b);
-        const emit = new Set();
-        for (const w of usedWeights) {
-          let best = avail[0];
-          for (const a of avail) if (Math.abs(a - w) < Math.abs(best - w)) best = a;
-          emit.add(best);
+        for (const fam of [spec.fam, ...(FONT_ALIASES[spec.fam] || [])]) {
+          fonts.push({ family: fam, weight: spec.weight, style: 'normal', b64: f.b64, ext: 'otf' });
         }
-        for (const w of emit) fonts.push({ family: docFam, weight: w, style: 'normal', b64: files[w], ext: 'otf' });
       }
       this.applyThemeKit({ name: 'MiM', fonts, varsCss: BRAND_PALETTE_CSS });
     }
     removeBrandTheme() { this.removeThemeKit(); }
 
-    // How much of the deck the active kit actually restyles. Fonts: % of text
-    // elements whose requested family the kit ships a face for (name-based —
-    // a shipped data: face for that exact family WILL render). Colors: which
-    // of the deck's own variables the kit's :root override re-declares.
-    themeAudit() {
-      const style = this.doc.getElementById('ve-theme');
-      if (!style) return null;
-      const kitFams = new Set();
-      for (const m of style.textContent.matchAll(/@font-face\{font-family:'([^']+)'/g)) kitFams.add(m[1]);
-      let total = 0, covered = 0;
-      for (const el of this.doc.querySelectorAll('body *')) {
-        if (total >= 1500) break;
-        if (el.closest('.ve-overlay, .ve-toolbar, .ve-guide')) continue;
-        if (!el.firstChild || el.firstChild.nodeType !== 3 || !/\S/.test(el.firstChild.nodeValue)) continue;
-        total++;
-        const first = (this.win.getComputedStyle(el).fontFamily.split(',')[0] || '').trim().replace(/^['"]|['"]$/g, '');
-        if (kitFams.has(first)) covered++;
-      }
-      const kitVars = new Set();
-      const rootBlock = style.textContent.match(/:root\{([^}]*)\}/);
-      if (rootBlock) for (const m of rootBlock[1].matchAll(/(--[\w-]+)\s*:/g)) kitVars.add(m[1]);
-      const deckVars = this.detectVars({ skipKit: true }).map(v => v.name);
-      return {
-        kit: style.dataset.kit || 'custom',
-        fontPct: total ? Math.round(100 * covered / total) : 0,
-        textEls: total,
-        recolored: deckVars.filter(n => kitVars.has(n)),
-        missed: deckVars.filter(n => !kitVars.has(n)),
-      };
-    }
-
     // The CSS custom properties the loaded lecture declares (name + effective
     // value). This is what a customer recolors — it works for ANY variable-based
     // template without the app knowing the variable names in advance.
-    detectVars(opts) {
+    detectVars() {
       const seen = new Map();
       for (const sheet of this.doc.styleSheets) {
-        if (opts && opts.skipKit && sheet.ownerNode && sheet.ownerNode.id === 've-theme') continue;
         let rules; try { rules = sheet.cssRules; } catch (_) { continue; }
         for (const rule of rules || []) {
           if (!rule.style || !rule.selectorText) continue;
@@ -2156,24 +2079,6 @@
       clone.querySelectorAll('[data-ve-id]').forEach(n => n.removeAttribute('data-ve-id'));
       clone.querySelectorAll('[data-ve-src]').forEach(n => n.removeAttribute('data-ve-src'));
       clone.querySelectorAll('[data-ve-done]').forEach(n => n.removeAttribute('data-ve-done'));
-      // The load-time <base> (renderer's injectBase) is an editor artifact:
-      // it pins the file to this machine's path and leaks it into saves.
-      // Make any still-relative asset refs absolute, then drop it.
-      const veBase = clone.querySelector('base[data-ve-base]');
-      if (veBase) {
-        const baseHref = this.doc.baseURI;
-        const abs = (u) => { try { return new URL(u, baseHref).href; } catch (_) { return u; } };
-        clone.querySelectorAll('img[src]').forEach(img => {
-          const raw = img.getAttribute('src');
-          if (raw && !/^(data:|https?:|file:|blob:|#)/i.test(raw)) img.setAttribute('src', abs(raw));
-        });
-        clone.querySelectorAll('[style*="url("]').forEach(el => {
-          const s = el.getAttribute('style');
-          el.setAttribute('style', s.replace(/url\((['"]?)([^'")]+)\1\)/gi, (m, q, u) =>
-            /^(data:|https?:|file:|blob:|#)/i.test(u) ? m : 'url(' + q + abs(u) + q + ')'));
-        });
-        veBase.remove();
-      }
       return '<!DOCTYPE html>\n' + clone.outerHTML;
     }
   }

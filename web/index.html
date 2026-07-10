@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slide HTML Editor — edit HTML pages & decks visually, export PDF</title>
+<meta name="description" content="Free online editor for HTML pages and slide decks. Edit text, move and resize anything like PowerPoint, then download the HTML or export a PDF. No signup, nothing uploaded.">
+<style>
+  :root { --bg:#1e2430; --panel:#273041; --text:#e8ecf3; --muted:#9aa4b8; --accent:#4f8cff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--text);
+         display:flex; flex-direction:column; height:100vh; }
+  button { background:#333d52; color:var(--text); border:1px solid #46536f; border-radius:6px;
+           padding:6px 12px; cursor:pointer; font:inherit; }
+  button:hover { background:#3d4961; }
+  button:disabled { opacity:.4; cursor:default; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  #toolbar { display:flex; gap:8px; align-items:center; padding:8px 12px; background:var(--panel);
+             border-bottom:1px solid #000; flex-wrap:wrap; }
+  #toolbar .brand { font-weight:700; margin-inline-end:8px; }
+  #toolbar .spacer { flex:1; }
+  #stage { flex:1; overflow:auto; }
+  #zoom-wrap { margin:24px auto; box-shadow:0 6px 30px rgba(0,0,0,.45); }
+  #canvas { border:0; background:#fff; transform-origin:0 0; display:block; }
+  #empty-state { margin:80px auto; max-width:540px; text-align:center; color:var(--muted);
+                 border:2px dashed #46536f; border-radius:12px; padding:48px 32px; }
+  #empty-state h1 { color:var(--text); font-size:22px; margin:0 0 8px; }
+  #status { padding:5px 12px; background:var(--panel); color:var(--muted); border-top:1px solid #000;
+            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+</style>
+</head>
+<body>
+  <div id="toolbar">
+    <span class="brand">📘 Slide HTML Editor</span>
+    <button id="btn-open" title="Open an HTML file">📂 Open</button>
+    <button id="btn-add-text" title="Insert a text block">➕ Text</button>
+    <button id="btn-add-image" title="Insert an image (embedded into the file)">🖼 Image</button>
+    <button id="btn-undo" disabled title="Undo (Ctrl+Z)">↶ Undo</button>
+    <button id="btn-redo" disabled title="Redo (Ctrl+Y)">↷ Redo</button>
+    <button id="btn-zoom-out" title="Zoom out">−</button>
+    <button id="btn-zoom-label" title="Fit to window">100%</button>
+    <button id="btn-zoom-in" title="Zoom in">+</button>
+    <span class="spacer"></span>
+    <button id="btn-export" class="primary" title="Export to PDF — choose 'Save as PDF' in the print dialog">⬇ PDF</button>
+    <button id="btn-save" class="primary" title="Download the edited HTML (Ctrl+S)">💾 Save HTML</button>
+  </div>
+  <div id="stage">
+    <div id="empty-state">
+      <h1>Edit any HTML page like a slide deck</h1>
+      <p>Drop an .html file here — got one from ChatGPT, Claude or Gemini? Edit the text, move and resize anything like PowerPoint, then download it or export a PDF.</p>
+      <p><strong>Nothing is uploaded.</strong> Everything runs in your browser.</p>
+      <button id="btn-open-2" class="primary">📂 Choose HTML file</button>
+    </div>
+    <div id="zoom-wrap" hidden><iframe id="canvas"></iframe></div>
+  </div>
+  <div id="status">Open an HTML file to start.</div>
+  <input type="file" id="file-input" accept=".html,.htm" hidden>
+  <input type="file" id="img-input" accept="image/*" multiple hidden>
+  <script src="editor.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

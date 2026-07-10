@@ -260,6 +260,10 @@ button.big { padding: 12px 22px; font-size: 16px; margin-top: 18px; }
 .sd-btn:hover:not(:disabled), .sd-b:hover:not(:disabled) { background: #f0f3f8; border-color: #b9c3d6; }
 .sd-btn:disabled, .sd-b:disabled { opacity: .5; cursor: default; }
 .sd-btn.wide { width: 100%; padding: 8px 10px; font-size: 12.5px; font-weight: 600; }
+.sd-btn.rej { color: #c0392b; border-color: #e6c3bd; }
+.sd-btn.rej:hover:not(:disabled) { background: #fdecea; }
+.sd-fails { margin-top: 8px; padding: 8px; background: #fdf6e6; border: 1px solid #e5c37c; border-radius: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.sd-failhead { width: 100%; font-size: 12px; color: #92600a; font-weight: 600; }
 .sd-b.sm { padding: 4px 9px; font-size: 11.5px; }
 .sd-b.ins, .sd-btn.ins { background: #2f6df6; border-color: #2f6df6; color: #fff; }
 .sd-b.ins:hover:not(:disabled), .sd-btn.ins:hover:not(:disabled) { background: #245ad6; }

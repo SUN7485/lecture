@@ -224,7 +224,10 @@
   });
 
   function injectBase(html, baseHref) {
-    const baseTag = `<base href="${baseHref}">`;
+    // Older app versions saved a stale <base> into the file; strip any before
+    // inserting the fresh load-time one (which getCleanHtml removes on save).
+    html = html.replace(/<base\b[^>]*>/gi, '');
+    const baseTag = `<base data-ve-base href="${baseHref}">`;
     if (/<head[^>]*>/i.test(html)) {
       return html.replace(/<head[^>]*>/i, (m) => m + baseTag);
     }
@@ -544,10 +547,8 @@
     return { width: w, height: h, els: same };
   }
 
-  async function exportPdf() {
-    if (!editor) { status('Open a lecture first.'); return; }
-    status('Exporting PDF…');
-
+  // Build the print-ready HTML + page size (shared by export and preview).
+  function buildPdfHtml() {
     const slides = detectSlides();
     let html, pageSize = null;
     if (slides) {
@@ -570,15 +571,29 @@
       html = html.includes('</head>')
         ? html.replace('</head>', printCss + '</head>')
         : printCss + html;
-      status(`Exporting PDF — ${slides.els.length} slides, one per page…`);
     } else {
       html = editor.getCleanHtml();
     }
+    return { html, pageSize, slideCount: slides ? slides.els.length : 0 };
+  }
 
+  async function exportPdf() {
+    if (!editor) { status('Open a lecture first.'); return; }
+    status('Exporting PDF…');
+    const { html, pageSize, slideCount } = buildPdfHtml();
+    if (slideCount) status(`Exporting PDF — ${slideCount} slides, one per page…`);
     const suggested = baseName(currentFile?.filePath, '.pdf');
     const res = await window.api.exportPdf({ html, suggestedName: suggested, pageSize });
     if (res.ok) status('Exported PDF: ' + res.filePath);
     else status('Export ' + (res.error ? 'failed: ' + res.error : 'cancelled.'));
+  }
+
+  async function previewPdf() {
+    if (!editor) { status('Open a lecture first.'); return; }
+    status('Building PDF preview…');
+    const { html, pageSize } = buildPdfHtml();
+    const res = await window.api.previewPdf({ html, pageSize });
+    status(res.ok ? 'Preview opened — check it, then export.' : 'Preview failed: ' + (res.error || ''));
   }
 
   function baseName(filePath, ext) {
@@ -605,6 +620,7 @@
     beginPlace('table', 'Click where the table should go… (Esc cancels)'));
   $('#btn-save').addEventListener('click', saveHtml);
   $('#btn-export').addEventListener('click', exportPdf);
+  $('#btn-preview').addEventListener('click', previewPdf);
 
   // ---------- MiM brand identity (one-click fonts + palette) ----------
   const btnBrand = $('#btn-brand');
@@ -630,9 +646,16 @@
     }
     editor.applyBrandTheme(brandFonts);
     updateBrandBtn();
-    status(brandFonts.length
-      ? 'Applied MiM identity — real fonts + official palette (off-brand gold → ministry pink). Click again to compare with the original.'
-      : 'Applied MiM palette. (Fonts folder not found — colors only.)');
+    const audit = editor.themeAudit();
+    if (!brandFonts.length) {
+      status('Applied MiM palette. (Fonts folder not found — colors only.)');
+    } else if (audit) {
+      const fontMsg = audit.fontPct >= 90 ? `fonts cover ${audit.fontPct}% of text`
+        : audit.fontPct > 0 ? `⚠ fonts only cover ${audit.fontPct}% of text`
+        : '⚠ fonts embedded but no text uses them';
+      const colorMsg = `${audit.recolored.length}/${audit.recolored.length + audit.missed.length} colors remapped`;
+      status(`Applied MiM identity — ${fontMsg}, ${colorMsg}. Click again to compare.`);
+    }
   });
 
   // ---------- Lecture Studio (docked AI enrichment panel) ----------

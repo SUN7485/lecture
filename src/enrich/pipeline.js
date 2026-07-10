@@ -172,41 +172,86 @@
         .map(d => ({ slide: d.i, title: d.h1 || '', subtitle: d.h2 || '', text: (d.text || '').slice(0, 300) }));
       if (!slides.length) { this.reviewed = true; this.onUpdate(null); return { ok: true, extras: 0 }; }
 
-      // The text model is a slow reasoner: one giant call over the whole deck
-      // hangs. Split into small batches so each call returns quickly, retry on
-      // transient 429/503/timeout, and reveal extras progressively.
+      // Small batches so each call returns quickly. A failed batch is NOT dropped
+      // silently — it goes into a visible failure ledger the user can retry. A
+      // renderer-side abort flag stops the loop before the next batch (the
+      // in-flight call finishes; no new calls are issued). No IPC abort here.
       const CHUNK = 4;
       const batches = [];
       for (let i = 0; i < slides.length; i += CHUNK) batches.push(slides.slice(i, i + CHUNK));
-      let n = 0, okBatches = 0;
+      this._reviewAbort = false;
+      this.reviewFailures = [];
+      const shared = { taken, slides };
+      let n = 0, okBatches = 0, cancelled = false;
       for (let bi = 0; bi < batches.length; bi++) {
+        if (this._reviewAbort) { cancelled = true; break; }
         onProgress && onProgress(bi, batches.length);
         const r = await this._reviewBatch(batches[bi]);
-        if (!r.ok) continue;
-        okBatches++;
-        for (const item of r.arr) {
-          const si = item.slide;
-          if (typeof si !== 'number' || taken.has(si) || !slides.some(s => s.slide === si)) continue;
-          const p = this._make({
-            targetId: 'vx' + (++this._xn), slideIndex: si, kind: 'pending', state: 'suggested',
-            isExtra: true, applyMode: item.placement === 'append' ? 'append' : 'newslide'
-          });
-          this._applySuggestion(p, item);
-          p.isExtra = true;
-          this._renderFree(p);   // equation extras preview at once (diagram extras need nodes)
-          this.editor.markSourceSlide(this.editor.slides()[si], p.targetId);   // stable anchor
-          this.proposals.push(p);
-          taken.add(si);
-          n++;
+        if (!r.ok) {
+          this.reviewFailures.push({ batch: batches[bi], label: this._rangeLabel(batches[bi]), error: r.error || '' });
+          this.onUpdate(null);
+          continue;
         }
+        okBatches++;
+        n += this._ingestReviewItems(r.arr, shared);
         this.onUpdate(null);              // progressive reveal after each batch
       }
       onProgress && onProgress(batches.length, batches.length);
       this.reviewed = true;
       await this._writeCache();
       this.onUpdate(null);
-      if (!okBatches) return { ok: false, error: 'الخدمة مشغولة (503/timeout) — جرّب لاحقًا.' };
-      return { ok: true, extras: n, batches: batches.length, okBatches };
+      if (!okBatches && !this.reviewFailures.length) return { ok: false, error: 'الخدمة مشغولة (503/timeout) — جرّب لاحقًا.' };
+      return { ok: true, extras: n, batches: batches.length, okBatches, failures: this.reviewFailures.length, cancelled };
+    },
+
+    // Turn a batch's raw items into extra proposals. Shared by review + retry so
+    // the anchor/renumber logic lives in ONE place. Returns how many were added.
+    _ingestReviewItems(arr, shared) {
+      const { taken, slides } = shared;
+      let added = 0;
+      for (const item of (arr || [])) {
+        const si = item.slide;
+        if (typeof si !== 'number' || taken.has(si) || !slides.some(s => s.slide === si)) continue;
+        const p = this._make({
+          targetId: 'vx' + (++this._xn), slideIndex: si, kind: 'pending', state: 'suggested',
+          isExtra: true, applyMode: item.placement === 'append' ? 'append' : 'newslide'
+        });
+        this._applySuggestion(p, item);
+        p.isExtra = true;
+        this._renderFree(p);
+        this.editor.markSourceSlide(this.editor.slides()[si], p.targetId);
+        this.proposals.push(p);
+        taken.add(si);
+        added++;
+      }
+      return added;
+    },
+
+    // Human label for a failed batch range, 1-based (e.g. "الشرائح ٩–١٢").
+    _rangeLabel(batch) {
+      const nums = batch.map(s => s.slide + 1);
+      const lo = Math.min.apply(null, nums), hi = Math.max.apply(null, nums);
+      return lo === hi ? ('الشريحة ' + lo) : ('الشرائح ' + lo + '–' + hi);
+    },
+
+    // User pressed إيقاف — stop before the next batch. Simple flag, no IPC abort.
+    cancelReview() { this._reviewAbort = true; },
+
+    // Retry ONE previously-failed range. Rebuilds the taken-set from live
+    // proposals so we never double-insert. Returns { ok, added } / { ok:false }.
+    async retryFailedRange(index) {
+      const entry = this.reviewFailures && this.reviewFailures[index];
+      if (!entry) return { ok: false, error: 'no such range' };
+      const digest = this.editor.slidesDigest();
+      const taken = new Set(this.proposals.filter(p => p.state !== 'rejected').map(p => p.slideIndex));
+      const slides = digest.map(d => ({ slide: d.i }));
+      const r = await this._reviewBatch(entry.batch);
+      if (!r.ok) { entry.error = r.error || entry.error; this.onUpdate(null); return { ok: false, error: r.error }; }
+      const added = this._ingestReviewItems(r.arr, { taken, slides });
+      this.reviewFailures.splice(index, 1);
+      await this._writeCache();
+      this.onUpdate(null);
+      return { ok: true, added };
     },
 
     // One small review batch (≤4 slides). Light output; retry once on transient

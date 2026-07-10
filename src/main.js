@@ -225,28 +225,15 @@ ipcMain.handle('enrich-cache-write', (_e, { lecturePath, data } = {}) => {
   } catch (e) { return { ok: false, error: String(e) }; }
 });
 
-// ---- Export PDF (clean render in a hidden window) ----
-ipcMain.handle('export-pdf', async (_e, { html, suggestedName, pageSize }) => {
-  let filePath = process.env.LVE_EXPORT_PATH; // test hook: skip the dialog
-  if (!filePath) {
-    const res = await dialog.showSaveDialog(mainWindow, {
-      title: 'Export PDF',
-      defaultPath: suggestedName || 'lecture.pdf',
-      filters: [{ name: 'PDF', extensions: ['pdf'] }]
-    });
-    if (res.canceled || !res.filePath) return { ok: false };
-    filePath = res.filePath;
-  }
-
+// ---- PDF rendering (shared by export + preview): clean render in a hidden window ----
+async function renderPdfBuffer(html, pageSize) {
   // Write the clean HTML to a temp file so relative assets (base href) resolve.
   const tmp = path.join(os.tmpdir(), `lve-export-${Date.now()}.html`);
   fs.writeFileSync(tmp, html, 'utf8');
-
   const pdfWin = new BrowserWindow({
     show: false,
     webPreferences: { offscreen: false }
   });
-
   try {
     await pdfWin.loadFile(tmp);
     // Wait for web fonts and every image to finish loading (8s safety cap).
@@ -260,7 +247,6 @@ ipcMain.handle('export-pdf', async (_e, { html, suggestedName, pageSize }) => {
       })()`, true),
       new Promise(r => setTimeout(r, 8000))
     ]);
-
     const opts = { printBackground: true, preferCSSPageSize: true };
     if (pageSize) {
       // Slide deck: page size exactly matches the slide (px -> inches @96dpi).
@@ -269,13 +255,51 @@ ipcMain.handle('export-pdf', async (_e, { html, suggestedName, pageSize }) => {
     } else {
       opts.margins = { marginType: 'default' };
     }
-    const data = await pdfWin.webContents.printToPDF(opts);
+    return await pdfWin.webContents.printToPDF(opts);
+  } finally {
+    pdfWin.destroy();
+    fs.unlink(tmp, () => {});
+  }
+}
+
+// ---- Export PDF ----
+ipcMain.handle('export-pdf', async (_e, { html, suggestedName, pageSize }) => {
+  let filePath = process.env.LVE_EXPORT_PATH; // test hook: skip the dialog
+  if (!filePath) {
+    const res = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export PDF',
+      defaultPath: suggestedName || 'lecture.pdf',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    });
+    if (res.canceled || !res.filePath) return { ok: false };
+    filePath = res.filePath;
+  }
+  try {
+    const data = await renderPdfBuffer(html, pageSize);
     fs.writeFileSync(filePath, data);
     return { ok: true, filePath };
   } catch (err) {
     return { ok: false, error: String(err) };
-  } finally {
-    pdfWin.destroy();
-    fs.unlink(tmp, () => {});
+  }
+});
+
+// ---- PDF quick preview: same render path as export, shown in a viewer window ----
+ipcMain.handle('preview-pdf', async (_e, { html, pageSize }) => {
+  try {
+    const data = await renderPdfBuffer(html, pageSize);
+    const pdfPath = path.join(os.tmpdir(), `lve-preview-${Date.now()}.pdf`);
+    fs.writeFileSync(pdfPath, data);
+    const viewer = new BrowserWindow({
+      width: 1000,
+      height: 800,
+      title: 'PDF Preview',
+      webPreferences: { plugins: true }
+    });
+    viewer.setMenuBarVisibility(false);
+    viewer.on('closed', () => fs.unlink(pdfPath, () => {}));
+    await viewer.loadURL(require('url').pathToFileURL(pdfPath).href);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
   }
 });

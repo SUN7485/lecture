@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   getFonts: () => ipcRenderer.invoke('get-fonts'),
   saveHtml: (payload) => ipcRenderer.invoke('save-html', payload),
   exportPdf: (payload) => ipcRenderer.invoke('export-pdf', payload),
+  previewPdf: (payload) => ipcRenderer.invoke('preview-pdf', payload),
 
   // ---- AI enrichment ----
   aiStatus: () => ipcRenderer.invoke('ai-status'),
