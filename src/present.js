@@ -35,7 +35,11 @@
     if (!slides.length) return null;
 
     const notes = liveSlides.map(s => editor.getSpeakerNotes(s));
-    const slideW = 950, slideH = 650; // deck's fixed slide size convention
+    // Measure the deck's REAL slide footprint from the live (laid-out) editor —
+    // including borders (e.g. the brand accent bar) — so decks that aren't the
+    // default 950x650 scale to fit without clipping. Fall back to the convention.
+    const slideW = (liveSlides[0] && liveSlides[0].offsetWidth) || 950;
+    const slideH = (liveSlides[0] && liveSlides[0].offsetHeight) || 650;
 
     let i = 0;
     let blank = null; // null | 'black' | 'white'

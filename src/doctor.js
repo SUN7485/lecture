@@ -160,6 +160,22 @@
           }
         }
       }
+
+      // Rule 6 — brand spacing drift (ONLY when a brand kit is active). The kit's
+      // BRAND_POLISH_CSS sets .content line-height 1.68; an inline edit can override
+      // it. Flag the deviation and offer to clear the override so the kit wins again.
+      if (editor.hasBrandTheme && editor.hasBrandTheme()) {
+        var content = slide.querySelector('.content');
+        if (content && content.style.lineHeight) {
+          var ccs = win.getComputedStyle(content);
+          var lh = parseFloat(ccs.lineHeight) / (parseFloat(ccs.fontSize) || 16);
+          if (lh && Math.abs(lh - 1.68) > 0.18) {
+            issues.push({ ruleId: 'brand-spacing', severity: 'warn', slideIndex: si, el: content,
+              message: 'تباعد الأسطر لا يطابق هوية العلامة (المطلوب ١٫٦٨) — الإصلاح يزيل التجاوز.',
+              fix: (function (c) { return function () { c.style.lineHeight = ''; }; })(content) });
+          }
+        }
+      }
     });
 
     return issues;

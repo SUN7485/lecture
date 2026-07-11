@@ -326,7 +326,9 @@
     // inside the currently text-editing element, or append to the current slide's
     // title if nothing is being edited. One undo step.
     insertDate(kind) { // 'hijri' | 'greg'
-      var locale = kind === 'hijri' ? 'ar-SA-u-ca-islamic' : 'ar-SA';
+      // ar-SA's DEFAULT calendar is islamic-umalqura, so the calendar must be
+      // explicit on BOTH branches — bare 'ar-SA' renders a Hijri date too.
+      var locale = kind === 'hijri' ? 'ar-SA-u-ca-islamic-umalqura' : 'ar-SA-u-ca-gregory';
       var str = new Intl.DateTimeFormat(locale, { dateStyle: 'long' }).format(new Date());
       var target = this._editingEl;
       if (target) {
