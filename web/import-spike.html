@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Import spike — mammoth.js conversion scratch page (not linked from the app)</title>
+<style>
+  body{font:14px/1.5 system-ui,sans-serif;margin:20px;background:#1e2430;color:#e8ecf3;}
+  h1{font-size:18px;}
+  #stats{background:#273041;padding:12px;border-radius:8px;margin:14px 0;white-space:pre-wrap;font-family:monospace;font-size:12.5px;}
+  #raw{width:100%;height:220px;background:#0e1420;color:#9fe3a0;font-family:monospace;font-size:11px;padding:10px;box-sizing:border-box;}
+  #preview{width:100%;height:500px;border:1px solid #46536f;background:#fff;}
+  #messages{background:#3a2a2a;padding:10px;border-radius:8px;font-size:12px;}
+</style>
+</head>
+<body>
+<h1>Import spike — mammoth.js (offline, vendored, no CDN)</h1>
+<input type="file" id="file-input" accept=".docx">
+<div id="stats">Pick a .docx file to convert…</div>
+<div id="messages"></div>
+<h2>Preview</h2>
+<iframe id="preview"></iframe>
+<h2>Raw converted HTML</h2>
+<pre id="raw"></pre>
+
+<script src="vendor/mammoth.browser.min.js"></script>
+<script>
+  document.getElementById('file-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.convertToHtml({ arrayBuffer });
+    const html = result.value;
+    const messages = result.messages;
+
+    // Tag histogram + image/table/RTL observations.
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const tags = ['h1','h2','h3','p','ul','ol','li','img','table','tr','td'];
+    const counts = {};
+    tags.forEach(t => counts[t] = doc.querySelectorAll(t).length);
+    const imgs = Array.from(doc.querySelectorAll('img'));
+    const dataUrlImgs = imgs.filter(i => /^data:/.test(i.src)).length;
+    const rtlGuess = /[؀-ۿ]/.test(doc.body.textContent);
+
+    document.getElementById('stats').textContent =
+      'File: ' + file.name + '\n' +
+      'Tag histogram: ' + JSON.stringify(counts, null, 2) + '\n' +
+      'Images: ' + imgs.length + ' (data-URL: ' + dataUrlImgs + ')\n' +
+      'Contains Arabic text (heuristic): ' + rtlGuess + '\n' +
+      'Mammoth messages: ' + messages.length;
+
+    document.getElementById('messages').textContent = messages.length
+      ? messages.map(m => '[' + m.type + '] ' + m.message).join('\n')
+      : '(no warnings)';
+
+    document.getElementById('raw').textContent = html;
+    document.getElementById('preview').srcdoc = '<div dir="auto">' + html + '</div>';
+
+    console.log('CONVERTED:', file.name, JSON.stringify(counts), 'images:', imgs.length, 'dataUrlImgs:', dataUrlImgs, 'rtl:', rtlGuess, 'messages:', messages.length);
+  });
+</script>
+</body>
+</html>
