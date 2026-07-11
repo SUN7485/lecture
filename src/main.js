@@ -34,6 +34,10 @@ function createWindow() {
   });
 
   mainWindow.setMenuBarVisibility(false);
+  // Electron denies window.open() popups by default; Present mode's speaker
+  // view (present.js) needs its named popup allowed through.
+  mainWindow.webContents.setWindowOpenHandler(({ frameName }) =>
+    frameName === 'lve-speaker' ? { action: 'allow' } : { action: 'deny' });
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 }
 

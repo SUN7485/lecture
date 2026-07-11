@@ -36,6 +36,7 @@
     'btn-save': { text: '💾 حفظ HTML', title: 'تنزيل ملف HTML المعدّل (Ctrl+S)' },
     'btn-open-2': { text: '📂 اختر ملف HTML' },
     'btn-theme': { text: '🎨 الثيم', title: 'الثيمات الجاهزة، تصدير واستيراد .theme.json' },
+    'btn-present': { text: '🎤 عرض', title: 'عرض الشرائح ملء الشاشة + نافذة الملقّن' },
   };
   function applyArabicUi() {
     document.documentElement.setAttribute('dir', 'rtl');
@@ -378,6 +379,7 @@
     { id: 'date-hijri', ar: 'إدراج تاريخ هجري', en: 'Insert Hijri date', run: () => $('#btn-date-hijri').click() },
     { id: 'date-greg', ar: 'إدراج تاريخ ميلادي', en: 'Insert Gregorian date', run: () => $('#btn-date-greg').click() },
     { id: 'theme', ar: 'الثيمات وتصدير/استيراد', en: 'Theme presets / export / import', run: () => toggleThemePop() },
+    { id: 'present', ar: 'عرض الشرائح', en: 'Present', run: () => $('#btn-present').click() },
   ];
 
   let cmdkEl = null, cmdkIndex = 0, cmdkFiltered = ACTIONS;
@@ -607,6 +609,10 @@
     status('Gregorian date inserted.');
   });
   $('#btn-theme').addEventListener('click', toggleThemePop);
+  $('#btn-present').addEventListener('click', () => {
+    if (!editor) { status('Open a file first.'); return; }
+    if (window.Presenter) window.Presenter.start(editor);
+  });
   $('#btn-zoom-in').addEventListener('click', () => setZoom(zoom * 1.2));
   $('#btn-zoom-out').addEventListener('click', () => setZoom(zoom / 1.2));
   $('#btn-zoom-label').addEventListener('click', fitZoom);

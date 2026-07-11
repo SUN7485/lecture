@@ -708,6 +708,7 @@
     { id: 'numerals', ar: 'تبديل الأرقام عربي لاتيني', en: 'Toggle numerals', run: () => $('#btn-numerals').click() },
     { id: 'date-hijri', ar: 'إدراج تاريخ هجري', en: 'Insert Hijri date', run: () => $('#btn-date-hijri').click() },
     { id: 'date-greg', ar: 'إدراج تاريخ ميلادي', en: 'Insert Gregorian date', run: () => $('#btn-date-greg').click() },
+    { id: 'present', ar: 'عرض الشرائح', en: 'Present', run: () => $('#btn-present').click() },
   ];
 
   let cmdkEl = null, cmdkIndex = 0, cmdkFiltered = ACTIONS;
@@ -927,6 +928,12 @@
     if (!editor) { status('Open a lecture first.'); return; }
     editor.insertDate('greg');
     status('تم إدراج التاريخ الميلادي.');
+  });
+
+  // ---------- Present mode (014) ----------
+  $('#btn-present').addEventListener('click', () => {
+    if (!editor) { status('Open a lecture first.'); return; }
+    if (window.Presenter) window.Presenter.start(editor);
   });
 
   // ---------- Settings (API keys) ----------
