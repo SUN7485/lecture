@@ -139,6 +139,32 @@ ipcMain.handle('save-html', async (_e, { html, suggestedName }) => {
   return { ok: true, filePath: res.filePath };
 });
 
+// ---- Generic text file save/open (theme files, etc.) — anchor-click blob
+// downloads don't reliably reach disk from an Electron renderer, so this
+// mirrors save-html's native dialog for any text content + extension. ----
+ipcMain.handle('save-text-file', async (_e, { content, suggestedName, extension, filterName }) => {
+  const ext = extension || 'txt';
+  const res = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save file',
+    defaultPath: suggestedName || ('file.' + ext),
+    filters: [{ name: filterName || ext.toUpperCase(), extensions: [ext] }]
+  });
+  if (res.canceled || !res.filePath) return { ok: false };
+  fs.writeFileSync(res.filePath, content, 'utf8');
+  return { ok: true, filePath: res.filePath };
+});
+ipcMain.handle('open-text-file', async (_e, { extension, filterName }) => {
+  const ext = extension || 'txt';
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Open file',
+    filters: [{ name: filterName || ext.toUpperCase(), extensions: [ext] }],
+    properties: ['openFile']
+  });
+  if (res.canceled || !res.filePaths.length) return null;
+  const filePath = res.filePaths[0];
+  return { filePath, content: fs.readFileSync(filePath, 'utf8') };
+});
+
 // ---- AI enrichment (main process holds the API keys) ----
 ipcMain.handle('ai-status', () => {
   try { return ai.status(); } catch (e) { return { text: false, image: false, error: String(e) }; }

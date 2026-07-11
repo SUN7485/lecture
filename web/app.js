@@ -35,6 +35,7 @@
     'btn-export': { text: '⬇ PDF', title: "تصدير PDF — اختر «Save as PDF» في نافذة الطباعة" },
     'btn-save': { text: '💾 حفظ HTML', title: 'تنزيل ملف HTML المعدّل (Ctrl+S)' },
     'btn-open-2': { text: '📂 اختر ملف HTML' },
+    'btn-theme': { text: '🎨 الثيم', title: 'الثيمات الجاهزة، تصدير واستيراد .theme.json' },
   };
   function applyArabicUi() {
     document.documentElement.setAttribute('dir', 'rtl');
@@ -376,6 +377,7 @@
     { id: 'numerals', ar: 'تبديل الأرقام عربي لاتيني', en: 'Toggle numerals', run: () => $('#btn-numerals').click() },
     { id: 'date-hijri', ar: 'إدراج تاريخ هجري', en: 'Insert Hijri date', run: () => $('#btn-date-hijri').click() },
     { id: 'date-greg', ar: 'إدراج تاريخ ميلادي', en: 'Insert Gregorian date', run: () => $('#btn-date-greg').click() },
+    { id: 'theme', ar: 'الثيمات وتصدير/استيراد', en: 'Theme presets / export / import', run: () => toggleThemePop() },
   ];
 
   let cmdkEl = null, cmdkIndex = 0, cmdkFiltered = ACTIONS;
@@ -438,6 +440,124 @@
     return !!(iae && iae.isContentEditable);
   }
 
+  // ---------- Theme files + built-in presets (012) ----------
+  // Web has no brand-kit modal yet, so this is a small toolbar popover with
+  // the same three actions as the Electron Brand Kit's theme section: MiM
+  // (colors-only here — no ministry font files to fetch client-side), two
+  // neutral palette+font-pair presets, and Export/Import of a .theme.json.
+  // All three reuse editor.applyThemeKit — no second theming mechanism.
+  function varsToCss(vars) {
+    const decls = Object.keys(vars || {}).map(k => `${k}:${vars[k]};`).join('');
+    return decls ? `:root{${decls}}` : '';
+  }
+  function typoCss(p) {
+    return `@import url('https://fonts.googleapis.com/css2?family=${encodeURIComponent(p.heading)}:wght@700&family=${encodeURIComponent(p.body)}:wght@400;700&display=swap');\n` +
+      `.slide h1,.slide h2,.slide h3{font-family:'${p.heading}',sans-serif;}\n` +
+      `.slide .content,.slide p,.slide li{font-family:'${p.body}',sans-serif;line-height:${p.lineHeight};}`;
+  }
+  const NEUTRAL_PRESETS = {
+    Slate: {
+      vars: { '--purple': '#2B3A55', '--cyan': '#5AA9C9', '--pink': '#8AA6B8', '--gold': '#8AA6B8',
+        '--dark': '#1A1A1A', '--bg-gray': '#F2F4F6', '--white': '#FFFFFF',
+        '--grey-dark': '#5B6470', '--grey-mid': '#9AA5B1', '--grey-light': '#E3E7EC' },
+      typo: { heading: 'Cairo', body: 'Tajawal', lineHeight: 1.75 },
+    },
+    Warm: {
+      vars: { '--purple': '#7A4E2D', '--cyan': '#C97B4A', '--pink': '#E3B27B', '--gold': '#E3B27B',
+        '--dark': '#241A12', '--bg-gray': '#FBF3EA', '--white': '#FFFFFF',
+        '--grey-dark': '#6B5A4A', '--grey-mid': '#B39B86', '--grey-light': '#EFE2D3' },
+      typo: { heading: 'Almarai', body: 'Cairo', lineHeight: 1.8 },
+    },
+  };
+  let themeName = '';
+  function applyBuiltinPreset(name) {
+    if (!editor) { status('Open a file first.'); return; }
+    if (name === 'MiM') {
+      editor.applyBrandTheme([], 'MiM'); // exact BRAND_PALETTES.MiM; no font files client-side
+    } else {
+      const p = NEUTRAL_PRESETS[name];
+      if (!p) return;
+      editor.applyThemeKit({ name, fonts: [], varsCss: varsToCss(p.vars) + '\n' + typoCss(p.typo) });
+    }
+    themeName = name;
+    status(`Applied "${name}" preset.`);
+  }
+  function extractLiveFonts(cssText) {
+    const fonts = [];
+    const re = /@font-face\{([^}]*)\}/g;
+    let m;
+    while ((m = re.exec(cssText || ''))) {
+      const body = m[1];
+      const fam = (body.match(/font-family:\s*'([^']+)'/) || [])[1];
+      const weight = parseInt((body.match(/font-weight:\s*(\d+)/) || [])[1], 10) || 400;
+      const src = body.match(/url\(data:([^;]+);base64,([^)]+)\)\s*format\('([^']+)'\)/);
+      if (!fam || !src) continue;
+      const fmt = src[3];
+      const ext = fmt === 'truetype' ? 'ttf' : fmt === 'woff2' ? 'woff2' : fmt === 'woff' ? 'woff' : 'otf';
+      fonts.push({ family: fam, weight, ext, b64: src[2] });
+    }
+    return fonts;
+  }
+  function exportTheme() {
+    if (!editor) { status('Open a file first.'); return; }
+    const vars = {};
+    editor.detectVars().forEach(v => { vars[v.name] = v.declared || v.value; });
+    const style = editor.doc.getElementById('ve-theme');
+    const fonts = style ? extractLiveFonts(style.textContent) : [];
+    const name = themeName || editor.activeThemeKit() || 'Untitled';
+    const json = window.ThemeIO.toJson({ name, vars, fonts });
+    const blob = new Blob([json], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name.replace(/[^\w-]+/g, '-') + '.theme.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    status(`Exported "${name}" theme.`);
+  }
+  async function importThemeFile(file) {
+    if (!editor || !file) return;
+    let parsed;
+    try { parsed = window.ThemeIO.parse(await file.text()); }
+    catch (e) { status('Theme import failed: ' + e.message); return; }
+    editor.applyThemeKit(parsed);
+    themeName = parsed.name;
+    status(`Imported theme "${parsed.name}".`);
+  }
+
+  let themePop = null, themeFileInput = null;
+  function ensureThemePop() {
+    if (themePop) return themePop;
+    themePop = document.createElement('div');
+    themePop.id = 'theme-pop';
+    themePop.innerHTML =
+      '<div class="tp-title">Presets</div>' +
+      '<div class="tp-row"><button data-preset="MiM">✨ MiM</button><button data-preset="Slate">🩶 Slate</button><button data-preset="Warm">🟤 Warm</button></div>' +
+      '<div class="tp-title">.theme.json</div>' +
+      '<div class="tp-row"><button data-export>⬇ Export</button><button data-import>⬆ Import</button></div>';
+    themePop.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => applyBuiltinPreset(b.dataset.preset)));
+    themePop.querySelector('[data-export]').addEventListener('click', exportTheme);
+    themeFileInput = document.createElement('input');
+    themeFileInput.type = 'file'; themeFileInput.accept = '.theme.json,application/json'; themeFileInput.hidden = true;
+    themeFileInput.addEventListener('change', () => { importThemeFile(themeFileInput.files[0]); themeFileInput.value = ''; });
+    themePop.querySelector('[data-import]').addEventListener('click', () => themeFileInput.click());
+    document.body.appendChild(themePop);
+    document.body.appendChild(themeFileInput);
+    return themePop;
+  }
+  function toggleThemePop() {
+    if (!editor) { status('Open a file first.'); return; }
+    const pop = ensureThemePop();
+    const btn = $('#btn-theme');
+    const r = btn.getBoundingClientRect();
+    pop.style.left = Math.max(4, r.left) + 'px';
+    pop.classList.toggle('open');
+  }
+  document.addEventListener('mousedown', (e) => {
+    if (themePop && themePop.classList.contains('open') && !themePop.contains(e.target) && e.target.id !== 'btn-theme') {
+      themePop.classList.remove('open');
+    }
+  });
+
   // ---------- drag & drop ----------
   ['dragover', 'drop'].forEach(evt =>
     window.addEventListener(evt, (e) => e.preventDefault()));
@@ -486,6 +606,7 @@
     editor.insertDate('greg');
     status('Gregorian date inserted.');
   });
+  $('#btn-theme').addEventListener('click', toggleThemePop);
   $('#btn-zoom-in').addEventListener('click', () => setZoom(zoom * 1.2));
   $('#btn-zoom-out').addEventListener('click', () => setZoom(zoom / 1.2));
   $('#btn-zoom-label').addEventListener('click', fitZoom);

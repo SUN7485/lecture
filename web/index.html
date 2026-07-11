@@ -54,6 +54,14 @@
   .cmdk-list { list-style:none; margin:0; padding:6px; max-height:50vh; overflow-y:auto; direction:rtl; }
   .cmdk-row { padding:9px 12px; border-radius:8px; cursor:pointer; font-size:13.5px; }
   .cmdk-row.on { background:#3d4961; }
+  /* ---------- Theme popover (012) ---------- */
+  #theme-pop { position:fixed; top:56px; z-index:210; display:none; background:var(--panel); border:1px solid #46536f;
+               border-radius:10px; box-shadow:0 12px 40px rgba(0,0,0,.5); padding:10px; width:230px; }
+  #theme-pop.open { display:block; }
+  #theme-pop .tp-title { font-size:11.5px; font-weight:700; color:var(--muted); margin:6px 2px 4px; }
+  #theme-pop .tp-row { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+  #theme-pop button { width:100%; text-align:center; }
+  #theme-pop .tp-row button { width:auto; flex:1; }
 </style>
 </head>
 <body>
@@ -71,6 +79,7 @@
     <button id="btn-numerals" title="Toggle numeral system: Arabic ⇄ Latin">١٢٣ ⇄ 123</button>
     <button id="btn-date-hijri" title="Insert Hijri date">📅 Hijri</button>
     <button id="btn-date-greg" title="Insert Gregorian date">📅 Gregorian</button>
+    <button id="btn-theme" title="Theme presets, export &amp; import a .theme.json">🎨 Theme</button>
     <span class="spacer"></span>
     <button id="btn-export" class="primary" title="Export to PDF — choose 'Save as PDF' in the print dialog">⬇ PDF</button>
     <button id="btn-save" class="primary" title="Download the edited HTML (Ctrl+S)">💾 Save HTML</button>
@@ -89,6 +98,7 @@
   <input type="file" id="img-input" accept="image/*" multiple hidden>
   <script src="editor.js"></script>
   <script src="doctor.js"></script>
+  <script src="theme.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

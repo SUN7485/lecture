@@ -27,5 +27,9 @@ contextBridge.exposeInMainWorld('api', {
   pickFonts: () => ipcRenderer.invoke('pick-fonts'),
   brandKitsGet: () => ipcRenderer.invoke('brandkits-get'),
   brandKitsSave: (kit) => ipcRenderer.invoke('brandkits-save', kit),
-  brandKitsDelete: (name) => ipcRenderer.invoke('brandkits-delete', name)
+  brandKitsDelete: (name) => ipcRenderer.invoke('brandkits-delete', name),
+
+  // ---- Generic text file save/open (theme files, etc.) ----
+  saveTextFile: (payload) => ipcRenderer.invoke('save-text-file', payload),
+  openTextFile: (payload) => ipcRenderer.invoke('open-text-file', payload)
 });

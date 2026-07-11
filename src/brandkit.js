@@ -52,6 +52,98 @@
     setStatus(`Applied "${p.label}" typography preset.`);
   }
 
+  // ---------- Theme files (.theme.json) + built-in presets (012) ----------
+  // Two neutral presets (palette + font-pair, reusing the SAME typoCss/applyThemeKit
+  // path as 011B) — MiM is not re-transcribed here, it reuses editor.applyBrandTheme
+  // (the exact BRAND_PALETTES.MiM the ✨ button already applies).
+  const NEUTRAL_PRESETS = {
+    Slate: {
+      vars: { '--purple': '#2B3A55', '--cyan': '#5AA9C9', '--pink': '#8AA6B8', '--gold': '#8AA6B8',
+        '--dark': '#1A1A1A', '--bg-gray': '#F2F4F6', '--white': '#FFFFFF',
+        '--grey-dark': '#5B6470', '--grey-mid': '#9AA5B1', '--grey-light': '#E3E7EC' },
+      typo: { heading: 'Cairo', body: 'Tajawal', lineHeight: 1.75 },
+    },
+    Warm: {
+      vars: { '--purple': '#7A4E2D', '--cyan': '#C97B4A', '--pink': '#E3B27B', '--gold': '#E3B27B',
+        '--dark': '#241A12', '--bg-gray': '#FBF3EA', '--white': '#FFFFFF',
+        '--grey-dark': '#6B5A4A', '--grey-mid': '#B39B86', '--grey-light': '#EFE2D3' },
+      typo: { heading: 'Almarai', body: 'Cairo', lineHeight: 1.8 },
+    },
+  };
+  async function applyMiMPreset() {
+    const editor = getEditor();
+    if (!editor) return;
+    let fonts = [];
+    try { fonts = await api.getFonts(); } catch (_) { fonts = []; }
+    editor.applyBrandTheme(fonts, 'MiM'); // exact BRAND_PALETTES.MiM — not retyped
+    kit = { name: 'MiM', vars: {}, fonts: [] };
+    refreshActive();
+    setStatus('Applied MiM preset (screen palette).');
+  }
+  function applyNeutralPreset(name) {
+    const editor = getEditor();
+    const p = NEUTRAL_PRESETS[name];
+    if (!editor || !p) return;
+    editor.applyThemeKit({ name, fonts: [], varsCss: varsToCss(p.vars) + '\n' + typoCss(p.typo) });
+    kit = { name, vars: Object.assign({}, p.vars), fonts: [] };
+    refreshActive();
+    setStatus(`Applied "${name}" preset.`);
+  }
+  function applyBuiltinPreset(name) {
+    if (name === 'MiM') applyMiMPreset(); else applyNeutralPreset(name);
+  }
+
+  // Parse the live #ve-theme <style> for @font-face rules — reflects whatever
+  // is CURRENTLY applied (MiM/preset/upload) regardless of how it got there,
+  // so Export always exports a byte-accurate, re-importable snapshot.
+  function extractLiveFonts(cssText) {
+    const fonts = [];
+    const re = /@font-face\{([^}]*)\}/g;
+    let m;
+    while ((m = re.exec(cssText || ''))) {
+      const body = m[1];
+      const fam = (body.match(/font-family:\s*'([^']+)'/) || [])[1];
+      const weight = parseInt((body.match(/font-weight:\s*(\d+)/) || [])[1], 10) || 400;
+      const src = body.match(/url\(data:([^;]+);base64,([^)]+)\)\s*format\('([^']+)'\)/);
+      if (!fam || !src) continue;
+      const fmt = src[3];
+      const ext = fmt === 'truetype' ? 'ttf' : fmt === 'woff2' ? 'woff2' : fmt === 'woff' ? 'woff' : 'otf';
+      fonts.push({ family: fam, weight, ext, b64: src[2] });
+    }
+    return fonts;
+  }
+  function buildLiveKit() {
+    const editor = getEditor();
+    const vars = {};
+    editor.detectVars().forEach(v => { vars[v.name] = v.declared || v.value; });
+    const style = editor.doc.getElementById('ve-theme');
+    const fonts = style ? extractLiveFonts(style.textContent) : [];
+    return { name: kit.name || editor.activeThemeKit() || 'Untitled', vars, fonts };
+  }
+  async function exportTheme() {
+    const editor = getEditor();
+    if (!editor) { setStatus('Open a lecture first.'); return; }
+    const liveKit = buildLiveKit();
+    const json = window.ThemeIO.toJson(liveKit);
+    const suggested = (liveKit.name || 'theme').replace(/[^\w-]+/g, '-') + '.theme.json';
+    const res = await api.saveTextFile({ content: json, suggestedName: suggested, extension: 'json', filterName: 'Theme JSON' });
+    if (res && res.ok) setStatus(`Exported "${liveKit.name}" theme to ${res.filePath}.`);
+  }
+  async function importThemeFile() {
+    const editor = getEditor();
+    if (!editor) { setStatus('Open a lecture first.'); return; }
+    const res = await api.openTextFile({ extension: 'json', filterName: 'Theme JSON' });
+    if (!res) return;
+    let parsed;
+    try { parsed = window.ThemeIO.parse(res.content); }
+    catch (e) { setStatus('Theme import failed: ' + e.message); return; }
+    editor.applyThemeKit(parsed);
+    kit = { name: parsed.name, vars: window.ThemeIO.parseVarsCss(parsed.varsCss), fonts: parsed.fonts };
+    refreshActive();
+    if (modal) { modal.querySelector('#kit-name').value = kit.name; renderColors(); renderFonts(); }
+    setStatus(`Imported theme "${parsed.name}".`);
+  }
+
   async function open() {
     const editor = getEditor();
     if (!editor) { setStatus('Open a lecture first.'); return; }
@@ -97,6 +189,18 @@
           `<div class="kit-sec"><div class="kit-stitle">🅰 خطوط عربية جاهزة <span class="kit-hint">— Arabic typography presets</span></div>` +
             `<div class="kit-fams" id="kit-typo">${TYPO_PRESETS.map(p => `<button class="kit-chip" data-typo="${p.id}">${escapeHtml(p.label)}</button>`).join('')}</div>` +
           `</div>` +
+
+          `<div class="kit-sec"><div class="kit-stitle">🧩 ملف الثيم <span class="kit-hint">— presets, export &amp; import a .theme.json</span></div>` +
+            `<div class="kit-fams" id="kit-presets">` +
+              `<button class="kit-chip" data-preset="MiM">✨ MiM</button>` +
+              `<button class="kit-chip" data-preset="Slate">🩶 Slate</button>` +
+              `<button class="kit-chip" data-preset="Warm">🟤 Warm</button>` +
+            `</div>` +
+            `<div class="kit-fams">` +
+              `<button data-export-theme>⬇ تصدير الثيم</button>` +
+              `<button data-import-theme>⬆ استيراد الثيم</button>` +
+            `</div>` +
+          `</div>` +
         `</div>` +
         `<div class="modal-foot kit-foot">` +
           `<input id="kit-name" placeholder="Kit name (e.g. Acme Corp)" spellcheck="false">` +
@@ -126,6 +230,11 @@
     backdrop.querySelectorAll('#kit-typo [data-typo]').forEach(btn => {
       btn.addEventListener('click', () => applyTypography(TYPO_PRESETS.find(p => p.id === btn.dataset.typo)));
     });
+    backdrop.querySelectorAll('#kit-presets [data-preset]').forEach(btn => {
+      btn.addEventListener('click', () => applyBuiltinPreset(btn.dataset.preset));
+    });
+    backdrop.querySelector('[data-export-theme]').addEventListener('click', exportTheme);
+    backdrop.querySelector('[data-import-theme]').addEventListener('click', importThemeFile);
 
     backdrop.querySelector('#kit-name').value = kit.name || '';
     backdrop.querySelector('[data-new]').addEventListener('click', () => { kit = freshKit(getEditor()); modal.querySelector('#kit-name').value = ''; renderColors(); renderFonts(); });
