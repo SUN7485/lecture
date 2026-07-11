@@ -274,6 +274,80 @@
     // record the current DOM as one undo step and refresh the toolbar buttons.
     commit() { this._pushHistory(); this._emit(); }
 
+    // Turn leading markdown tokens typed into a block into real structure, once,
+    // when an inline edit ends. Only acts on the FIRST text node's leading token
+    // so Arabic/English mid-line content is never touched.
+    _applyShorthand(el) {
+      if (!el || !el.firstChild || el.firstChild.nodeType !== 3) return false;
+      var t = el.firstChild.nodeValue;
+      var m = t.match(/^(#{1,3}|-|\d+\.)\s+/);
+      if (!m) return false;
+      var token = m[1];
+      el.firstChild.nodeValue = t.slice(m[0].length); // strip the token
+      var d = this.doc;
+      if (token === '-') {
+        var li = d.createElement('li'), ul = d.createElement('ul');
+        while (el.firstChild) li.appendChild(el.firstChild);
+        ul.appendChild(li); el.replaceWith(ul); return true;
+      }
+      if (/^\d+\.$/.test(token)) {
+        var li2 = d.createElement('li'), ol = d.createElement('ol');
+        while (el.firstChild) li2.appendChild(el.firstChild);
+        ol.appendChild(li2); el.replaceWith(ol); return true;
+      }
+      var level = token.length; // #,##,### -> h1/h2/h3
+      var h = d.createElement('h' + level);
+      while (el.firstChild) h.appendChild(el.firstChild);
+      el.replaceWith(h); return true;
+    }
+
+    // Per-deck numeral system. Walks visible text nodes and swaps digits both ways.
+    // Marks the deck with data-ve-numerals on <html> so the choice survives export.
+    setNumerals(system) { // 'ar' | 'latin'
+      var toAr = system === 'ar';
+      var self = this;
+      var NUM_AR = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+      var walk = this.doc.createTreeWalker(this.doc.body, NodeFilter.SHOW_TEXT, null);
+      var nodes = [], n;
+      while ((n = walk.nextNode())) {
+        if (n.parentElement && n.parentElement.closest('script,style,.ve-overlay,.ve-toolbar')) continue;
+        nodes.push(n);
+      }
+      nodes.forEach(function (node) {
+        node.nodeValue = toAr
+          ? node.nodeValue.replace(/[0-9]/g, function (d) { return NUM_AR[+d]; })
+          : node.nodeValue.replace(/[٠-٩]/g, function (d) { return String(NUM_AR.indexOf(d)); });
+      });
+      this.doc.documentElement.setAttribute('data-ve-numerals', system);
+      this._pushHistory();
+    }
+
+    // Insert a formatted Arabic date (Hijri or Gregorian) at the caret/selection
+    // inside the currently text-editing element, or append to the current slide's
+    // title if nothing is being edited. One undo step.
+    insertDate(kind) { // 'hijri' | 'greg'
+      var locale = kind === 'hijri' ? 'ar-SA-u-ca-islamic' : 'ar-SA';
+      var str = new Intl.DateTimeFormat(locale, { dateStyle: 'long' }).format(new Date());
+      var target = this._editingEl;
+      if (target) {
+        var sel = this.win.getSelection();
+        if (sel.rangeCount && target.contains(sel.anchorNode)) {
+          var rng = sel.getRangeAt(0);
+          rng.deleteContents();
+          rng.insertNode(this.doc.createTextNode(str));
+          rng.collapse(false);
+        } else {
+          target.appendChild(this.doc.createTextNode(str));
+        }
+      } else {
+        var slide = this.selected ? this.slides()[this.slideIndexOf(this.selected)] : this.slides()[0];
+        if (!slide) return;
+        var h = slide.querySelector('h1,h2');
+        if (h) h.appendChild(this.doc.createTextNode(' — ' + str));
+      }
+      this._pushHistory();
+    }
+
     _onKey(e) {
       // While editing text, let the browser handle typing and native undo.
       if (this._editingEl) {
@@ -384,6 +458,9 @@
         el.classList.remove('ve-editing');
         this._editingEl = null;
         if (this._editBar) { this._editBar.remove(); this._editBar = null; }
+        // Markdown shorthand (# / - / 1.) only on plain text blocks, never on
+        // an element that's already a heading/list-item.
+        if (el.tagName === 'P' || el.tagName === 'DIV') this._applyShorthand(el);
         this._pushHistory();
       };
       el.addEventListener('blur', end, { once: true });

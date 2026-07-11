@@ -296,6 +296,111 @@
     pw.print();
   }
 
+  // ---------- Speed layer (009): Ctrl+K command palette + slide hotkeys ----------
+  // ACTIONS is the single source of truth: the palette lists it, hotkeys below
+  // dispatch the same run() functions, so the two entry points never drift.
+  function currentSlideEl() {
+    if (editor.selected) { const s = editor._slideOf(editor.selected); if (s) return s; }
+    return pickTargetSlide();
+  }
+  function scrollToSlide(s) {
+    const top = (s.offsetTop) * zoom;
+    stage.scrollTop = Math.max(0, top - 24);
+  }
+  function gotoSlide(dir) {
+    if (!editor) return;
+    const slides = editor.slides();
+    if (!slides.length) return;
+    let idx = slides.indexOf(currentSlideEl());
+    if (idx < 0) idx = 0;
+    idx = Math.max(0, Math.min(slides.length - 1, idx + dir));
+    editor.select(slides[idx]);
+    scrollToSlide(slides[idx]);
+  }
+  function slideDeleteAction() {
+    if (!editor) { status('Open a file first.'); return; }
+    const s = currentSlideEl();
+    if (!s) { status('No slide to delete.'); return; }
+    if (editor.slides().length <= 1) { status('Cannot delete the only slide.'); return; }
+    editor.deleteSlide(s);
+    status('Slide deleted.');
+  }
+  const ACTIONS = [
+    { id: 'open', ar: 'فتح ملف', en: 'Open file', run: () => fileInput.click() },
+    { id: 'save', ar: 'حفظ', en: 'Save', run: saveHtml },
+    { id: 'export-pdf', ar: 'تصدير PDF', en: 'Export PDF', run: exportPdf },
+    { id: 'insert-text', ar: 'إدراج نص', en: 'Insert text', run: () => { if (!editor) return status('Open a file first.'); editor.beginPlace('text'); status('Click on the page where the text should go… (Esc cancels)'); } },
+    { id: 'insert-image', ar: 'إدراج صورة', en: 'Insert image', run: () => { if (!editor) return status('Open a file first.'); imgMode = 'insert'; imgInput.click(); } },
+    { id: 'add-slide', ar: 'إضافة شريحة', en: 'Add slide', run: () => { if (!editor) return status('Open a file first.'); editor.addSlide(currentSlideEl()); status('New slide added. Edit its title and content.'); } },
+    { id: 'dup-slide', ar: 'تكرار الشريحة', en: 'Duplicate slide', run: () => { if (!editor) return status('Open a file first.'); editor.duplicateSlide(currentSlideEl()); status('Slide duplicated.'); } },
+    { id: 'del-slide', ar: 'حذف الشريحة', en: 'Delete slide', run: slideDeleteAction },
+    { id: 'next-slide', ar: 'الشريحة التالية', en: 'Next slide', run: () => gotoSlide(1) },
+    { id: 'prev-slide', ar: 'الشريحة السابقة', en: 'Previous slide', run: () => gotoSlide(-1) },
+    { id: 'undo', ar: 'تراجع', en: 'Undo', run: () => editor && editor.undo() },
+    { id: 'redo', ar: 'إعادة', en: 'Redo', run: () => editor && editor.redo() },
+    { id: 'doctor', ar: 'فحص الشرائح', en: 'Run doctor', run: () => { if (window.SlideDoctor) toggleDoctor(); } },
+  ];
+
+  let cmdkEl = null, cmdkIndex = 0, cmdkFiltered = ACTIONS;
+
+  function ensureCmdk() {
+    if (cmdkEl) return cmdkEl;
+    cmdkEl = document.createElement('div');
+    cmdkEl.id = 'cmdk';
+    cmdkEl.innerHTML = '<div class="cmdk-box"><input class="cmdk-input" placeholder="اكتب أمرًا… (Type a command…)"><ul class="cmdk-list"></ul></div>';
+    cmdkEl.addEventListener('mousedown', (e) => { if (e.target === cmdkEl) closeCmdk(); });
+    const input = cmdkEl.querySelector('.cmdk-input');
+    input.addEventListener('input', () => { cmdkIndex = 0; renderCmdk(input.value); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); cmdkIndex = Math.min(cmdkFiltered.length - 1, cmdkIndex + 1); renderCmdk(input.value); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); cmdkIndex = Math.max(0, cmdkIndex - 1); renderCmdk(input.value); }
+      else if (e.key === 'Enter') { e.preventDefault(); runCmdk(cmdkIndex); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeCmdk(); }
+    });
+    document.body.appendChild(cmdkEl);
+    return cmdkEl;
+  }
+  function renderCmdk(q) {
+    const needle = (q || '').trim().toLowerCase();
+    cmdkFiltered = !needle ? ACTIONS : ACTIONS.filter(a => (a.ar + ' ' + a.en + ' ' + a.id).toLowerCase().includes(needle));
+    if (cmdkIndex >= cmdkFiltered.length) cmdkIndex = 0;
+    const list = cmdkEl.querySelector('.cmdk-list');
+    list.innerHTML = '';
+    cmdkFiltered.forEach((a, i) => {
+      const li = document.createElement('li');
+      li.className = 'cmdk-row' + (i === cmdkIndex ? ' on' : '');
+      li.textContent = `${a.ar} — ${a.en}`;
+      li.addEventListener('mousedown', (e) => { e.preventDefault(); runCmdk(i); });
+      list.appendChild(li);
+    });
+  }
+  function runCmdk(i) {
+    const a = cmdkFiltered[i];
+    closeCmdk();
+    if (a) a.run();
+  }
+  function openCmdk() {
+    const el = ensureCmdk();
+    el.classList.add('open');
+    cmdkIndex = 0;
+    const input = el.querySelector('.cmdk-input');
+    input.value = '';
+    renderCmdk('');
+    input.focus();
+  }
+  function closeCmdk() { if (cmdkEl) cmdkEl.classList.remove('open'); }
+  window.__openCmdk = openCmdk; // hook for automated tests
+
+  // True while the user is typing in a normal input/textarea or editing text
+  // inside the deck — slide hotkeys and shorthand must never fire there.
+  function typingElsewhere() {
+    const ae = document.activeElement;
+    if (ae && /^(input|textarea)$/i.test(ae.tagName)) return true;
+    if (ae && ae.isContentEditable) return true;
+    const iae = editor && editor.doc && editor.doc.activeElement;
+    return !!(iae && iae.isContentEditable);
+  }
+
   // ---------- drag & drop ----------
   ['dragover', 'drop'].forEach(evt =>
     window.addEventListener(evt, (e) => e.preventDefault()));
@@ -333,8 +438,16 @@
   window.addEventListener('resize', () => applyZoom());
   window.addEventListener('keydown', (e) => {
     if (!editor) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openCmdk(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? editor.redo() : editor.undo(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); editor.redo(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveHtml(); }
+    // ---- 009 slide hotkeys: skip entirely while typing text elsewhere ----
+    else if (typingElsewhere()) { /* no-op */ }
+    else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); editor.addSlide(currentSlideEl()); status('New slide added. Edit its title and content.'); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); editor.duplicateSlide(currentSlideEl()); status('Slide duplicated.'); }
+    else if ((e.ctrlKey || e.metaKey) && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); slideDeleteAction(); }
+    else if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); gotoSlide(1); }
+    else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); gotoSlide(-1); }
   });
 })();
