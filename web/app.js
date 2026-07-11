@@ -37,6 +37,7 @@
       editor.onChange = ({ canUndo, canRedo }) => {
         btnUndo.disabled = !canUndo;
         btnRedo.disabled = !canRedo;
+        if (window.SlideDoctor) runDoctor(); // keep the 🩺 badge live as the user edits
       };
       editor.onReplaceRequest = () => { imgMode = 'replace'; imgInput.click(); };
       editor.onPlaced = (type) => {
@@ -47,12 +48,119 @@
       editor.onSlidesChanged = () => {};
       editor.attach(iframe);
       window.__editor = editor; // hook for automated tests
+      if (window.SlideDoctor) runDoctor(); // seed the 🩺 badge count for this deck
       fitZoom();
       status('Ready. Double-click any text to edit it; drag any element to move it.');
     };
     emptyState.hidden = true;
     zoomWrap.hidden = false;
     iframe.srcdoc = html;
+  }
+
+  // ---------- Slide Doctor (008B): lint badge + docked issue list ----------
+  // UI over window.SlideDoctor.analyze(editor). Issue objects are invalid across
+  // editor.commit()/undo() — always re-scan (runDoctor) rather than reuse them.
+  let drOpen = false;
+  let drIssues = [];
+  let drDock = null;
+
+  function ensureDoctorDock() {
+    if (drDock) return drDock;
+    drDock = document.createElement('aside');
+    drDock.id = 'doctor-dock';
+    drDock.innerHTML =
+      '<div class="dr-head">🩺 فحص الشرائح<span class="spacer"></span>' +
+      '<button class="dr-x" title="إغلاق">✕</button></div>' +
+      '<div class="dr-list"></div>';
+    drDock.querySelector('.dr-x').addEventListener('click', () => toggleDoctor());
+    document.body.appendChild(drDock); // fixed overlay on the right (web has no #body)
+    return drDock;
+  }
+
+  function runDoctor() {
+    if (!editor || !window.SlideDoctor) return;
+    drIssues = window.SlideDoctor.analyze(editor);
+    const btn = $('#btn-doctor');
+    btn.textContent = '🩺 الفحص' + (drIssues.length ? ` (${drIssues.length})` : '');
+    btn.classList.toggle('has-issues', drIssues.length > 0);
+    if (drOpen) renderDoctor();
+  }
+
+  function renderDoctor() {
+    const list = ensureDoctorDock().querySelector('.dr-list');
+    list.innerHTML = '';
+    if (!drIssues.length) {
+      list.innerHTML = '<div class="dr-empty">لا توجد ملاحظات — الشرائح سليمة ✅</div>';
+      return;
+    }
+    // Errors first, then warnings.
+    [{ sev: 'error', label: 'أخطاء', cls: 'err' }, { sev: 'warn', label: 'تنبيهات', cls: 'warn' }]
+      .forEach((g) => {
+        const rows = drIssues
+          .map((iss, idx) => ({ iss, idx }))
+          .filter((x) => x.iss.severity === g.sev);
+        if (!rows.length) return;
+        const gh = document.createElement('div');
+        gh.className = 'dr-group';
+        gh.textContent = `${g.label} (${rows.length})`;
+        list.appendChild(gh);
+        rows.forEach(({ iss }) => list.appendChild(doctorRow(iss, g.cls)));
+      });
+  }
+
+  function doctorRow(iss, cls) {
+    const row = document.createElement('div');
+    row.className = `dr-row ${cls}`;
+    const chip = document.createElement('span');
+    chip.className = 'dr-chip';
+    chip.textContent = `شريحة ${iss.slideIndex + 1}`;
+    const msg = document.createElement('div');
+    msg.textContent = iss.message;
+    row.appendChild(chip);
+    row.appendChild(msg);
+    if (iss.fix) {
+      const fix = document.createElement('button');
+      fix.className = 'dr-fix';
+      fix.textContent = 'إصلاح';
+      fix.addEventListener('click', (e) => {
+        e.stopPropagation();
+        iss.fix(); editor.commit(); runDoctor(); // re-scan: iss is stale after commit
+        status('تم الإصلاح.');
+      });
+      row.appendChild(fix);
+    }
+    row.addEventListener('click', () => focusIssue(iss));
+    return row;
+  }
+
+  function focusIssue(issue) {
+    const el = issue.el;
+    if (!el || !el.isConnected) return;
+    // The iframe is scaled by `zoom`; center the element inside the scrolling stage.
+    // Slides are position:relative, so el.offsetTop is slide-relative — accumulate
+    // offsetTop up the offsetParent chain to get the true document-top of the element.
+    const z = (typeof zoom === 'number') ? zoom : 1;
+    const stageEl = $('#stage');
+    let y = 0;
+    for (let n = el; n; n = n.offsetParent) y += n.offsetTop;
+    const top = (y + el.offsetHeight / 2) * z - stageEl.clientHeight / 2;
+    stageEl.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    const d = editor.doc;
+    if (!d.getElementById('ve-dr-style')) {
+      const st = d.createElement('style');
+      st.id = 've-dr-style';
+      st.textContent = '.ve-dr-flash{outline:3px solid #e11d48 !important;outline-offset:2px;transition:outline-color .2s;}';
+      d.head.appendChild(st);
+    }
+    el.classList.add('ve-dr-flash');
+    setTimeout(() => el.classList.remove('ve-dr-flash'), 1600);
+  }
+
+  function toggleDoctor() {
+    if (!editor) { status('Open a file first.'); return; }
+    drOpen = !drOpen;
+    ensureDoctorDock().classList.toggle('open', drOpen);
+    if (drOpen) { runDoctor(); renderDoctor(); }
   }
 
   // ---------- zoom ----------
@@ -216,6 +324,7 @@
   });
   $('#btn-undo').addEventListener('click', () => editor && editor.undo());
   $('#btn-redo').addEventListener('click', () => editor && editor.redo());
+  $('#btn-doctor').addEventListener('click', toggleDoctor);
   $('#btn-zoom-in').addEventListener('click', () => setZoom(zoom * 1.2));
   $('#btn-zoom-out').addEventListener('click', () => setZoom(zoom / 1.2));
   $('#btn-zoom-label').addEventListener('click', fitZoom);

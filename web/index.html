@@ -27,6 +27,25 @@
   #empty-state h1 { color:var(--text); font-size:22px; margin:0 0 8px; }
   #status { padding:5px 12px; background:var(--panel); color:var(--muted); border-top:1px solid #000;
             white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* ---------- Slide Doctor dock (008B): fixed overlay on the right (web has no #body flex row) ---------- */
+  #doctor-dock { position:fixed; top:56px; right:0; bottom:28px; width:340px; z-index:20;
+                 display:none; flex-direction:column; background:#fbfbfd; color:#1f2733;
+                 border-inline-start:1px solid #d3d9e3; box-shadow:-2px 0 14px rgba(0,0,0,.35); }
+  #doctor-dock.open { display:flex; }
+  .dr-head { display:flex; align-items:center; gap:8px; padding:9px 12px; border-bottom:1px solid #dde3ec; font-weight:700; color:#1f2733; }
+  .dr-head .spacer { flex:1; }
+  .dr-x { padding:2px 9px; background:#eef2ff; color:#1f2733; border:1px solid #c7d2fe; }
+  .dr-list { direction:rtl; flex:1; overflow-y:auto; padding:8px 12px; display:flex; flex-direction:column; gap:8px; }
+  .dr-group { font-size:11.5px; font-weight:700; color:#6b7280; margin-top:6px; }
+  .dr-row { border:1px solid #e5e7eb; border-radius:9px; background:#fff; padding:8px 10px; cursor:pointer;
+            display:flex; flex-direction:column; gap:6px; color:#1f2733; }
+  .dr-row:hover { border-color:#b9a6ef; }
+  .dr-row.err { border-inline-start:3px solid #e11d48; }
+  .dr-row.warn { border-inline-start:3px solid #d97706; }
+  .dr-chip { align-self:flex-start; font-size:10.5px; background:#eef2ff; border:1px solid #c7d2fe; border-radius:999px; padding:1px 8px; }
+  .dr-fix { align-self:flex-start; padding:3px 10px; font-size:12px; background:#333d52; color:#e8ecf3; border:1px solid #46536f; }
+  #btn-doctor.has-issues { color:#ff6b6b; font-weight:700; }
+  .dr-empty { color:#6b7280; text-align:center; padding:24px 8px; font-size:13px; }
 </style>
 </head>
 <body>
@@ -40,6 +59,7 @@
     <button id="btn-zoom-out" title="Zoom out">−</button>
     <button id="btn-zoom-label" title="Fit to window">100%</button>
     <button id="btn-zoom-in" title="Zoom in">+</button>
+    <button id="btn-doctor" title="فحص الشرائح — نص كثيف، تباين، خطوط، صور مشوّهة، تسمية الأشكال">🩺 الفحص</button>
     <span class="spacer"></span>
     <button id="btn-export" class="primary" title="Export to PDF — choose 'Save as PDF' in the print dialog">⬇ PDF</button>
     <button id="btn-save" class="primary" title="Download the edited HTML (Ctrl+S)">💾 Save HTML</button>
@@ -57,6 +77,7 @@
   <input type="file" id="file-input" accept=".html,.htm" hidden>
   <input type="file" id="img-input" accept="image/*" multiple hidden>
   <script src="editor.js"></script>
+  <script src="doctor.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

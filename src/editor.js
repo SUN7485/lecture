@@ -270,6 +270,10 @@
     canRedo() { return this.redoStack.length > 0; }
     _emit() { this.onChange({ canUndo: this.canUndo(), canRedo: this.canRedo() }); }
 
+    // Public history checkpoint for external mutators (e.g. Slide Doctor fixes):
+    // record the current DOM as one undo step and refresh the toolbar buttons.
+    commit() { this._pushHistory(); this._emit(); }
+
     _onKey(e) {
       // While editing text, let the browser handle typing and native undo.
       if (this._editingEl) {
