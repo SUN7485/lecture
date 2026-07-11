@@ -705,6 +705,9 @@
     { id: 'redo', ar: 'إعادة', en: 'Redo', run: () => editor && editor.redo() },
     { id: 'doctor', ar: 'فحص الشرائح', en: 'Run doctor', run: () => { if (window.SlideDoctor) toggleDoctor(); } },
     { id: 'brand', ar: 'تبديل هوية MiM', en: 'Toggle brand theme', run: () => btnBrand.click() },
+    { id: 'numerals', ar: 'تبديل الأرقام عربي لاتيني', en: 'Toggle numerals', run: () => $('#btn-numerals').click() },
+    { id: 'date-hijri', ar: 'إدراج تاريخ هجري', en: 'Insert Hijri date', run: () => $('#btn-date-hijri').click() },
+    { id: 'date-greg', ar: 'إدراج تاريخ ميلادي', en: 'Insert Gregorian date', run: () => $('#btn-date-greg').click() },
   ];
 
   let cmdkEl = null, cmdkIndex = 0, cmdkFiltered = ACTIONS;
@@ -903,6 +906,27 @@
   $('#btn-brandkit').addEventListener('click', () => {
     if (!editor) { status('Open a lecture first.'); return; }
     if (window.BrandKit) window.BrandKit.open();
+  });
+
+  // ---------- Arabic-first pack (011): numeral toggle + date helper ----------
+  $('#btn-numerals').addEventListener('click', () => {
+    if (!editor) { status('Open a lecture first.'); return; }
+    // Untouched decks carry plain Western digits, so an unset attribute means
+    // 'latin' — the first click's default action is to convert TO Arabic-Indic.
+    const cur = editor.doc.documentElement.getAttribute('data-ve-numerals') || 'latin';
+    const next = cur === 'ar' ? 'latin' : 'ar';
+    editor.setNumerals(next);
+    status(next === 'ar' ? 'تم التحويل إلى الأرقام العربية (١٢٣).' : 'Converted to Western numerals (123).');
+  });
+  $('#btn-date-hijri').addEventListener('click', () => {
+    if (!editor) { status('Open a lecture first.'); return; }
+    editor.insertDate('hijri');
+    status('تم إدراج التاريخ الهجري.');
+  });
+  $('#btn-date-greg').addEventListener('click', () => {
+    if (!editor) { status('Open a lecture first.'); return; }
+    editor.insertDate('greg');
+    status('تم إدراج التاريخ الميلادي.');
   });
 
   // ---------- Settings (API keys) ----------

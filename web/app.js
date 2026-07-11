@@ -22,6 +22,40 @@
 
   function status(msg) { statusEl.textContent = msg; }
 
+  // ---------- Arabic-first pack (011E): RTL + Arabic UI when the browser asks for it ----------
+  // Simple lookup, no i18n framework — English is the default/fallback.
+  const AR_LABELS = {
+    brand: { text: '📘 محرر الشرائح' },
+    'btn-open': { text: '📂 فتح', title: 'فتح ملف HTML' },
+    'btn-add-text': { text: '➕ نص', title: 'إدراج كتلة نص' },
+    'btn-add-image': { text: '🖼 صورة', title: 'إدراج صورة (تُضمَّن داخل الملف)' },
+    'btn-undo': { text: '↶ تراجع', title: 'تراجع (Ctrl+Z)' },
+    'btn-redo': { text: '↷ إعادة', title: 'إعادة (Ctrl+Y)' },
+    'btn-zoom-label': { title: 'ملء النافذة' },
+    'btn-export': { text: '⬇ PDF', title: "تصدير PDF — اختر «Save as PDF» في نافذة الطباعة" },
+    'btn-save': { text: '💾 حفظ HTML', title: 'تنزيل ملف HTML المعدّل (Ctrl+S)' },
+    'btn-open-2': { text: '📂 اختر ملف HTML' },
+  };
+  function applyArabicUi() {
+    document.documentElement.setAttribute('dir', 'rtl');
+    document.documentElement.setAttribute('lang', 'ar');
+    Object.keys(AR_LABELS).forEach((id) => {
+      const el = id === 'brand' ? document.querySelector('.toolbar .brand, #toolbar .brand') : document.getElementById(id);
+      if (!el) return;
+      const l = AR_LABELS[id];
+      if (l.text) el.textContent = l.text;
+      if (l.title) el.title = l.title;
+    });
+    const h1 = document.querySelector('#empty-state h1');
+    if (h1) h1.textContent = 'حرّر أي صفحة HTML وكأنها عرض شرائح';
+    const p1 = document.querySelector('#empty-state p');
+    if (p1) p1.innerHTML = 'أفلت ملف .html هنا — من ChatGPT أو Claude أو Gemini؟ عدّل النص، وحرّك أي عنصر أو غيّر حجمه، ثم نزّل الملف أو صدّره PDF.';
+    const p2 = document.querySelector('#empty-state p + p');
+    if (p2) p2.innerHTML = '<strong>لا يُرفع شيء لأي خادم.</strong> كل شيء يعمل داخل متصفحك.';
+    status('افتح ملف HTML للبدء.');
+  }
+  if (navigator.language && navigator.language.toLowerCase().startsWith('ar')) applyArabicUi();
+
   // ---------- open ----------
   async function openFile(file) {
     if (!file) return;
@@ -339,6 +373,9 @@
     { id: 'undo', ar: 'تراجع', en: 'Undo', run: () => editor && editor.undo() },
     { id: 'redo', ar: 'إعادة', en: 'Redo', run: () => editor && editor.redo() },
     { id: 'doctor', ar: 'فحص الشرائح', en: 'Run doctor', run: () => { if (window.SlideDoctor) toggleDoctor(); } },
+    { id: 'numerals', ar: 'تبديل الأرقام عربي لاتيني', en: 'Toggle numerals', run: () => $('#btn-numerals').click() },
+    { id: 'date-hijri', ar: 'إدراج تاريخ هجري', en: 'Insert Hijri date', run: () => $('#btn-date-hijri').click() },
+    { id: 'date-greg', ar: 'إدراج تاريخ ميلادي', en: 'Insert Gregorian date', run: () => $('#btn-date-greg').click() },
   ];
 
   let cmdkEl = null, cmdkIndex = 0, cmdkFiltered = ACTIONS;
@@ -430,6 +467,25 @@
   $('#btn-undo').addEventListener('click', () => editor && editor.undo());
   $('#btn-redo').addEventListener('click', () => editor && editor.redo());
   $('#btn-doctor').addEventListener('click', toggleDoctor);
+  $('#btn-numerals').addEventListener('click', () => {
+    if (!editor) { status('Open a file first.'); return; }
+    // Untouched decks carry plain Western digits, so an unset attribute means
+    // 'latin' — the first click's default action is to convert TO Arabic-Indic.
+    const cur = editor.doc.documentElement.getAttribute('data-ve-numerals') || 'latin';
+    const next = cur === 'ar' ? 'latin' : 'ar';
+    editor.setNumerals(next);
+    status(next === 'ar' ? 'Converted to Arabic-Indic numerals (١٢٣).' : 'Converted to Western numerals (123).');
+  });
+  $('#btn-date-hijri').addEventListener('click', () => {
+    if (!editor) { status('Open a file first.'); return; }
+    editor.insertDate('hijri');
+    status('Hijri date inserted.');
+  });
+  $('#btn-date-greg').addEventListener('click', () => {
+    if (!editor) { status('Open a file first.'); return; }
+    editor.insertDate('greg');
+    status('Gregorian date inserted.');
+  });
   $('#btn-zoom-in').addEventListener('click', () => setZoom(zoom * 1.2));
   $('#btn-zoom-out').addEventListener('click', () => setZoom(zoom / 1.2));
   $('#btn-zoom-label').addEventListener('click', fitZoom);

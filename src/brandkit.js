@@ -26,6 +26,32 @@
   const getEditor = () => window.__editor;
   const setStatus = (m) => { const el = document.querySelector('#status'); if (el) el.textContent = m; };
 
+  // ---------- Arabic typography presets (011B) ----------
+  // Metadata only (family names + line-height) layered on top of the SAME
+  // applyThemeKit mechanism as the palette/fonts above — no new theming path.
+  // Line-heights are tuned generously so tashkeel (diacritics) doesn't clip.
+  const TYPO_PRESETS = [
+    { id: 'cairo-tajawal', label: 'Cairo + Tajawal', heading: 'Cairo', body: 'Tajawal', lineHeight: 1.75 },
+    { id: 'amiri-almarai', label: 'Amiri + Almarai', heading: 'Amiri', body: 'Almarai', lineHeight: 1.85 },
+    { id: 'changa-cairo', label: 'Changa + Cairo', heading: 'Changa', body: 'Cairo', lineHeight: 1.7 },
+  ];
+  function varsToCss(vars) {
+    const decls = Object.keys(vars || {}).map(k => `${k}:${vars[k]};`).join('');
+    return decls ? `:root{${decls}}` : '';
+  }
+  function typoCss(p) {
+    return `@import url('https://fonts.googleapis.com/css2?family=${encodeURIComponent(p.heading)}:wght@700&family=${encodeURIComponent(p.body)}:wght@400;700&display=swap');\n` +
+      `.slide h1,.slide h2,.slide h3{font-family:'${p.heading}',sans-serif;}\n` +
+      `.slide .content,.slide p,.slide li{font-family:'${p.body}',sans-serif;line-height:${p.lineHeight};}`;
+  }
+  function applyTypography(p) {
+    const editor = getEditor();
+    if (!editor) return;
+    editor.applyThemeKit({ name: kit.name || editor.activeThemeKit() || 'custom', fonts: kit.fonts, varsCss: varsToCss(kit.vars) + '\n' + typoCss(p) });
+    refreshActive();
+    setStatus(`Applied "${p.label}" typography preset.`);
+  }
+
   async function open() {
     const editor = getEditor();
     if (!editor) { setStatus('Open a lecture first.'); return; }
@@ -67,6 +93,10 @@
             `<button data-addfont>＋ Upload fonts…</button>` +
             (detectedFams.length ? `<div class="kit-fams" id="kit-fams"><span class="kit-hint">Lecture fonts (click to alias the last font):</span></div>` : '') +
           `</div>` +
+
+          `<div class="kit-sec"><div class="kit-stitle">🅰 خطوط عربية جاهزة <span class="kit-hint">— Arabic typography presets</span></div>` +
+            `<div class="kit-fams" id="kit-typo">${TYPO_PRESETS.map(p => `<button class="kit-chip" data-typo="${p.id}">${escapeHtml(p.label)}</button>`).join('')}</div>` +
+          `</div>` +
         `</div>` +
         `<div class="modal-foot kit-foot">` +
           `<input id="kit-name" placeholder="Kit name (e.g. Acme Corp)" spellcheck="false">` +
@@ -92,6 +122,10 @@
         box.appendChild(chip);
       });
     }
+
+    backdrop.querySelectorAll('#kit-typo [data-typo]').forEach(btn => {
+      btn.addEventListener('click', () => applyTypography(TYPO_PRESETS.find(p => p.id === btn.dataset.typo)));
+    });
 
     backdrop.querySelector('#kit-name').value = kit.name || '';
     backdrop.querySelector('[data-new]').addEventListener('click', () => { kit = freshKit(getEditor()); modal.querySelector('#kit-name').value = ''; renderColors(); renderFonts(); });
