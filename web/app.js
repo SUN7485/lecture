@@ -501,6 +501,7 @@
     }
     themeName = name;
     status(`Applied "${name}" preset.`);
+    if (themePop) themePop.classList.remove('open'); // else it can overlap neighboring toolbar buttons
   }
   function extractLiveFonts(cssText) {
     const fonts = [];
@@ -533,6 +534,7 @@
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     status(`Exported "${name}" theme.`);
+    if (themePop) themePop.classList.remove('open');
   }
   async function importThemeFile(file) {
     if (!editor || !file) return;
@@ -542,6 +544,7 @@
     editor.applyThemeKit(parsed);
     themeName = parsed.name;
     status(`Imported theme "${parsed.name}".`);
+    if (themePop) themePop.classList.remove('open');
   }
 
   let themePop = null, themeFileInput = null;
