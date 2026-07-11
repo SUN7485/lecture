@@ -88,7 +88,7 @@
   <div id="stage">
     <div id="empty-state">
       <h1>Edit any HTML page like a slide deck</h1>
-      <p>Drop an .html file here — got one from ChatGPT, Claude or Gemini? Edit the text, move and resize anything like PowerPoint, then download it or export a PDF.</p>
+      <p>Drop an .html file here — got one from ChatGPT, Claude or Gemini? Edit the text, move and resize anything like PowerPoint, then download it or export a PDF. A Word (.docx) file works too — it's split into slides automatically.</p>
       <p><strong>Nothing is uploaded.</strong> Everything runs in your browser.</p>
       <button id="btn-open-2" class="primary">📂 Choose HTML file</button>
       <p style="margin-top:14px;"><a href="templates.html" style="color:var(--accent);">📑 Or start from a ready-made Arabic template →</a></p>
@@ -96,12 +96,14 @@
     <div id="zoom-wrap" hidden><iframe id="canvas"></iframe></div>
   </div>
   <div id="status">Open an HTML file to start.</div>
-  <input type="file" id="file-input" accept=".html,.htm" hidden>
+  <input type="file" id="file-input" accept=".html,.htm,.docx" hidden>
   <input type="file" id="img-input" accept="image/*" multiple hidden>
   <script src="editor.js"></script>
   <script src="doctor.js"></script>
   <script src="theme.js"></script>
   <script src="present.js"></script>
+  <script src="vendor/mammoth.browser.min.js"></script>
+  <script src="importer.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

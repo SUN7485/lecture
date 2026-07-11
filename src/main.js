@@ -66,6 +66,19 @@ ipcMain.handle('open-html', async () => {
   return { filePath, dir: path.dirname(filePath), content };
 });
 
+// ---- Word import (010B): pick a .docx, hand its bytes to the renderer ----
+// (renderer converts with the same vendored mammoth the web port uses).
+ipcMain.handle('open-docx', async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import Word document',
+    filters: [{ name: 'Word', extensions: ['docx'] }],
+    properties: ['openFile']
+  });
+  if (res.canceled || !res.filePaths.length) return null;
+  const filePath = res.filePaths[0];
+  return { filePath, base64: fs.readFileSync(filePath).toString('base64') };
+});
+
 // ---- Reopen the last lecture (offered on the empty screen) ----
 ipcMain.handle('get-last-file', () => {
   const filePath = readLastFile();

@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   openHtml: () => ipcRenderer.invoke('open-html'),
+  openDocx: () => ipcRenderer.invoke('open-docx'),
   importHtml: () => ipcRenderer.invoke('import-html'),
   autoOpen: () => ipcRenderer.invoke('auto-open'),
   getLastFile: () => ipcRenderer.invoke('get-last-file'),

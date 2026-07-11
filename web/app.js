@@ -61,10 +61,28 @@
   // ---------- open ----------
   async function openFile(file) {
     if (!file) return;
+    if (/\.docx$/i.test(file.name)) { openDocx(file); return; }
     saveName = file.name.replace(/\.html?$/i, '') + '-edited.html';
     const html = await file.text();
     loadIntoIframe(html);
     status('Opened: ' + file.name);
+  }
+
+  // ---------- Word import (010B): .docx -> mammoth -> DeckImporter -> deck ----------
+  async function openDocx(file) {
+    if (!window.mammoth || !window.DeckImporter) { status('Word import is unavailable (mammoth failed to load).'); return; }
+    status('Converting ' + file.name + '…');
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await window.mammoth.convertToHtml({ arrayBuffer });
+      const title = file.name.replace(/\.docx$/i, '');
+      const deckHtml = window.DeckImporter.fromWordHtml(result.value, { title });
+      saveName = title + '-edited.html';
+      loadIntoIframe(deckHtml);
+      status('Imported from Word: ' + file.name + (result.messages.length ? ' (' + result.messages.length + ' mammoth notice(s))' : ''));
+    } catch (e) {
+      status('Word import failed: ' + e.message);
+    }
   }
 
   function loadIntoIframe(html) {
@@ -565,8 +583,8 @@
     window.addEventListener(evt, (e) => e.preventDefault()));
   window.addEventListener('drop', (e) => {
     const files = Array.from(e.dataTransfer.files || []);
-    const html = files.find(f => /\.html?$/i.test(f.name));
-    if (html) { openFile(html); return; }
+    const doc = files.find(f => /\.html?$|\.docx$/i.test(f.name));
+    if (doc) { openFile(doc); return; }
     const imgs = files.filter(f => /^image\//.test(f.type));
     if (imgs.length && editor) { imgMode = 'insert'; handleImages(imgs); }
   });

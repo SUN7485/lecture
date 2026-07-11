@@ -34,6 +34,27 @@
     status('Opened: ' + res.filePath);
   }
 
+  // ---------- Word import (010B): .docx -> mammoth -> DeckImporter -> deck ----------
+  async function importDocx() {
+    const res = await window.api.openDocx();
+    if (!res) return;
+    if (!window.mammoth || !window.DeckImporter) { status('Word import is unavailable (mammoth failed to load).'); return; }
+    status('Converting ' + res.filePath + '…');
+    try {
+      const bytes = Uint8Array.from(atob(res.base64), (c) => c.charCodeAt(0));
+      const result = await window.mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
+      const name = res.filePath.split(/[\\/]/).pop().replace(/\.docx$/i, '');
+      const deckHtml = window.DeckImporter.fromWordHtml(result.value, { title: name });
+      const dir = res.filePath.slice(0, res.filePath.length - res.filePath.split(/[\\/]/).pop().length - 1);
+      currentFile = { filePath: dir + '\\' + name + '.html', dir, content: deckHtml };
+      window.__currentFile = currentFile;
+      loadIntoIframe(deckHtml, dir);
+      status('Imported from Word: ' + name + (result.messages.length ? ' (' + result.messages.length + ' mammoth notice(s))' : ''));
+    } catch (e) {
+      status('Word import failed: ' + e.message);
+    }
+  }
+
   function loadIntoIframe(html, dir) {
     const baseHref = 'file:///' + dir.replace(/\\/g, '/') + '/';
     const htmlWithBase = injectBase(html, baseHref);
@@ -607,6 +628,7 @@
   // ---------- Wire up ----------
   $('#btn-open').addEventListener('click', openHtml);
   $('#btn-open-2').addEventListener('click', openHtml);
+  $('#btn-import-docx').addEventListener('click', importDocx);
   $('#btn-add-images').addEventListener('click', addImages);
 
   function beginPlace(type, msg) {
@@ -692,6 +714,7 @@
   }
   const ACTIONS = [
     { id: 'open', ar: 'فتح ملف', en: 'Open file', run: openHtml },
+    { id: 'import-docx', ar: 'استيراد Word', en: 'Import Word document', run: importDocx },
     { id: 'save', ar: 'حفظ', en: 'Save', run: saveHtml },
     { id: 'export-pdf', ar: 'تصدير PDF', en: 'Export PDF', run: exportPdf },
     { id: 'insert-text', ar: 'إدراج نص', en: 'Insert text', run: () => beginPlace('text', 'Click on the page where the text should go… (Esc cancels)') },
