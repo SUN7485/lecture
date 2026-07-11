@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>قوالب شرائح تعليمية عربية جاهزة — مجانية</title>
+<meta name="description" content="خمسة قوالب شرائح تعليمية عربية جاهزة للاستخدام: مقدمة درس، مراجعة اختبار، خطة فصل دراسي، درس مقارنة، واختبار قصير. افتحها مباشرة في محرر الشرائح المجاني وعدّلها كأنها PowerPoint.">
+<style>
+  :root{ --bg:#1e2430; --panel:#273041; --text:#e8ecf3; --muted:#9aa4b8; --accent:#4f8cff; }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Cairo',system-ui,sans-serif;background:var(--bg);color:var(--text);direction:rtl;}
+  header{padding:36px 24px 18px;text-align:center;max-width:760px;margin:0 auto;}
+  header h1{font-size:26px;margin:0 0 10px;}
+  header p{color:var(--muted);font-size:15px;line-height:1.7;margin:0;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:22px;
+        max-width:1080px;margin:28px auto 60px;padding:0 24px;}
+  .card{background:var(--panel);border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.35);
+        display:flex;flex-direction:column;}
+  .thumb{position:relative;width:100%;padding-top:68.4%;background:#0e1420;overflow:hidden;}
+  .thumb iframe{position:absolute;top:0;left:0;width:950px;height:650px;border:0;pointer-events:none;
+    transform:scale(0.274);transform-origin:top left;}
+  .card-body{padding:16px 18px 18px;display:flex;flex-direction:column;gap:8px;flex:1;}
+  .card-body h2{font-size:17px;margin:0;}
+  .card-body p{font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;flex:1;}
+  .card-body a.use{margin-top:6px;display:inline-block;text-align:center;background:var(--accent);color:#fff;
+    text-decoration:none;padding:9px 14px;border-radius:8px;font-weight:700;font-size:14px;}
+  .card-body a.use:hover{opacity:.9;}
+  footer{text-align:center;color:var(--muted);font-size:13px;padding:0 24px 40px;}
+  footer a{color:var(--accent);}
+  @media (max-width:420px){ .grid{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>قوالب شرائح تعليمية عربية جاهزة</h1>
+  <p>خمسة قوالب واقعية جاهزة للاستخدام مباشرة — مقدمة درس، مراجعة اختبار، خطة فصل دراسي، درس مقارنة، واختبار قصير.
+     اضغط «استخدم القالب» ليُفتح فورًا في محرر الشرائح المجاني، حيث يمكنك تعديل كل نص وصورة كأنها PowerPoint، ثم تنزيله أو تصديره PDF. لا حاجة لحساب.</p>
+</header>
+
+<div class="grid" id="grid"></div>
+
+<footer>القوالب مبنية على نفس بنية الشرائح التي يفهمها <a href="index.html">محرر الشرائح</a> — لا حاجة لأي إعداد إضافي.</footer>
+
+<script>
+  const TEMPLATES = [
+    { id: 'lesson-intro', name: 'مقدمة درس', desc: 'غلاف، أهداف الدرس، جدول الأعمال، المصطلحات الأساسية، وملخص — لبداية أي حصة دراسية.' },
+    { id: 'exam-review', name: 'مراجعة اختبار', desc: 'مواضيع الاختبار، نموذج سؤال وجواب، الأخطاء الشائعة، وقائمة تحقق قبل الدخول للاختبار.' },
+    { id: 'semester-plan', name: 'خطة فصل دراسي', desc: 'خطة أسبوعية بجدول، أهم المحطات والتواريخ، وتوزيع الدرجات النهائي.' },
+    { id: 'comparison-lesson', name: 'درس مقارنة', desc: 'شرائح مقارنة عمودية بين مفهومين، إيجابيات وسلبيات، وخلاصة نهائية.' },
+    { id: 'quiz-deck', name: 'اختبار قصير', desc: 'أربعة أسئلة اختيار من متعدد بإجابات قابلة للكشف، وشريحة ملخص إجابات.' },
+  ];
+  const grid = document.getElementById('grid');
+  TEMPLATES.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML =
+      `<div class="thumb"><iframe src="templates/${t.id}.html" tabindex="-1"></iframe></div>` +
+      `<div class="card-body"><h2>${t.name}</h2><p>${t.desc}</p>` +
+      `<a class="use" href="index.html?template=${t.id}">استخدم القالب</a></div>`;
+    grid.appendChild(card);
+  });
+</script>
+
+</body>
+</html>

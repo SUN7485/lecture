@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>قالب درس مقارنة — محرر الشرائح العربي</title>
+<meta name="description" content="قالب جاهز لدرس مقارنة بين مفهومين: شرائح مقارنة عمودية، إيجابيات وسلبيات، وخلاصة. عدّله مجانًا في محرر الشرائح العربي.">
+<style>
+  :root{
+    --purple:#413258; --cyan:#1AD9C7; --pink:#BFA19F; --gold:#BFA19F;
+    --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
+    --grey-dark:#666666; --grey-mid:#B3B3B3; --grey-light:#E6E6E6;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap');
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg-gray);font-family:'Cairo',sans-serif;direction:rtl;}
+  .slide{width:950px;height:650px;margin:40px auto;background:var(--white);
+    padding:45px 60px;position:relative;box-shadow:0 25px 50px rgba(0,0,0,.12);
+    border-right:12px solid var(--purple);overflow:hidden;}
+  .slide h1{color:var(--purple);font-size:32px;margin:0 0 10px;border-bottom:3px solid var(--cyan);padding-bottom:8px;}
+  .slide h2{color:var(--dark);font-size:20px;margin:0 0 16px;font-weight:600;}
+  .content{font-size:17px;line-height:1.75;color:var(--dark);height:420px;overflow:hidden;}
+  .content p,.content ul,.content ol{margin:0 0 10px;}
+  .content strong{color:var(--purple);}
+  .cover-slide{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    border-right:12px solid var(--purple);background:linear-gradient(135deg,#fff 0%,var(--bg-gray) 100%);}
+  .cover-slide h1{border:none;font-size:38px;}
+  .cover-slide .kicker{color:var(--grey-dark);font-size:16px;margin-bottom:14px;font-weight:600;}
+  .cover-slide .badge{display:inline-block;background:var(--purple);color:var(--white);padding:10px 30px;
+    border-radius:8px;font-weight:700;margin-top:18px;}
+  .footer{position:absolute;bottom:20px;right:60px;left:60px;display:flex;justify-content:space-between;
+    font-size:11px;color:var(--grey-dark);border-top:1px solid var(--grey-light);padding-top:6px;}
+  .vs{display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:start;}
+  .vs .col{background:var(--bg-gray);border-radius:10px;padding:16px;border:1px solid var(--grey-light);}
+  .vs .col h3{margin:0 0 10px;color:var(--purple);font-size:18px;text-align:center;}
+  .vs .mid{display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--cyan);font-size:20px;}
+  .vs ul{margin:0;padding-inline-start:18px;}
+  .pros-cons{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .pros{background:#eefaf4;border:1px solid #bfe6cf;border-radius:10px;padding:14px 16px;}
+  .cons{background:#fdf0ee;border:1px solid #eec4bc;border-radius:10px;padding:14px 16px;}
+  .pros h3{color:#1f7a4c;margin:0 0 8px;} .cons h3{color:#a83a2a;margin:0 0 8px;}
+</style>
+</head>
+<body>
+
+<div class="slide cover-slide">
+  <div class="kicker">درس مقارنة</div>
+  <h1>المفهوم الأول مقابل المفهوم الثاني</h1>
+  <p style="font-size:18px;color:var(--grey-dark);max-width:650px;">اسم المقرر — الوحدة رقم N</p>
+  <div class="badge">إعداد: اسم المعلم</div>
+</div>
+
+<div class="slide">
+  <h1>مقارنة من حيث التعريف</h1>
+  <h2>كيف يختلف المفهومان في الأساس؟</h2>
+  <div class="content">
+    <div class="vs">
+      <div class="col"><h3>المفهوم الأول</h3><ul>
+        <li>تعريف مختصر للمفهوم الأول.</li>
+        <li>خاصية مميزة له.</li>
+        <li>مثال توضيحي.</li>
+      </ul></div>
+      <div class="mid">⇔</div>
+      <div class="col"><h3>المفهوم الثاني</h3><ul>
+        <li>تعريف مختصر للمفهوم الثاني.</li>
+        <li>خاصية مميزة له.</li>
+        <li>مثال توضيحي.</li>
+      </ul></div>
+    </div>
+  </div>
+</div>
+
+<div class="slide">
+  <h1>مقارنة من حيث الاستخدام</h1>
+  <h2>متى نستخدم كل مفهوم؟</h2>
+  <div class="content">
+    <div class="vs">
+      <div class="col"><h3>المفهوم الأول</h3><ul>
+        <li>الحالة المناسبة لاستخدامه.</li>
+        <li>مجال تطبيقي شائع.</li>
+      </ul></div>
+      <div class="mid">⇔</div>
+      <div class="col"><h3>المفهوم الثاني</h3><ul>
+        <li>الحالة المناسبة لاستخدامه.</li>
+        <li>مجال تطبيقي شائع.</li>
+      </ul></div>
+    </div>
+  </div>
+</div>
+
+<div class="slide">
+  <h1>الإيجابيات والسلبيات</h1>
+  <h2>ملخص المفاضلة بين الخيارين</h2>
+  <div class="content">
+    <div class="pros-cons">
+      <div class="pros"><h3>✓ الإيجابيات</h3><ul style="margin:0;padding-inline-start:18px;">
+        <li>ميزة أولى.</li><li>ميزة ثانية.</li></ul></div>
+      <div class="cons"><h3>✗ السلبيات</h3><ul style="margin:0;padding-inline-start:18px;">
+        <li>عيب أول.</li><li>عيب ثاني.</li></ul></div>
+    </div>
+  </div>
+</div>
+
+<div class="slide">
+  <h1>الخلاصة</h1>
+  <h2>ماذا نستنتج من هذه المقارنة؟</h2>
+  <div class="content">
+    <p>اكتب هنا الخلاصة النهائية: متى يُفضَّل اختيار المفهوم الأول، ومتى يُفضَّل الثاني، وما القاعدة العامة التي تساعد الطالب على الاختيار الصحيح في المستقبل.</p>
+  </div>
+  <div class="footer"><span>درس مقارنة</span><span>المصدر: mim.gov.sa</span></div>
+</div>
+
+</body>
+</html>

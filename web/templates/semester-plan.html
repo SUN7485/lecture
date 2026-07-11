@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>قالب خطة فصل دراسي — محرر الشرائح العربي</title>
+<meta name="description" content="قالب جاهز لخطة فصل دراسي: خطة أسبوعية، محطات رئيسية، وتوزيع الدرجات. عدّله مجانًا في محرر الشرائح العربي.">
+<style>
+  :root{
+    --purple:#413258; --cyan:#1AD9C7; --pink:#BFA19F; --gold:#BFA19F;
+    --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
+    --grey-dark:#666666; --grey-mid:#B3B3B3; --grey-light:#E6E6E6;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap');
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg-gray);font-family:'Cairo',sans-serif;direction:rtl;}
+  .slide{width:950px;height:650px;margin:40px auto;background:var(--white);
+    padding:45px 60px;position:relative;box-shadow:0 25px 50px rgba(0,0,0,.12);
+    border-right:12px solid var(--purple);overflow:hidden;}
+  .slide h1{color:var(--purple);font-size:32px;margin:0 0 10px;border-bottom:3px solid var(--cyan);padding-bottom:8px;}
+  .slide h2{color:var(--dark);font-size:20px;margin:0 0 16px;font-weight:600;}
+  .content{font-size:16px;line-height:1.7;color:var(--dark);height:420px;overflow:hidden;}
+  .content p,.content ul,.content ol{margin:0 0 10px;}
+  .content strong{color:var(--purple);}
+  .cover-slide{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    border-right:12px solid var(--purple);background:linear-gradient(135deg,#fff 0%,var(--bg-gray) 100%);}
+  .cover-slide h1{border:none;font-size:38px;}
+  .cover-slide .kicker{color:var(--grey-dark);font-size:16px;margin-bottom:14px;font-weight:600;}
+  .cover-slide .badge{display:inline-block;background:var(--purple);color:var(--white);padding:10px 30px;
+    border-radius:8px;font-weight:700;margin-top:18px;}
+  .footer{position:absolute;bottom:20px;right:60px;left:60px;display:flex;justify-content:space-between;
+    font-size:11px;color:var(--grey-dark);border-top:1px solid var(--grey-light);padding-top:6px;}
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{border:1px solid var(--grey-light);padding:7px 9px;text-align:right;}
+  th{background:var(--purple);color:var(--white);}
+  tbody tr:nth-child(even){background:var(--bg-gray);}
+  .milestone{display:flex;align-items:center;gap:14px;margin-bottom:12px;}
+  .milestone .num{width:34px;height:34px;border-radius:50%;background:var(--purple);color:var(--white);
+    display:flex;align-items:center;justify-content:center;font-weight:700;flex:none;}
+  .chip{display:inline-block;background:var(--cyan);color:var(--white);border-radius:999px;
+    padding:4px 14px;font-size:14px;font-weight:600;margin:3px;}
+</style>
+</head>
+<body>
+
+<div class="slide cover-slide">
+  <div class="kicker">خطة فصل دراسي</div>
+  <h1>خطة المقرر الدراسي</h1>
+  <p style="font-size:18px;color:var(--grey-dark);max-width:650px;">اسم المقرر — الفصل الدراسي N — العام الدراسي ١٤٤٨هـ</p>
+  <div class="badge">إعداد: اسم المعلم</div>
+</div>
+
+<div class="slide">
+  <h1>الخطة الأسبوعية</h1>
+  <h2>توزيع الموضوعات على أسابيع الفصل</h2>
+  <div class="content">
+    <table>
+      <thead><tr><th>الأسبوع</th><th>الموضوع</th><th>النشاط الرئيسي</th></tr></thead>
+      <tbody>
+        <tr><td>١</td><td>مقدمة المقرر</td><td>تعارف + خطة الفصل</td></tr>
+        <tr><td>٢-٣</td><td>الوحدة الأولى</td><td>محاضرة + تطبيق عملي</td></tr>
+        <tr><td>٤-٥</td><td>الوحدة الثانية</td><td>محاضرة + مشروع فردي</td></tr>
+        <tr><td>٦</td><td>مراجعة + اختبار قصير</td><td>اختبار منتصف الفصل</td></tr>
+        <tr><td>٧-٩</td><td>الوحدة الثالثة</td><td>محاضرة + مشروع جماعي</td></tr>
+        <tr><td>١٠</td><td>مراجعة نهائية</td><td>عرض المشاريع + الاختبار النهائي</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="slide">
+  <h1>المحطات الرئيسية</h1>
+  <h2>أهم التواريخ التي يجب تذكّرها</h2>
+  <div class="content">
+    <div class="milestone"><div class="num">١</div><div><strong>الأسبوع الأول</strong> — تسليم خطة المشروع الفردي.</div></div>
+    <div class="milestone"><div class="num">٢</div><div><strong>الأسبوع السادس</strong> — اختبار منتصف الفصل.</div></div>
+    <div class="milestone"><div class="num">٣</div><div><strong>الأسبوع الثامن</strong> — تسليم المشروع الجماعي.</div></div>
+    <div class="milestone"><div class="num">٤</div><div><strong>الأسبوع العاشر</strong> — الاختبار النهائي وعرض المشاريع.</div></div>
+  </div>
+</div>
+
+<div class="slide">
+  <h1>توزيع الدرجات</h1>
+  <h2>كيف تُحسب الدرجة النهائية</h2>
+  <div class="content">
+    <table>
+      <thead><tr><th>البند</th><th>الوزن</th></tr></thead>
+      <tbody>
+        <tr><td>المشاركة والحضور</td><td>١٠٪</td></tr>
+        <tr><td>اختبار منتصف الفصل</td><td>٢٠٪</td></tr>
+        <tr><td>المشروع الفردي</td><td>١٥٪</td></tr>
+        <tr><td>المشروع الجماعي</td><td>١٥٪</td></tr>
+        <tr><td>الاختبار النهائي</td><td>٤٠٪</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:14px;"><span class="chip">مجموع: ١٠٠٪</span></div>
+  </div>
+  <div class="footer"><span>خطة الفصل الدراسي</span><span>المصدر: mim.gov.sa</span></div>
+</div>
+
+</body>
+</html>

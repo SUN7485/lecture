@@ -627,4 +627,22 @@
     else if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); gotoSlide(1); }
     else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); gotoSlide(-1); }
   });
+
+  // ---------- Template gallery route (013): ?template=<name> ----------
+  // Loads a same-origin template deck straight into the editor, bypassing
+  // the file picker — the link from templates.html.
+  (async () => {
+    const name = new URLSearchParams(location.search).get('template');
+    if (!name || !/^[\w-]+$/.test(name)) return; // guard against unknown/unsafe names
+    try {
+      const res = await fetch('templates/' + name + '.html');
+      if (!res.ok) throw new Error('not found');
+      const html = await res.text();
+      saveName = name + '-edited.html';
+      loadIntoIframe(html);
+      status('Template loaded: ' + name);
+    } catch (_) {
+      status('Could not load template "' + name + '".');
+    }
+  })();
 })();

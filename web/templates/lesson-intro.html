@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>قالب مقدمة درس — محرر الشرائح العربي</title>
+<meta name="description" content="قالب جاهز لمقدمة درس: غلاف، أهداف الدرس، جدول الأعمال، المصطلحات الأساسية، وملخص. عدّله مجانًا في محرر الشرائح العربي.">
+<style>
+  :root{
+    --purple:#413258; --cyan:#1AD9C7; --pink:#BFA19F; --gold:#BFA19F;
+    --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
+    --grey-dark:#666666; --grey-mid:#B3B3B3; --grey-light:#E6E6E6;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap');
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg-gray);font-family:'Cairo',sans-serif;direction:rtl;}
+  .slide{width:950px;height:650px;margin:40px auto;background:var(--white);
+    padding:45px 60px;position:relative;box-shadow:0 25px 50px rgba(0,0,0,.12);
+    border-right:12px solid var(--purple);overflow:hidden;}
+  .slide h1{color:var(--purple);font-size:32px;margin:0 0 10px;border-bottom:3px solid var(--cyan);padding-bottom:8px;}
+  .slide h2{color:var(--dark);font-size:20px;margin:0 0 16px;font-weight:600;}
+  .content{font-size:18px;line-height:1.8;color:var(--dark);height:420px;overflow:hidden;}
+  .content p,.content ul,.content ol{margin:0 0 10px;}
+  .content strong{color:var(--purple);}
+  .cover-slide{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    border-right:12px solid var(--purple);background:linear-gradient(135deg,#fff 0%,var(--bg-gray) 100%);}
+  .cover-slide h1{border:none;font-size:38px;}
+  .cover-slide .kicker{color:var(--grey-dark);font-size:16px;margin-bottom:14px;font-weight:600;}
+  .cover-slide .badge{display:inline-block;background:var(--purple);color:var(--white);padding:10px 30px;
+    border-radius:8px;font-weight:700;margin-top:18px;}
+  .footer{position:absolute;bottom:20px;right:60px;left:60px;display:flex;justify-content:space-between;
+    font-size:11px;color:var(--grey-dark);border-top:1px solid var(--grey-light);padding-top:6px;}
+  .card{background:var(--bg-gray);border-radius:10px;padding:16px 18px;border:1px solid var(--grey-light);margin-bottom:10px;}
+  .card h3{margin:0 0 8px;color:var(--purple);font-size:17px;}
+  .chip{display:inline-block;background:var(--cyan);color:var(--white);border-radius:999px;
+    padding:4px 14px;font-size:14px;font-weight:600;margin:3px;}
+</style>
+</head>
+<body>
+
+<div class="slide cover-slide">
+  <div class="kicker">مقدمة درس</div>
+  <h1>عنوان الدرس هنا</h1>
+  <p style="font-size:18px;color:var(--grey-dark);max-width:650px;">اسم المقرر — الوحدة رقم N — الأسبوع رقم N</p>
+  <div class="badge">إعداد: اسم المعلم</div>
+</div>
+
+<div class="slide">
+  <h1>أهداف الدرس</h1>
+  <h2>بنهاية هذا الدرس سيكون الطالب قادرًا على:</h2>
+  <div class="content">
+    <ul>
+      <li>تعريف المفهوم الأساسي للدرس بلغته الخاصة وربطه بأمثلة واقعية.</li>
+      <li>تحليل مثال تطبيقي وتحديد خطوات الحل الصحيحة.</li>
+      <li>تصنيف الحالات المختلفة ضمن الإطار النظري الذي تمت دراسته.</li>
+      <li>تقييم نتيجة تطبيق عملي وتقديم توصية مبنية على الأدلة.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="slide">
+  <h1>جدول أعمال الحصة</h1>
+  <h2>توزيع زمني مقترح لمدة 45 دقيقة</h2>
+  <div class="content">
+    <p><strong>5 دقائق</strong> — تمهيد وربط بالدرس السابق.</p>
+    <p><strong>15 دقيقة</strong> — عرض المفهوم الجديد مع أمثلة.</p>
+    <p><strong>15 دقيقة</strong> — نشاط تطبيقي جماعي.</p>
+    <p><strong>7 دقائق</strong> — مناقشة ومراجعة سريعة.</p>
+    <p><strong>3 دقائق</strong> — تلخيص وتكليف واجب منزلي.</p>
+  </div>
+</div>
+
+<div class="slide">
+  <h1>المصطلحات الأساسية</h1>
+  <h2>مفردات لا بد من إتقانها في هذا الدرس</h2>
+  <div class="content">
+    <span class="chip">المصطلح الأول</span>
+    <span class="chip">المصطلح الثاني</span>
+    <span class="chip">المصطلح الثالث</span>
+    <span class="chip">المصطلح الرابع</span>
+    <div class="card" style="margin-top:16px;">
+      <h3>المصطلح الأول</h3>
+      <p style="margin:0;">تعريف مبسّط وواضح للمصطلح مع مثال قصير يوضّح استخدامه.</p>
+    </div>
+    <div class="card">
+      <h3>المصطلح الثاني</h3>
+      <p style="margin:0;">تعريف مبسّط وواضح للمصطلح مع مثال قصير يوضّح استخدامه.</p>
+    </div>
+  </div>
+</div>
+
+<div class="slide">
+  <h1>ملخص الدرس</h1>
+  <h2>النقاط الرئيسية التي يجب تذكّرها</h2>
+  <div class="content">
+    <ol>
+      <li>الفكرة المحورية للدرس بجملة واحدة واضحة.</li>
+      <li>أهم قاعدة أو معادلة أو خطوة تم تعلّمها.</li>
+      <li>خطأ شائع يجب الانتباه له وتجنّبه.</li>
+      <li>ما الذي سندرسه في الحصة القادمة؟</li>
+    </ol>
+  </div>
+  <div class="footer"><span>الدرس: عنوان الدرس</span><span>المصدر: mim.gov.sa</span></div>
+</div>
+
+</body>
+</html>

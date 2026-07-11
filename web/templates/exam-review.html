@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>قالب مراجعة اختبار — محرر الشرائح العربي</title>
+<meta name="description" content="قالب جاهز لمراجعة اختبار: مواضيع الاختبار، نموذج سؤال وجواب، الأخطاء الشائعة، وقائمة تحقق قبل الاختبار. عدّله مجانًا في محرر الشرائح العربي.">
+<style>
+  :root{
+    --purple:#413258; --cyan:#1AD9C7; --pink:#BFA19F; --gold:#BFA19F;
+    --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
+    --grey-dark:#666666; --grey-mid:#B3B3B3; --grey-light:#E6E6E6;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap');
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg-gray);font-family:'Cairo',sans-serif;direction:rtl;}
+  .slide{width:950px;height:650px;margin:40px auto;background:var(--white);
+    padding:45px 60px;position:relative;box-shadow:0 25px 50px rgba(0,0,0,.12);
+    border-right:12px solid var(--purple);overflow:hidden;}
+  .slide h1{color:var(--purple);font-size:32px;margin:0 0 10px;border-bottom:3px solid var(--cyan);padding-bottom:8px;}
+  .slide h2{color:var(--dark);font-size:20px;margin:0 0 16px;font-weight:600;}
+  .content{font-size:18px;line-height:1.8;color:var(--dark);height:420px;overflow:hidden;}
+  .content p,.content ul,.content ol{margin:0 0 10px;}
+  .content strong{color:var(--purple);}
+  .cover-slide{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    border-right:12px solid var(--purple);background:linear-gradient(135deg,#fff 0%,var(--bg-gray) 100%);}
+  .cover-slide h1{border:none;font-size:38px;}
+  .cover-slide .kicker{color:var(--grey-dark);font-size:16px;margin-bottom:14px;font-weight:600;}
+  .cover-slide .badge{display:inline-block;background:var(--purple);color:var(--white);padding:10px 30px;
+    border-radius:8px;font-weight:700;margin-top:18px;}
+  .footer{position:absolute;bottom:20px;right:60px;left:60px;display:flex;justify-content:space-between;
+    font-size:11px;color:var(--grey-dark);border-top:1px solid var(--grey-light);padding-top:6px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .card{background:var(--bg-gray);border-radius:10px;padding:14px 16px;border:1px solid var(--grey-light);}
+  .card h3{margin:0 0 6px;color:var(--purple);font-size:16px;}
+  .quiz{border:2px solid var(--cyan);border-radius:12px;padding:16px 20px;background:#fff;}
+  .quiz p.q{font-size:18px;font-weight:700;margin:0 0 10px;color:var(--purple);}
+  .quiz ol{list-style:none;margin:0 0 10px;padding:0;display:flex;flex-direction:column;gap:5px;}
+  .quiz li{font-size:14px;padding:6px 10px;border-radius:8px;background:var(--bg-gray);border:1px solid var(--grey-light);}
+  .quiz details{border-top:1px dashed var(--cyan);padding-top:8px;}
+  .quiz summary{cursor:pointer;font-weight:600;color:var(--cyan);}
+  .checklist li{list-style:none;padding:8px 12px;margin-bottom:6px;background:var(--bg-gray);border-radius:8px;
+    border:1px solid var(--grey-light);}
+  .checklist li::before{content:"☐ ";color:var(--purple);font-weight:700;}
+</style>
+</head>
+<body>
+
+<div class="slide cover-slide">
+  <div class="kicker">مراجعة اختبار</div>
+  <h1>مراجعة اختبار الوحدة</h1>
+  <p style="font-size:18px;color:var(--grey-dark);max-width:650px;">اسم المقرر — الاختبار رقم N</p>
+  <div class="badge">إعداد: اسم المعلم</div>
+</div>
+
+<div class="slide">
+  <h1>مواضيع الاختبار</h1>
+  <h2>الأقسام التي يغطيها الاختبار ووزنها التقريبي</h2>
+  <div class="content">
+    <div class="grid2">
+      <div class="card"><h3>الموضوع الأول (٢٥٪)</h3><p style="margin:0;">وصف موجز لما يغطيه هذا الموضوع.</p></div>
+      <div class="card"><h3>الموضوع الثاني (٢٥٪)</h3><p style="margin:0;">وصف موجز لما يغطيه هذا الموضوع.</p></div>
+      <div class="card"><h3>الموضوع الثالث (٢٥٪)</h3><p style="margin:0;">وصف موجز لما يغطيه هذا الموضوع.</p></div>
+      <div class="card"><h3>الموضوع الرابع (٢٥٪)</h3><p style="margin:0;">وصف موجز لما يغطيه هذا الموضوع.</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="slide">
+  <h1>نموذج سؤال وجواب</h1>
+  <h2>مثال على نمط الأسئلة المتوقعة</h2>
+  <div class="content">
+    <div class="quiz">
+      <p class="q">❓ نص السؤال التجريبي يظهر هنا؟</p>
+      <ol>
+        <li>أ. الخيار الأول</li>
+        <li>ب. الخيار الثاني</li>
+        <li>ج. الخيار الثالث</li>
+        <li>د. الخيار الرابع</li>
+      </ol>
+      <details>
+        <summary>إظهار الإجابة</summary>
+        <p style="margin:8px 0 0;font-size:14px;"><strong>الإجابة الصحيحة:</strong> ب. الخيار الثاني — مع شرح مختصر للسبب.</p>
+      </details>
+    </div>
+  </div>
+</div>
+
+<div class="slide">
+  <h1>الأخطاء الشائعة</h1>
+  <h2>تنبيهات قبل الدخول للاختبار</h2>
+  <div class="content">
+    <ul>
+      <li>الخلط بين المفهوم الأول والمفهوم الثاني — راجع الفرق بينهما جيدًا.</li>
+      <li>إهمال وحدات القياس عند حل المسائل الحسابية.</li>
+      <li>عدم قراءة نص السؤال كاملًا قبل اختيار الإجابة.</li>
+      <li>نسيان مراجعة الخطوة الأخيرة في المسائل متعددة الخطوات.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="slide">
+  <h1>قائمة التحقق قبل الاختبار</h1>
+  <h2>تأكد من إنجاز هذه النقاط</h2>
+  <div class="content">
+    <ul class="checklist">
+      <li>راجعت جميع المصطلحات الأساسية في الوحدة.</li>
+      <li>حللت نماذج الأسئلة السابقة كاملة.</li>
+      <li>راجعت الأخطاء الشائعة المذكورة أعلاه.</li>
+      <li>أحضرت الأدوات المطلوبة (آلة حاسبة، أقلام...).</li>
+    </ul>
+  </div>
+  <div class="footer"><span>مراجعة اختبار الوحدة</span><span>المصدر: mim.gov.sa</span></div>
+</div>
+
+</body>
+</html>
