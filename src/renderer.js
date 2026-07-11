@@ -625,16 +625,21 @@
   // ---------- MiM brand identity (one-click fonts + palette) ----------
   const btnBrand = $('#btn-brand');
   function updateBrandBtn() {
-    const on = !!(editor && editor.hasBrandTheme());
+    const kit = editor ? editor.activeThemeKit() : null;
+    const on = kit === 'MiM' || kit === 'MiM-print';
     btnBrand.classList.toggle('active', on);
-    btnBrand.textContent = on ? '✨ MiM Identity ✓' : '✨ MiM Identity';
-    btnBrand.title = on
-      ? 'MiM identity applied — real ministry fonts + official palette. Click to revert to the original.'
-      : 'Apply the full MiM identity — real ministry fonts + official color palette. Click again to revert.';
+    btnBrand.textContent = kit === 'MiM' ? '✨ MiM Screen ✓'
+      : kit === 'MiM-print' ? '✨ MiM Print ✓' : '✨ MiM Identity';
+    btnBrand.title = kit === 'MiM'
+      ? 'MiM Screen palette (brand book v1.1) applied. Click for the Print palette (Pantone sheet).'
+      : kit === 'MiM-print'
+      ? 'MiM Print palette (official Pantone sheet) applied. Click to revert to the original.'
+      : 'Apply the MiM identity — ministry fonts + official palette. Cycles: Screen → Print → off.';
   }
   btnBrand.addEventListener('click', async () => {
     if (!editor) { status('Open a lecture first.'); return; }
-    if (editor.hasBrandTheme()) {
+    const kit = editor.activeThemeKit();
+    if (kit === 'MiM-print') {
       editor.removeBrandTheme();
       updateBrandBtn();
       status('Reverted to the original fonts and colors.');
@@ -644,17 +649,19 @@
       status('Loading ministry fonts…');
       try { brandFonts = await window.api.getFonts(); } catch (_) { brandFonts = []; }
     }
-    editor.applyBrandTheme(brandFonts);
+    const next = kit === 'MiM' ? 'MiM-print' : 'MiM';
+    editor.applyBrandTheme(brandFonts, next);
     updateBrandBtn();
     const audit = editor.themeAudit();
+    const label = next === 'MiM-print' ? 'Print palette' : 'Screen palette';
+    const hint = next === 'MiM-print' ? 'Click again to revert.' : 'Click again for the Print palette.';
     if (!brandFonts.length) {
-      status('Applied MiM palette. (Fonts folder not found — colors only.)');
+      status(`Applied MiM ${label}. (Fonts folder not found — colors only.) ${hint}`);
     } else if (audit) {
       const fontMsg = audit.fontPct >= 90 ? `fonts cover ${audit.fontPct}% of text`
         : audit.fontPct > 0 ? `⚠ fonts only cover ${audit.fontPct}% of text`
         : '⚠ fonts embedded but no text uses them';
-      const colorMsg = `${audit.recolored.length}/${audit.recolored.length + audit.missed.length} colors remapped`;
-      status(`Applied MiM identity — ${fontMsg}, ${colorMsg}. Click again to compare.`);
+      status(`Applied MiM ${label} — ${fontMsg}, ${audit.recolored.length}/${audit.recolored.length + audit.missed.length} colors remapped. ${hint}`);
     }
   });
 

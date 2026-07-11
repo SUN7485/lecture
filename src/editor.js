@@ -112,18 +112,43 @@
   // Serif-leaning family names render in Lyon; everything else in Diodrum.
   const SERIF_HINT = /times|georgia|garamond|cambria|constantia|palatino|book|amiri|lora|playfair|merriweather|naskh|traditional|lyon/i;
 
-  // Official MiM palette (brand book, pages 30–34). The lecture already uses
-  // var(--purple)/var(--cyan)/var(--gold) etc., so overriding :root recolors
-  // everything. Note --gold is deliberately mapped to MiM Pink #BFA19F: gold
-  // is NOT a ministry color; pink is the real third accent. Purple-tint tokens
-  // let hardcoded fades (e.g. the title-button shadow) track the base color.
-  const BRAND_PALETTE_CSS = `:root{
-  --purple:#413258; --cyan:#1AD9C7; --pink:#BFA19F; --gold:#BFA19F;
-  --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
-  --grey-dark:#666666; --grey-mid:#B3B3B3; --grey-light:#E6E6E6;
-  --purple-70:rgba(65,50,88,.70); --purple-40:rgba(65,50,88,.40);
-  --purple-15:rgba(65,50,88,.15); --purple-08:rgba(65,50,88,.08);
-}`;
+  // Two OFFICIAL MiM palettes exist and disagree; we ship both (user decision
+  // 2026-07-10). 'MiM' = Brand Guidelines v1.1 screen hex table. 'MiM-print' =
+  // the Pantone color sheet («درجات الالوان الرسمية»), print-accurate primaries.
+  // Screen purple #413258 is confirmed against the guide's own table text
+  // (prints RGB 65,50,88 + hex 413258; #3F3355 is only the gradient stop —
+  // don't "correct" to it). Note --gold maps to MiM Pink in both: gold is not
+  // a ministry color. Purple-tint tokens let hardcoded fades track the base.
+  const BRAND_PALETTES = {
+    'MiM': `:root{
+    --purple:#413258; --cyan:#1AD9C7; --pink:#BFA19F; --gold:#BFA19F;
+    --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
+    --grey-dark:#666666; --grey-mid:#B3B3B3; --grey-light:#E6E6E6;
+    --purple-70:rgba(65,50,88,.70); --purple-40:rgba(65,50,88,.40);
+    --purple-15:rgba(65,50,88,.15); --purple-08:rgba(65,50,88,.08);
+  }`,
+    'MiM-print': `:root{
+    --purple:#5C428A; --cyan:#4BB5B1; --pink:#F0BBAC; --gold:#F0BBAC;
+    --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
+    --grey-dark:#626365; --grey-mid:#A7A9AB; --grey-light:#D5D5D5;
+    --purple-70:rgba(92,66,138,.70); --purple-40:rgba(92,66,138,.40);
+    --purple-15:rgba(92,66,138,.15); --purple-08:rgba(92,66,138,.08);
+  }`,
+  };
+
+  // Official MiM documents are lighter than the lecture template: thin accent
+  // bars, hairline dividers, airy line-height, near-flat shadows. This layer
+  // rides in the same ve-theme style (appended last in <head>, so it outranks
+  // the deck's stylesheet at equal specificity) and is removed with the kit.
+  // Class-level overrides only — decks from other templates simply no-op, and
+  // inline styles (user edits, cover button) are deliberately left alone.
+  // .slide is border-box at fixed 950x650, so thinner bars are layout-safe.
+  const BRAND_POLISH_CSS = `
+  .slide{border-right-width:12px;box-shadow:0 8px 24px rgba(0,0,0,.07)}
+  .cover-slide{border-right-width:12px;border-left-width:6px}
+  .slide h1{border-bottom-width:2px}
+  .content{line-height:1.68}
+  th,td{border-width:1px}`;
 
   class LectureEditor {
     constructor() {
@@ -1462,7 +1487,7 @@
     //         (or varsCss for a raw :root{} block, used by the MiM preset)
     hasBrandTheme() {
       const s = this.doc && this.doc.getElementById('ve-theme');
-      return !!(s && s.dataset.kit === 'MiM');
+      return !!(s && /^MiM/.test(s.dataset.kit || ''));
     }
     activeThemeKit() {
       const s = this.doc && this.doc.getElementById('ve-theme');
@@ -1504,7 +1529,7 @@
 
     // MiM preset — a one-click shortcut layered on the general kit system.
     // `fonts` = [{ name:'diodrum-bold', b64:'…' }] read from src/fonts by main.
-    applyBrandTheme(rawFonts) {
+    applyBrandTheme(rawFonts, variant) {
       // Index the raw font files: canonical family -> { weight: b64 }.
       const byFam = {};
       for (const f of (rawFonts || [])) {
@@ -1556,7 +1581,8 @@
         }
         for (const w of emit) fonts.push({ family: docFam, weight: w, style: 'normal', b64: files[w], ext: 'otf' });
       }
-      this.applyThemeKit({ name: 'MiM', fonts, varsCss: BRAND_PALETTE_CSS });
+      const kit = BRAND_PALETTES[variant] ? variant : 'MiM';
+      this.applyThemeKit({ name: kit, fonts, varsCss: BRAND_PALETTES[kit] + BRAND_POLISH_CSS });
     }
     removeBrandTheme() { this.removeThemeKit(); }
 
