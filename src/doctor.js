@@ -26,6 +26,53 @@
     var L1 = _lum(a), L2 = _lum(b), hi = Math.max(L1, L2), lo = Math.min(L1, L2);
     return (hi + 0.05) / (lo + 0.05);
   }
+  // Move a foreground color toward whichever pole (black or white) yields more
+  // contrast against `bg`, by the smallest step that reaches `need`. If neither
+  // pole can reach it (mid-gray bg), returns the full swing — the best available.
+  function _nudge(fg, bg, need) {
+    var target = _ratio([0, 0, 0], bg) >= _ratio([255, 255, 255], bg) ? [0, 0, 0] : [255, 255, 255];
+    var best = target;
+    for (var t = 0.05; t <= 1.0001; t += 0.05) {
+      var c = [fg[0] + (target[0] - fg[0]) * t,
+               fg[1] + (target[1] - fg[1]) * t,
+               fg[2] + (target[2] - fg[2]) * t];
+      if (_ratio(c, bg) >= need) { best = c; break; }
+    }
+    return [Math.round(best[0]), Math.round(best[1]), Math.round(best[2])];
+  }
+  // Parse an authored color token (hex #rgb/#rrggbb or rgb()/rgba()) into [r,g,b].
+  // Used for the deck's palette values (CSS custom props keep their authored form),
+  // unlike _rgb() below which handles resolved computed colors (always rgb()).
+  function _parseColor(str) {
+    if (!str) return null;
+    str = str.trim();
+    var m = str.match(/rgba?\(([^)]+)\)/i);
+    if (m) {
+      var p = m[1].split(',').map(function (s) { return parseFloat(s.trim()); });
+      if (p.length >= 4 && p[3] === 0) return null;
+      return [p[0], p[1], p[2]];
+    }
+    var h = str.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (h) {
+      var hex = h[1];
+      if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+      return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
+    }
+    return null;
+  }
+  // From the deck's own palette, the color CLOSEST to the current text color that
+  // still passes `need` against `bg`. Keeps the fix on-brand; null if none qualify
+  // (e.g. text over a photo) so the caller can fall back to the black/white nudge.
+  function _snapPalette(fg, bg, need, palette) {
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < palette.length; i++) {
+      var c = palette[i];
+      if (_ratio(c, bg) < need) continue;
+      var d = (c[0] - fg[0]) * (c[0] - fg[0]) + (c[1] - fg[1]) * (c[1] - fg[1]) + (c[2] - fg[2]) * (c[2] - fg[2]);
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    return best;
+  }
   // Computed color -> [r,g,b], or null when fully transparent (alpha 0) so
   // background resolution can fall through to the parent element.
   function _rgb(str) {
@@ -91,6 +138,17 @@
     var slides = editor.slides();
     var issues = [];
 
+    // Deck palette (for the on-brand low-contrast fix) + brand-theme flag (for the
+    // on-brand font-zoo fix). detectVars() returns the deck's declared CSS custom
+    // props; we keep only the ones that parse as colors.
+    var palette = [];
+    if (editor.detectVars) {
+      try {
+        editor.detectVars().forEach(function (v) { var c = _parseColor(v.value); if (c) palette.push(c); });
+      } catch (_) { palette = []; }
+    }
+    var brandOn = !!(editor.hasBrandTheme && editor.hasBrandTheme());
+
     slides.forEach(function (slide, si) {
       var texts = _textEls(slide);
 
@@ -113,20 +171,50 @@
         var bold = (parseInt(cs.fontWeight, 10) || 400) >= 700;
         var large = size >= 24 || (bold && size >= 18.66);
         var need = large ? 3 : 4.5;
-        if (ratio < need && (!worst || ratio < worst.ratio)) worst = { el: el, ratio: ratio, need: need };
+        if (ratio < need && (!worst || ratio < worst.ratio)) worst = { el: el, ratio: ratio, need: need, fg: fg, bg: bg };
       });
       if (worst) {
         issues.push({ ruleId: 'low-contrast', severity: 'error', slideIndex: si, el: worst.el,
-          message: 'تباين ضعيف بين النص والخلفية (النسبة ' + worst.ratio.toFixed(1) + ':1، المطلوب ≥' + worst.need + ').', fix: null });
+          message: 'تباين ضعيف بين النص والخلفية (النسبة ' + worst.ratio.toFixed(1) + ':1، المطلوب ≥' + worst.need + ') — الإصلاح يضبط لون النص من لوحة الألوان حتى يمرّ.',
+          fix: (function (el, fg, bg, need) { return function () {
+            // Prefer the nearest passing palette color (on-brand); else nudge to black/white.
+            var c = _snapPalette(fg, bg, need, palette) || _nudge(fg, bg, need);
+            el.style.color = 'rgb(' + c[0] + ', ' + c[1] + ', ' + c[2] + ')';
+          }; })(worst.el, worst.fg, worst.bg, worst.need) });
       }
 
-      // Rule 3 — font zoo (advisory; >2 primary families on one slide)
-      var fams = {};
-      texts.forEach(function (el) { var f = _fam(win, el); if (f) fams[f] = 1; });
-      var famList = Object.keys(fams);
+      // Rule 3 — font zoo (>2 primary families on one slide). Auto-fix collapses
+      // every text element onto the slide's dominant family (the one the most
+      // elements already use), copying that element's full computed stack so its
+      // fallbacks survive.
+      var famCount = {}, famRep = {};
+      texts.forEach(function (el) {
+        var f = _fam(win, el); if (!f) return;
+        famCount[f] = (famCount[f] || 0) + 1;
+        if (!famRep[f]) famRep[f] = el;
+      });
+      var famList = Object.keys(famCount);
       if (famList.length > FONT_LIMIT) {
-        issues.push({ ruleId: 'font-zoo', severity: 'warn', slideIndex: si, el: slide,
-          message: 'الشريحة تستخدم ' + famList.length + ' خطوط مختلفة — التزم بخطّين على الأكثر.', fix: null });
+        var fzMsg, fzFix;
+        if (brandOn) {
+          // A brand kit defines the deck's fonts in CSS; extra families are inline
+          // style="font-family" overrides. Clear them so the brand pairing wins again
+          // (same philosophy as the brand-spacing rule below).
+          fzMsg = 'الشريحة تستخدم ' + famList.length + ' خطوط مختلفة — الإصلاح يزيل تجاوزات الخط ليعود خطّ الهوية.';
+          fzFix = (function (els) { return function () {
+            els.forEach(function (el) { if (el.style && el.style.fontFamily) el.style.fontFamily = ''; });
+          }; })(texts.slice());
+        } else {
+          // No brand active: unify onto the family the most elements already use,
+          // copying its full computed stack so fallbacks survive.
+          var dom = famList.reduce(function (a, b) { return famCount[b] > famCount[a] ? b : a; });
+          var domStack = win.getComputedStyle(famRep[dom]).fontFamily;
+          fzMsg = 'الشريحة تستخدم ' + famList.length + ' خطوط مختلفة — الإصلاح يوحّدها على الخطّ الأكثر استخدامًا.';
+          fzFix = (function (els, stack, domFam) { return function () {
+            els.forEach(function (el) { if (_fam(win, el) !== domFam) el.style.fontFamily = stack; });
+          }; })(texts.slice(), domStack, dom);
+        }
+        issues.push({ ruleId: 'font-zoo', severity: 'warn', slideIndex: si, el: slide, message: fzMsg, fix: fzFix });
       }
 
       // Rules 4 & 5 — one pass over images

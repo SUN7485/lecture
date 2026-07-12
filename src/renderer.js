@@ -833,11 +833,27 @@
     drDock.id = 'doctor-dock';
     drDock.innerHTML =
       '<div class="dr-head">🩺 فحص الشرائح<span class="spacer"></span>' +
+      '<button class="dr-fixall" title="إصلاح كل الملاحظات القابلة للإصلاح">إصلاح الكل</button>' +
       '<button class="dr-x" title="إغلاق">✕</button></div>' +
       '<div class="dr-list"></div>';
+    drDock.querySelector('.dr-fixall').addEventListener('click', fixAll);
     drDock.querySelector('.dr-x').addEventListener('click', () => toggleDoctor());
     $('#body').appendChild(drDock); // flex sibling of #stage, docks on the right
     return drDock;
+  }
+
+  // Run every auto-fixable issue on the live DOM, then a SINGLE commit (one undo
+  // step). Issue `el` refs stay valid across fixes because no fix replaces an
+  // element or innerHTML — only commit/undo does, so we commit just once at the end.
+  function fixAll() {
+    if (!editor || !drIssues.length) return;
+    const fixable = drIssues.filter((i) => i.fix);
+    if (!fixable.length) { status('لا توجد ملاحظات قابلة للإصلاح تلقائيًا.'); return; }
+    const before = drIssues.length;
+    fixable.forEach((i) => i.fix());
+    editor.commit();
+    runDoctor(); // re-scan; drIssues now reflects what actually remains
+    status(`أصلحت ${before - drIssues.length} ملاحظة، المتبقّي ${drIssues.length}.`);
   }
 
   function runDoctor() {
