@@ -401,6 +401,17 @@ button.big { padding: 12px 22px; font-size: 16px; margin-top: 18px; }
 .dr-fix { align-self: flex-start; padding: 3px 10px; font-size: 12px; }
 #btn-doctor.has-issues { color: #b91c1c; font-weight: 700; }
 .dr-empty { color: #6b7280; text-align: center; padding: 24px 8px; font-size: 13px; }
+.dr-score { font-size: 11px; font-weight: 800; border-radius: 999px; padding: 1px 8px; margin-inline-start: 8px; }
+.dr-score.ok { background: #dcfce7; color: #15803d; }
+.dr-score.mid { background: #fef3c7; color: #b45309; }
+.dr-score.bad { background: #fee2e2; color: #b91c1c; }
+.dr-tabs { display: flex; gap: 4px; padding: 6px 10px 0; }
+.dr-tabs button { font-size: 11px; border: 1px solid #e5e7eb; background: #fff; border-radius: 999px; padding: 2px 10px; cursor: pointer; }
+.dr-tabs button.on { background: #ede9fe; border-color: #b9a6ef; font-weight: 700; }
+.dr-ign { border: none; background: none; color: #9ca3af; cursor: pointer; font-size: 12px; align-self: flex-start; }
+.dr-ign:hover { color: #dc2626; }
+.dr-foot { font-size: 10.5px; color: #6b7280; padding: 6px 10px; border-top: 1px solid #eee; }
+.dr-foot a { color: #7c3aed; }
 
 /* ---------- Command palette (009) ---------- */
 #cmdk { position: fixed; inset: 0; background: rgba(15,20,40,.35); z-index: 200; display: none; align-items: flex-start; justify-content: center; }

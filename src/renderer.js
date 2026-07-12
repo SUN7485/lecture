@@ -826,18 +826,29 @@
   let drOpen = false;
   let drIssues = [];
   let drDock = null;
+  let drScanMs = 0;
+  let drView = 'type';   // 'type' | 'slide' — dock grouping mode
 
   function ensureDoctorDock() {
     if (drDock) return drDock;
     drDock = document.createElement('aside');
     drDock.id = 'doctor-dock';
     drDock.innerHTML =
-      '<div class="dr-head">🩺 فحص الشرائح<span class="spacer"></span>' +
+      '<div class="dr-head">🩺 فحص الشرائح<span class="dr-score" title="درجة سلامة العرض"></span><span class="spacer"></span>' +
+      '<button class="dr-rescan" title="إعادة الفحص">🔄</button>' +
       '<button class="dr-fixall" title="إصلاح كل الملاحظات القابلة للإصلاح">إصلاح الكل</button>' +
       '<button class="dr-x" title="إغلاق">✕</button></div>' +
-      '<div class="dr-list"></div>';
+      '<div class="dr-tabs"><button data-v="type" class="on">حسب النوع</button><button data-v="slide">حسب الشريحة</button></div>' +
+      '<div class="dr-list"></div>' +
+      '<div class="dr-foot"></div>';
     drDock.querySelector('.dr-fixall').addEventListener('click', fixAll);
     drDock.querySelector('.dr-x').addEventListener('click', () => toggleDoctor());
+    drDock.querySelector('.dr-rescan').addEventListener('click', () => { runDoctor(); renderDoctor(); status('أُعيد الفحص.'); });
+    drDock.querySelectorAll('.dr-tabs button').forEach((b) => b.addEventListener('click', () => {
+      drView = b.dataset.v;
+      drDock.querySelectorAll('.dr-tabs button').forEach((x) => x.classList.toggle('on', x === b));
+      renderDoctor();
+    }));
     $('#body').appendChild(drDock); // flex sibling of #stage, docks on the right
     return drDock;
   }
@@ -858,18 +869,64 @@
 
   function runDoctor() {
     if (!editor || !window.SlideDoctor) return;
+    const t0 = performance.now();
     drIssues = window.SlideDoctor.analyze(editor);
+    drScanMs = Math.max(1, Math.round(performance.now() - t0));
     const btn = $('#btn-doctor');
     btn.textContent = '🩺 الفحص' + (drIssues.length ? ` (${drIssues.length})` : '');
     btn.classList.toggle('has-issues', drIssues.length > 0);
     if (drOpen) renderDoctor();
   }
 
+  // Health score: start at 100, errors cost 12, warnings 4. Purely a
+  // motivational readout — the list is the real product.
+  function doctorScore() {
+    const errs = drIssues.filter((i) => i.severity === 'error').length;
+    const warns = drIssues.length - errs;
+    return Math.max(0, 100 - 12 * errs - 4 * warns);
+  }
+  function renderDoctorMeta() {
+    const dock = ensureDoctorDock();
+    const score = doctorScore();
+    const pill = dock.querySelector('.dr-score');
+    pill.textContent = score + '/100';
+    pill.className = 'dr-score ' + (score >= 90 ? 'ok' : score >= 60 ? 'mid' : 'bad');
+    const ignored = editor ? editor.doc.querySelectorAll('[data-ve-dr-ignore]').length : 0;
+    const foot = dock.querySelector('.dr-foot');
+    foot.innerHTML = 'فُحصت ' + (editor ? editor.slides().length : 0) + ' شريحة في ' + drScanMs + 'ms' +
+      (ignored ? ' · <a class="dr-restore" href="#">استعادة ' + ignored + ' متجاهَلة</a>' : '');
+    const rst = foot.querySelector('.dr-restore');
+    if (rst) rst.addEventListener('click', (e) => {
+      e.preventDefault();
+      editor.doc.querySelectorAll('[data-ve-dr-ignore]').forEach((el) => el.removeAttribute('data-ve-dr-ignore'));
+      editor.commit(); runDoctor(); renderDoctor();
+      status('استُعيدت الملاحظات المتجاهَلة.');
+    });
+  }
+
   function renderDoctor() {
+    renderDoctorMeta();
     const list = ensureDoctorDock().querySelector('.dr-list');
     list.innerHTML = '';
     if (!drIssues.length) {
       list.innerHTML = '<div class="dr-empty">لا توجد ملاحظات — الشرائح سليمة ✅</div>';
+      return;
+    }
+    if (drView === 'slide') {
+      const bySlide = new Map();
+      drIssues.forEach((iss) => {
+        if (!bySlide.has(iss.slideIndex)) bySlide.set(iss.slideIndex, []);
+        bySlide.get(iss.slideIndex).push(iss);
+      });
+      [...bySlide.keys()].sort((a, b) => a - b).forEach((sIdx) => {
+        const rows = bySlide.get(sIdx);
+        const gh = document.createElement('div');
+        gh.className = 'dr-group';
+        gh.textContent = 'شريحة ' + (sIdx + 1) + ' (' + rows.length + ')';
+        list.appendChild(gh);
+        rows.sort((a, b) => (a.severity === 'error' ? 0 : 1) - (b.severity === 'error' ? 0 : 1));
+        rows.forEach((iss) => list.appendChild(doctorRow(iss, iss.severity === 'error' ? 'err' : 'warn')));
+      });
       return;
     }
     // Errors first, then warnings.
@@ -908,6 +965,20 @@
       });
       row.appendChild(fix);
     }
+    const ign = document.createElement('button');
+    ign.className = 'dr-ign';
+    ign.textContent = '✕';
+    ign.title = 'تجاهل هذه الملاحظة (تُحفظ مع الملف)';
+    ign.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const cur = iss.el.getAttribute('data-ve-dr-ignore') || '';
+      if (!(' ' + cur + ' ').includes(' ' + iss.ruleId + ' ')) {
+        iss.el.setAttribute('data-ve-dr-ignore', (cur + ' ' + iss.ruleId).trim());
+      }
+      editor.commit(); runDoctor();
+      status('تم تجاهل الملاحظة — «استعادة» في أسفل القائمة تعيدها.');
+    });
+    row.appendChild(ign);
     row.addEventListener('click', () => focusIssue(iss));
     return row;
   }
