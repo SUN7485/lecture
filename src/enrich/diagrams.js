@@ -80,7 +80,9 @@
   function titleBlock(ctx, title) {
     if (!title) return { svg: '', y0: 26 };
     const tx = ctx.rtl ? W - 24 : 24;
-    const anchor = ctx.rtl ? 'end' : 'start';
+    // Anchor at the text's leading edge so an Arabic (RTL) title's right edge
+    // sits at the right margin and flows left — "end" would clip it off-canvas.
+    const anchor = 'start';
     const barX = ctx.rtl ? W - 24 - 120 : 24;
     return {
       svg: `<text x="${tx}" y="36" text-anchor="${anchor}" font-size="19" font-weight="700" fill="${ctx.primary}">${esc(title)}</text>` +

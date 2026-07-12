@@ -87,6 +87,34 @@
     return base.length ? base : ['#413258', '#1AD9C7', '#BFA19F'];
   }
 
+  // Parse "#rrggbb" → [r,g,b] (null for anything else).
+  function rgbOf(hex) {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || '');
+    return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : null;
+  }
+  const toHex = (r, g, b) => '#' + [r, g, b].map(v =>
+    Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+  // Blend a hex toward white (amt>0) or black (amt<0) by |amt| in [0,1].
+  function shade(hex, amt) {
+    const c = rgbOf(hex); if (!c) return hex;
+    const t = amt >= 0 ? 255 : 0, k = Math.abs(amt);
+    return toHex(c[0] + (t - c[0]) * k, c[1] + (t - c[1]) * k, c[2] + (t - c[2]) * k);
+  }
+  // N distinct, on-brand bar colors: rotate the palette, then—when a single
+  // series needs more than the palette holds—derive alternating lighter/darker
+  // shades so every bar reads as its own colour instead of a wall of purple.
+  function barColors(base, n) {
+    const usable = base.filter(c => rgbOf(c)).slice(0, 3);
+    const src = usable.length ? usable : ['#413258', '#1AD9C7', '#BFA19F'];
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const c = src[i % src.length];
+      const cycle = Math.floor(i / src.length);
+      out.push(cycle === 0 ? c : shade(c, (cycle % 2 ? 0.22 : -0.18) * Math.ceil(cycle / 2)));
+    }
+    return out;
+  }
+
   // Horizontal bar chart — the safe default for long Arabic category labels.
   // opts: { palette:[hex], width, rtl, fontFamily, title }
   function buildBarChartSVG(data, opts = {}) {
@@ -121,7 +149,12 @@
     const x = (v) => rtl
       ? plotL + plotW - (v / niceMax) * plotW    // grows right→left
       : plotL + (v / niceMax) * plotW;
-    const axisAnchor = rtl ? 'end' : 'start';    // category labels hug the bars
+    // Category/title labels hug the OUTER edge (right in RTL, left in LTR) and
+    // flow inward. That outer edge is where the text's own reading starts, so
+    // the anchor is always "start" — NOT "end". Using "end" in RTL anchors the
+    // Arabic run's left edge at the right margin, so the text flows off-canvas
+    // and gets clipped by the SVG's overflow:hidden.
+    const axisAnchor = 'start';
 
     const parts = [];
     parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" ` +
@@ -129,7 +162,7 @@
       `role="img">`);
     parts.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="#FFFFFF"/>`);
     if (title) {
-      parts.push(`<text x="${rtl ? W - 10 : 10}" y="30" text-anchor="${rtl ? 'end' : 'start'}" ` +
+      parts.push(`<text x="${rtl ? W - 10 : 10}" y="30" text-anchor="start" ` +
         `font-size="20" font-weight="700" fill="${colors[0]}">${esc(truncate(title, 60))}</text>`);
     }
 
@@ -144,20 +177,29 @@
         `text-anchor="middle" font-size="11" fill="${muted}">${fmt(v)}</text>`);
     }
 
+    // One series ⇒ colour each bar on its own (rotate the palette) so a simple
+    // chart looks designed, not a wall of one colour. Many series ⇒ colour by
+    // series (grouped bars) so the legend still maps colour→series.
+    const single = data.series.length === 1;
+    const perBar = single ? barColors(colors, cats.length) : null;
+
     // Bars, grouped by category.
     cats.forEach((cat, ci) => {
       const gy = padTop + ci * groupH + groupPad / 2;
       data.series.forEach((s, si) => {
         const v = s.values[ci];
         const by = gy + si * (barH + 3);
-        const color = colors[si % colors.length];
+        const color = single ? perBar[ci] : colors[si % colors.length];
         if (v != null) {
           const bx = x(v), zero = x(0);
           const left = Math.min(bx, zero), w = Math.abs(bx - zero);
           parts.push(`<rect x="${left.toFixed(1)}" y="${by}" width="${Math.max(1, w).toFixed(1)}" ` +
             `height="${barH}" rx="3" fill="${color}"/>`);
+          // Value sits just OUTSIDE the bar tip on white. Force direction=ltr on
+          // the number: inside the rtl <svg>, a bare "40" would otherwise anchor
+          // its left edge at tx and spill back over the bar (only "4" showing).
           const tx = rtl ? left - 6 : left + w + 6;
-          parts.push(`<text x="${tx.toFixed(1)}" y="${by + barH - 4}" ` +
+          parts.push(`<text x="${tx.toFixed(1)}" y="${by + barH - 4}" direction="ltr" ` +
             `text-anchor="${rtl ? 'end' : 'start'}" font-size="12" font-weight="600" ` +
             `fill="${ink}">${fmt(v)}</text>`);
         }
@@ -177,7 +219,7 @@
         const swatch = 11, textW = label.length * 8 + 20;
         if (rtl) {
           parts.push(`<rect x="${lx - swatch}" y="${ly - swatch}" width="${swatch}" height="${swatch}" rx="2" fill="${colors[si % colors.length]}"/>`);
-          parts.push(`<text x="${lx - swatch - 5}" y="${ly}" text-anchor="end" font-size="12" fill="${ink}">${esc(label)}</text>`);
+          parts.push(`<text x="${lx - swatch - 5}" y="${ly}" text-anchor="start" font-size="12" fill="${ink}">${esc(label)}</text>`);
           lx -= textW;
         } else {
           parts.push(`<rect x="${lx}" y="${ly - swatch}" width="${swatch}" height="${swatch}" rx="2" fill="${colors[si % colors.length]}"/>`);
