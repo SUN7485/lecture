@@ -18,6 +18,16 @@
   var FONT_LIMIT = 2;         // brand rule: at most two families per slide
   var ASPECT_TOL = 0.12;      // >12% aspect drift = visibly distorted image
   var IMG_MIN_AREA = 40000;   // ignore small/decorative images (~200x200)
+  var TINY_FONT = 11;        // px floor — below this (<=10px) text won't survive a projector; 11px de-emphasized footers are common and legit
+  var OVERFLOW_TOL = 8;      // px slack before slide content counts as spilling
+  var ESCAPE_TOL = 24;       // px a floated unit may stick out before flagged
+  var SHRINK_STEP = 0.93;    // one overflow fix click = one 7% font step down
+  var UPSCALE_LIMIT = 1.8;   // rendered/natural width ratio that projects blurry
+  var MIX_MIN_DIGITS = 2;    // need >=2 digits of EACH script to call it mixed
+  var DUP_MIN_WORDS = 10;    // slides shorter than this are never "duplicates"
+  var TITLE_SIZE_TOL = 2;    // px drift between slide titles before flagged
+  var OFFPAL_DIST = 4000;    // squared RGB distance from palette = foreign color
+  var GREY_SPAN = 24;        // channel spread under which a color is neutral
 
   // ---- WCAG 2.1 relative luminance + contrast ratio ----
   function _srgb(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
@@ -115,6 +125,16 @@
     return out;
   }
 
+  // A dismissed issue rides as a token in data-ve-dr-ignore on the element
+  // (or an ancestor), so «تجاهل» survives save/reload with the file itself.
+  function _ignored(el, ruleId) {
+    for (var n = el; n && n.nodeType === 1; n = n.parentElement) {
+      var ig = n.getAttribute && n.getAttribute('data-ve-dr-ignore');
+      if (ig && (' ' + ig + ' ').indexOf(' ' + ruleId + ' ') !== -1) return true;
+    }
+    return false;
+  }
+
   // Wrap an uncaptioned image in the editor's numbered-figure convention so
   // renumberFigures() (run by editor.commit) auto-labels it «شكل N — …».
   function _captionFix(img, doc) {
@@ -148,6 +168,11 @@
       } catch (_) { palette = []; }
     }
     var brandOn = !!(editor.hasBrandTheme && editor.hasBrandTheme());
+    var kitOn = !!(editor.activeThemeKit && editor.activeThemeKit());
+    // Kit spacing minimum rides as a CSS var in the kit's :root override;
+    // legacy MiM kits predate the token, so brand falls back to its constant.
+    var rootCs = win.getComputedStyle(doc.documentElement);
+    var kitLh = parseFloat(rootCs.getPropertyValue('--ve-line-height')) || (brandOn ? 1.68 : NaN);
 
     slides.forEach(function (slide, si) {
       var texts = _textEls(slide);
@@ -223,6 +248,13 @@
         var img = imgs[k];
         if (img.closest('.ve-ghost') || img.closest('[data-ve-figlist]')) continue;
 
+        // Rule 9 — broken image: a src is present but nothing decoded.
+        if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) {
+          issues.push({ ruleId: 'broken-image', severity: 'error', slideIndex: si, el: img,
+            message: 'صورة مكسورة (المصدر لا يُحمَّل) — انقرها لاستبدالها أو احذفها.', fix: null });
+          continue;
+        }
+
         // Rule 4 — stretched / distorted image (auto-fixable)
         // Only object-fit:fill (the default) distorts; contain/cover/scale-down/none all
         // preserve the image's aspect, so skip them — this is also what makes the one-click
@@ -238,6 +270,13 @@
           }
         }
 
+        // Rule 10 — upscaled beyond its pixels: will project blurry.
+        if (nw && rw && !/\.svg(\?|#|$)|image\/svg/i.test(img.currentSrc || img.src || '') &&
+            rw * rh >= IMG_MIN_AREA && rw / nw > UPSCALE_LIMIT) {
+          issues.push({ ruleId: 'blurry-image', severity: 'warn', slideIndex: si, el: img,
+            message: 'الصورة معروضة أكبر من دقتها الأصلية (' + (rw / nw).toFixed(1) + '×) وستظهر مبكسلة — استبدلها بدقة أعلى أو صغّرها.', fix: null });
+        }
+
         // Rule 5 — content image with no numbered «شكل N» caption (auto-fixable)
         if (img.offsetWidth * img.offsetHeight >= IMG_MIN_AREA) {
           var numbered = img.closest('[data-ve-figure]');
@@ -249,25 +288,199 @@
         }
       }
 
-      // Rule 6 — brand spacing drift (ONLY when a brand kit is active). The kit's
-      // BRAND_POLISH_CSS sets .content line-height 1.68; an inline edit can override
-      // it. Flag the deviation and offer to clear the override so the kit wins again.
-      if (editor.hasBrandTheme && editor.hasBrandTheme()) {
+      // Rule 6 — kit spacing drift (any kit that declares --ve-line-height,
+      // plus legacy MiM): an inline edit shrank the leading below the
+      // identity's minimum; clearing the override restores the kit. One-sided
+      // on purpose — airier-than-kit spacing is a design choice, not a bug.
+      if (kitLh) {
         var content = slide.querySelector('.content');
         if (content && content.style.lineHeight) {
           var ccs = win.getComputedStyle(content);
           var lh = parseFloat(ccs.lineHeight) / (parseFloat(ccs.fontSize) || 16);
-          if (lh && Math.abs(lh - 1.68) > 0.18) {
+          if (lh && kitLh - lh > 0.18) {
             issues.push({ ruleId: 'brand-spacing', severity: 'warn', slideIndex: si, el: content,
-              message: 'تباعد الأسطر لا يطابق هوية العلامة (المطلوب ١٫٦٨) — الإصلاح يزيل التجاوز.',
+              message: 'تباعد الأسطر أقل من قيمة الهوية (' + kitLh + ') — الإصلاح يزيل التجاوز.',
               fix: (function (c) { return function () { c.style.lineHeight = ''; }; })(content) });
           }
         }
       }
+
+      // Rule 7 — overflow: what spills outside the slide box is invisible in
+      // PDF export and present mode.
+      // (a) flow overflow — the slide scrolls taller than its box. Each fix
+      // click = one 7% font step down on this slide (floored so it never
+      // creates tiny text); the re-scan shows whether one step was enough.
+      if (slide.scrollHeight > slide.clientHeight + OVERFLOW_TOL) {
+        issues.push({ ruleId: 'overflow', severity: 'error', slideIndex: si, el: slide,
+          message: 'المحتوى أطول من الشريحة بـ ' + (slide.scrollHeight - slide.clientHeight) + 'px وسيُقصّ عند التصدير — الإصلاح يصغّر الخط درجة واحدة (كرّره أو قسّم الشريحة).',
+          fix: (function (els) { return function () {
+            els.forEach(function (el) {
+              var fs = parseFloat(win.getComputedStyle(el).fontSize);
+              if (fs) el.style.fontSize = Math.max(TINY_FONT, Math.round(fs * SHRINK_STEP * 10) / 10) + 'px';
+            });
+          }; })(texts.slice()) });
+      }
+      // (b) escapee — a drag-floated unit (position:absolute + inline left/top,
+      // exactly what editor drags produce) sticking out of the slide; the fix
+      // pulls it back to the nearest in-bounds position. Client px map 1:1 to
+      // style px here (nothing between unit and offset parent is transformed).
+      var srect = slide.getBoundingClientRect();
+      var floats = slide.querySelectorAll('[style*="position"], .ve-slot');
+      for (var f2 = 0; f2 < floats.length; f2++) {
+        var fu = floats[f2];
+        if (fu.closest('.ve-overlay, .ve-toolbar, .ve-guide, .ve-ghost')) continue;
+        var fcs = win.getComputedStyle(fu);
+        if (fcs.position !== 'absolute' || !fu.style.left || !fu.style.top) continue;
+        var frect = fu.getBoundingClientRect();
+        if (!frect.width || !frect.height) continue;
+        var overX = Math.max(srect.left - frect.left, frect.right - srect.right, 0);
+        var overY = Math.max(srect.top - frect.top, frect.bottom - srect.bottom, 0);
+        if (overX <= ESCAPE_TOL && overY <= ESCAPE_TOL) continue;
+        issues.push({ ruleId: 'off-slide', severity: 'error', slideIndex: si, el: fu,
+          message: 'عنصر خارج حدود الشريحة وسيُقصّ عند التصدير — الإصلاح يعيده إلى داخلها.',
+          fix: (function (u, sl) { return function () {
+            var sr = sl.getBoundingClientRect(), ur = u.getBoundingClientRect();
+            var dx = 0, dy = 0;
+            if (ur.left < sr.left) dx = sr.left - ur.left;
+            else if (ur.right > sr.right) dx = sr.right - ur.right;
+            if (ur.top < sr.top) dy = sr.top - ur.top;
+            else if (ur.bottom > sr.bottom) dy = sr.bottom - ur.bottom;
+            u.style.left = Math.round(parseFloat(u.style.left) + dx) + 'px';
+            u.style.top = Math.round(parseFloat(u.style.top) + dy) + 'px';
+          }; })(fu, slide) });
+      }
+
+      // Rule 8 — unreadable text: below TINY_FONT nothing survives projection.
+      var tiny = [];
+      texts.forEach(function (el) {
+        if (/^(SUB|SUP)$/i.test(el.tagName)) return;
+        var fs2 = parseFloat(win.getComputedStyle(el).fontSize);
+        if (fs2 && fs2 < TINY_FONT) tiny.push(el);
+      });
+      if (tiny.length) {
+        issues.push({ ruleId: 'tiny-font', severity: 'warn', slideIndex: si, el: tiny[0],
+          message: 'نص أصغر من ' + TINY_FONT + 'px في ' + tiny.length + ' عنصر — لن يُقرأ على الشاشة؛ الإصلاح يرفعه إلى الحد الأدنى.',
+          fix: (function (els) { return function () {
+            els.forEach(function (e2) { e2.style.fontSize = TINY_FONT + 'px'; });
+          }; })(tiny) });
+      }
+
+      // Rule 11 — mixed numeral scripts on one slide (١٢٣ next to 123 reads
+      // sloppy in a ministry deck). Fix converts the minority script to the
+      // majority one — same numbers, different glyphs, fully reversible.
+      var arDigits = (raw.match(/[٠-٩]/g) || []).length;
+      var latDigits = (raw.match(/[0-9]/g) || []).length;
+      if (arDigits >= MIX_MIN_DIGITS && latDigits >= MIX_MIN_DIGITS) {
+        issues.push({ ruleId: 'mixed-numerals', severity: 'warn', slideIndex: si, el: slide,
+          message: 'الشريحة تخلط أرقامًا عربية (١٢٣) ولاتينية (123) — الإصلاح يوحّدها على الأكثر استخدامًا.',
+          fix: (function (sl, toAr) { return function () {
+            var walker = doc.createTreeWalker(sl, 4, null, false), t;
+            while ((t = walker.nextNode())) {
+              var pe = t.parentElement;
+              if (pe && pe.closest('.ve-overlay, .ve-toolbar, .ve-guide, .ve-ghost')) continue;
+              t.nodeValue = toAr
+                ? t.nodeValue.replace(/[0-9]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.charAt(+d); })
+                : t.nodeValue.replace(/[٠-٩]/g, function (d) { return String.fromCharCode(48 + d.charCodeAt(0) - 0x0660); });
+            }
+          }; })(slide, arDigits >= latDigits) });
+      }
+
+      // Rule 13 — off-palette text color (only when a theme kit is active:
+      // the user chose an identity, the doctor enforces it). Neutrals pass;
+      // the fix snaps to the nearest palette color that keeps WCAG contrast.
+      if (kitOn && palette.length >= 3) {
+        var offEls = [], offCols = [];
+        texts.forEach(function (el) {
+          var oc = _rgb(win.getComputedStyle(el).color); if (!oc) return;
+          if (Math.max(oc[0], oc[1], oc[2]) - Math.min(oc[0], oc[1], oc[2]) < GREY_SPAN) return;
+          var dBest = Infinity;
+          for (var p2 = 0; p2 < palette.length; p2++) {
+            var pc = palette[p2];
+            var dd = (pc[0] - oc[0]) * (pc[0] - oc[0]) + (pc[1] - oc[1]) * (pc[1] - oc[1]) + (pc[2] - oc[2]) * (pc[2] - oc[2]);
+            if (dd < dBest) dBest = dd;
+          }
+          if (dBest > OFFPAL_DIST) { offEls.push(el); offCols.push(oc); }
+        });
+        if (offEls.length) {
+          issues.push({ ruleId: 'off-palette', severity: 'warn', slideIndex: si, el: offEls[0],
+            message: 'ألوان نص خارج لوحة الهوية في ' + offEls.length + ' عنصر — الإصلاح يقرّبها إلى أقرب لون من اللوحة دون كسر التباين.',
+            fix: (function (els, cols) { return function () {
+              els.forEach(function (el, i2) {
+                var bg2 = _bgOf(el, win, [255, 255, 255]);
+                var cs3 = win.getComputedStyle(el);
+                var sz = parseFloat(cs3.fontSize) || 16;
+                var bold2 = (parseInt(cs3.fontWeight, 10) || 400) >= 700;
+                var need2 = (sz >= 24 || (bold2 && sz >= 18.66)) ? 3 : 4.5;
+                var snap2 = _snapPalette(cols[i2], bg2, need2, palette);
+                if (snap2) el.style.color = 'rgb(' + snap2[0] + ', ' + snap2[1] + ', ' + snap2[2] + ')';
+              });
+            }; })(offEls, offCols) });
+        }
+      }
+
+      // Rule 15 — content slide with no heading; Rule 16 — near-empty slide.
+      // First slide, .cover-slide, and heading-only divider designs are exempt.
+      var hasHead = !!slide.querySelector('h1, h2, h3, h4');
+      if (si > 0 && !slide.classList.contains('cover-slide')) {
+        if (!hasHead && words > 15) {
+          issues.push({ ruleId: 'missing-title', severity: 'warn', slideIndex: si, el: slide,
+            message: 'الشريحة بلا عنوان — الإصلاح يضيف عنوانًا مؤقتًا حرّره بالنقر المزدوج.',
+            fix: (function (sl) { return function () {
+              var h2 = doc.createElement('h2');
+              h2.textContent = 'عنوان الشريحة';
+              var host = sl.querySelector('.content') || sl;
+              host.insertBefore(h2, host.firstChild);
+            }; })(slide) });
+        }
+        if (words < 3 && !hasHead && !slide.querySelector('img, svg, table, canvas, video')) {
+          issues.push({ ruleId: 'empty-slide', severity: 'warn', slideIndex: si, el: slide,
+            message: 'شريحة شبه فارغة — املأها أو احذفها (Ctrl+Delete).', fix: null });
+        }
+      }
     });
 
-    return issues;
+    // Rule 17 — title drift (deck-level): once >=3 content slides carry
+    // titles and a clear majority share one size, stragglers get flagged.
+    // Size-only: family drift is already the font-zoo rule's job.
+    var titles = [];
+    slides.forEach(function (slide, si) {
+      if (si === 0 || slide.classList.contains('cover-slide')) return;
+      var t = slide.querySelector('h1, h2, h3');
+      if (t && /\S/.test(t.textContent)) {
+        titles.push({ el: t, si: si, size: parseFloat(win.getComputedStyle(t).fontSize) });
+      }
+    });
+    if (titles.length >= 3) {
+      var sizeCount = {};
+      titles.forEach(function (t) {
+        var k = String(Math.round(t.size));
+        sizeCount[k] = (sizeCount[k] || 0) + 1;
+      });
+      var domSize = +Object.keys(sizeCount).reduce(function (a, b) { return sizeCount[b] > sizeCount[a] ? b : a; });
+      if (sizeCount[String(domSize)] > titles.length / 2) {
+        titles.forEach(function (t) {
+          if (Math.abs(t.size - domSize) <= TITLE_SIZE_TOL) return;
+          issues.push({ ruleId: 'title-drift', severity: 'warn', slideIndex: t.si, el: t.el,
+            message: 'حجم عنوان الشريحة (' + Math.round(t.size) + 'px) مختلف عن بقية العناوين (' + domSize + 'px) — الإصلاح يوحّده.',
+            fix: (function (el, fs3) { return function () { el.style.fontSize = fs3 + 'px'; }; })(t.el, domSize) });
+        });
+      }
+    }
+
+    // Rule 18 — duplicate slide (usually a forgotten copy). O(n) via text map.
+    var seenText = {};
+    slides.forEach(function (slide, si) {
+      var norm = (slide.textContent || '').replace(/\s+/g, ' ').trim();
+      if (norm.split(' ').length < DUP_MIN_WORDS) return;
+      if (seenText[norm] != null) {
+        issues.push({ ruleId: 'duplicate-slide', severity: 'warn', slideIndex: si, el: slide,
+          message: 'الشريحة مطابقة تمامًا للشريحة ' + (seenText[norm] + 1) + ' — غالبًا نسخة منسيّة.', fix: null });
+      } else { seenText[norm] = si; }
+    });
+
+    // Dismissed issues (data-ve-dr-ignore) drop out here, one gate for all rules.
+    return issues.filter(function (iss) { return !_ignored(iss.el, iss.ruleId); });
   }
 
-  window.SlideDoctor = { analyze: analyze, version: 1 };
+  window.SlideDoctor = { analyze: analyze, version: 3 };
 })();

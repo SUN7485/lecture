@@ -124,6 +124,7 @@
     --purple:#413258; --cyan:#1AD9C7; --pink:#BFA19F; --gold:#BFA19F;
     --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
     --grey-dark:#666666; --grey-mid:#B3B3B3; --grey-light:#E6E6E6;
+    --ve-line-height:1.68;
     --purple-70:rgba(65,50,88,.70); --purple-40:rgba(65,50,88,.40);
     --purple-15:rgba(65,50,88,.15); --purple-08:rgba(65,50,88,.08);
   }`,
@@ -131,6 +132,7 @@
     --purple:#5C428A; --cyan:#4BB5B1; --pink:#F0BBAC; --gold:#F0BBAC;
     --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
     --grey-dark:#626365; --grey-mid:#A7A9AB; --grey-light:#D5D5D5;
+    --ve-line-height:1.68;
     --purple-70:rgba(92,66,138,.70); --purple-40:rgba(92,66,138,.40);
     --purple-15:rgba(92,66,138,.15); --purple-08:rgba(92,66,138,.08);
   }`,
@@ -1780,12 +1782,32 @@
         .map(n => root.getPropertyValue(n).trim())
         .filter(v => /^#|^rgb|^hsl/i.test(v));
       const palette = [...new Set(resolved.length ? resolved : this.themeColors())];
-      const bodyFont = this.win.getComputedStyle(this.doc.body).fontFamily;
       return {
         rtl,
         palette,
-        fontFamily: bodyFont || "'Diodrum Arabic','Cairo',sans-serif"
+        fontFamily: this._themeFont()
       };
+    }
+
+    // The font generated visuals should use. Sampling the bare <body> is wrong:
+    // this deck's <body> declares no font-family, so it inherits the UA default
+    // ("Times New Roman") and drags that serif into every chart/diagram. Instead
+    // sample the elements that carry the deck's REAL fonts — a heading, then the
+    // body-copy container — and reject a bare generic/UA default, falling back to
+    // the clean Arabic sans stack the renderers were designed around.
+    _themeFont() {
+      const genericOnly = /^\s*("?(times new roman|times|serif|sans-serif|arial|georgia|roboto)"?\s*,?\s*)+$/i;
+      const els = [
+        this.doc.querySelector('.slide h2, .slide h3'),
+        this.doc.querySelector('.content p, .content li, .content'),
+        this.doc.querySelector('.slide'),
+        this.doc.body
+      ].filter(Boolean);
+      for (const el of els) {
+        const f = (this.win.getComputedStyle(el).fontFamily || '').trim();
+        if (f && !genericOnly.test(f)) return f;
+      }
+      return "'Diodrum Arabic','Cairo','Segoe UI',sans-serif";
     }
 
     // A compact per-slide summary for the AI analysis pass. Text only — no HTML.

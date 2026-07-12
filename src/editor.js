@@ -124,6 +124,7 @@
     --purple:#413258; --cyan:#1AD9C7; --pink:#BFA19F; --gold:#BFA19F;
     --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
     --grey-dark:#666666; --grey-mid:#B3B3B3; --grey-light:#E6E6E6;
+    --ve-line-height:1.68;
     --purple-70:rgba(65,50,88,.70); --purple-40:rgba(65,50,88,.40);
     --purple-15:rgba(65,50,88,.15); --purple-08:rgba(65,50,88,.08);
   }`,
@@ -131,6 +132,7 @@
     --purple:#5C428A; --cyan:#4BB5B1; --pink:#F0BBAC; --gold:#F0BBAC;
     --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
     --grey-dark:#626365; --grey-mid:#A7A9AB; --grey-light:#D5D5D5;
+    --ve-line-height:1.68;
     --purple-70:rgba(92,66,138,.70); --purple-40:rgba(92,66,138,.40);
     --purple-15:rgba(92,66,138,.15); --purple-08:rgba(92,66,138,.08);
   }`,

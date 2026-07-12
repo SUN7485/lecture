@@ -495,13 +495,13 @@
     Slate: {
       vars: { '--purple': '#2B3A55', '--cyan': '#5AA9C9', '--pink': '#8AA6B8', '--gold': '#8AA6B8',
         '--dark': '#1A1A1A', '--bg-gray': '#F2F4F6', '--white': '#FFFFFF',
-        '--grey-dark': '#5B6470', '--grey-mid': '#9AA5B1', '--grey-light': '#E3E7EC' },
+        '--grey-dark': '#5B6470', '--grey-mid': '#9AA5B1', '--grey-light': '#E3E7EC', '--ve-line-height': '1.75' },
       typo: { heading: 'Cairo', body: 'Tajawal', lineHeight: 1.75 },
     },
     Warm: {
       vars: { '--purple': '#7A4E2D', '--cyan': '#C97B4A', '--pink': '#E3B27B', '--gold': '#E3B27B',
         '--dark': '#241A12', '--bg-gray': '#FBF3EA', '--white': '#FFFFFF',
-        '--grey-dark': '#6B5A4A', '--grey-mid': '#B39B86', '--grey-light': '#EFE2D3' },
+        '--grey-dark': '#6B5A4A', '--grey-mid': '#B39B86', '--grey-light': '#EFE2D3', '--ve-line-height': '1.8' },
       typo: { heading: 'Almarai', body: 'Cairo', lineHeight: 1.8 },
     },
   };
