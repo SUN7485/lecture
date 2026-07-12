@@ -1780,12 +1780,32 @@
         .map(n => root.getPropertyValue(n).trim())
         .filter(v => /^#|^rgb|^hsl/i.test(v));
       const palette = [...new Set(resolved.length ? resolved : this.themeColors())];
-      const bodyFont = this.win.getComputedStyle(this.doc.body).fontFamily;
       return {
         rtl,
         palette,
-        fontFamily: bodyFont || "'Diodrum Arabic','Cairo',sans-serif"
+        fontFamily: this._themeFont()
       };
+    }
+
+    // The font generated visuals should use. Sampling the bare <body> is wrong:
+    // this deck's <body> declares no font-family, so it inherits the UA default
+    // ("Times New Roman") and drags that serif into every chart/diagram. Instead
+    // sample the elements that carry the deck's REAL fonts — a heading, then the
+    // body-copy container — and reject a bare generic/UA default, falling back to
+    // the clean Arabic sans stack the renderers were designed around.
+    _themeFont() {
+      const genericOnly = /^\s*("?(times new roman|times|serif|sans-serif|arial|georgia|roboto)"?\s*,?\s*)+$/i;
+      const els = [
+        this.doc.querySelector('.slide h2, .slide h3'),
+        this.doc.querySelector('.content p, .content li, .content'),
+        this.doc.querySelector('.slide'),
+        this.doc.body
+      ].filter(Boolean);
+      for (const el of els) {
+        const f = (this.win.getComputedStyle(el).fontFamily || '').trim();
+        if (f && !genericOnly.test(f)) return f;
+      }
+      return "'Diodrum Arabic','Cairo','Segoe UI',sans-serif";
     }
 
     // A compact per-slide summary for the AI analysis pass. Text only — no HTML.
