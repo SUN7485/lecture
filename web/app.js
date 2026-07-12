@@ -36,6 +36,7 @@
     'btn-save': { text: '💾 حفظ HTML', title: 'تنزيل ملف HTML المعدّل (Ctrl+S)' },
     'btn-open-2': { text: '📂 اختر ملف HTML' },
     'btn-theme': { text: '🎨 الثيم', title: 'الثيمات الجاهزة، تصدير واستيراد .theme.json' },
+    'btn-fonts': { text: '🔤 الخطوط', title: 'مكتبة الخطوط — عناوين، نص، أو العنصر المحدد' },
     'btn-present': { text: '🎤 عرض', title: 'عرض الشرائح ملء الشاشة + نافذة الملقّن' },
   };
   function applyArabicUi() {
@@ -102,6 +103,7 @@
       editor.onSlidesChanged = () => {};
       editor.attach(iframe);
       window.__editor = editor; // hook for automated tests
+      readTypoFromDeck(); // restore per-role font assignments saved in the deck
       if (window.SlideDoctor) runDoctor(); // seed the 🩺 badge count for this deck
       fitZoom();
       status('Ready. Double-click any text to edit it; drag any element to move it.');
@@ -484,6 +486,7 @@
     { id: 'date-hijri', ar: 'إدراج تاريخ هجري', en: 'Insert Hijri date', run: () => $('#btn-date-hijri').click() },
     { id: 'date-greg', ar: 'إدراج تاريخ ميلادي', en: 'Insert Gregorian date', run: () => $('#btn-date-greg').click() },
     { id: 'theme', ar: 'الثيمات وتصدير/استيراد', en: 'Theme presets / export / import', run: () => toggleThemePop() },
+    { id: 'fonts', ar: 'مكتبة الخطوط', en: 'Font library', run: () => toggleFontsPop() },
     { id: 'present', ar: 'عرض الشرائح', en: 'Present', run: () => $('#btn-present').click() },
   ];
 
@@ -613,7 +616,7 @@
     const style = editor.doc.getElementById('ve-theme');
     const fonts = style ? extractLiveFonts(style.textContent) : [];
     const name = themeName || editor.activeThemeKit() || 'Untitled';
-    const json = window.ThemeIO.toJson({ name, vars, fonts });
+    const json = window.ThemeIO.toJson({ name, vars, fonts, typography: typoState });
     const blob = new Blob([json], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -629,6 +632,9 @@
     try { parsed = window.ThemeIO.parse(await file.text()); }
     catch (e) { status('Theme import failed: ' + e.message); return; }
     editor.applyThemeKit(parsed);
+    typoState = Object.assign({ heading: null, body: null }, parsed.typography || {});
+    const st = editor.doc.getElementById('ve-theme');
+    if (st) st.dataset.veTypo = JSON.stringify(typoState);
     themeName = parsed.name;
     status(`Imported theme "${parsed.name}".`);
     if (themePop) themePop.classList.remove('open');
@@ -666,7 +672,241 @@
     if (themePop && themePop.classList.contains('open') && !themePop.contains(e.target) && e.target.id !== 'btn-theme') {
       themePop.classList.remove('open');
     }
+    if (fontsPop && fontsPop.classList.contains('open') && !fontsPop.contains(e.target) && e.target.id !== 'btn-fonts') {
+      fontsPop.classList.remove('open');
+    }
   });
+
+  // ---------- Typography Kit (017): font library + per-role fonts ----------
+  // Fonts are EMBEDDED (woff2 -> data: URL via the kit's @font-face machinery),
+  // never linked — the saved deck renders offline and inside PDF export.
+  const FONT_LIB = [
+    { family: 'Cairo', cat: 'حديثة' }, { family: 'Tajawal', cat: 'حديثة' },
+    { family: 'Almarai', cat: 'حديثة' }, { family: 'Readex Pro', cat: 'حديثة' },
+    { family: 'IBM Plex Sans Arabic', cat: 'حديثة' }, { family: 'Noto Kufi Arabic', cat: 'حديثة' },
+    { family: 'Changa', cat: 'عناوين' }, { family: 'El Messiri', cat: 'عناوين' },
+    { family: 'Aref Ruqaa', cat: 'عناوين' },
+    { family: 'Amiri', cat: 'تقليدية' }, { family: 'Noto Naskh Arabic', cat: 'تقليدية' },
+    { family: 'Markazi Text', cat: 'تقليدية' },
+  ];
+  const FONT_SAMPLE = 'العلم نور والمعرفة قوة 123';
+  let typoState = { heading: null, body: null };
+  const embeddedFams = new Set();   // families already fetched this session
+  const uploadedFonts = [];         // [{family, faces:[{family,weight,ext,b64}]}]
+
+  // Google Fonts css2 -> embedded faces. gstatic serves CORS *, so the woff2
+  // binaries can be fetched and inlined as data: URLs. css2 labels each block
+  // with a /* subset */ comment — keep arabic + latin (digits/Latin terms).
+  async function fetchGoogleFontFaces(family, weights) {
+    const url = 'https://fonts.googleapis.com/css2?family=' +
+      encodeURIComponent(family).replace(/%20/g, '+') +
+      ':wght@' + weights.join(';') + '&display=swap';
+    const css = await (await fetch(url)).text();
+    const wanted = [];
+    const re = /\/\*\s*([\w-]+)\s*\*\/\s*@font-face\s*\{([^}]*)\}/g;
+    let m;
+    while ((m = re.exec(css))) {
+      const subset = m[1], body = m[2];
+      if (subset !== 'arabic' && subset !== 'latin') continue;
+      const weight = parseInt((body.match(/font-weight:\s*(\d+)/) || [])[1], 10) || 400;
+      const src = (body.match(/src:\s*url\((https:[^)]+\.woff2)\)/) || [])[1];
+      if (src) wanted.push({ weight, src });
+    }
+    if (!wanted.length) throw new Error('لم يُعثر على أوجه مناسبة للخط');
+    const fonts = [];
+    for (const f of wanted) {
+      const buf = await (await fetch(f.src)).arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      }
+      fonts.push({ family, weight: f.weight, ext: 'woff2', b64: btoa(bin) });
+    }
+    return fonts;
+  }
+
+  // Current kit contents so a typography change PRESERVES palette + fonts.
+  // Strips @font-face (re-added from parsed fonts) and any previous ve-typo
+  // block (re-generated from typoState) — idempotent re-apply.
+  function currentKitState() {
+    const style = editor.doc.getElementById('ve-theme');
+    const fonts = style ? extractLiveFonts(style.textContent) : [];
+    let css = style ? style.textContent.replace(/@font-face\{[^}]*\}/g, '') : '';
+    css = css.replace(/\/\*ve-typo\*\/[\s\S]*?\/\*\/ve-typo\*\//, '').trim();
+    return { name: (style && style.dataset.kit) || themeName || 'custom', fonts, css };
+  }
+
+  function dedupeFonts(fonts) {
+    const seen = new Set();
+    return fonts.filter((f) => {
+      const k = f.family + '|' + (f.weight || 400) + '|' + (f.style || 'normal');
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+
+  // Re-apply the kit with merged fonts + regenerated role CSS, and persist
+  // the assignment on the style tag so save/reload/export all see it.
+  function applyTypoKit(newFaces) {
+    const cur = currentKitState();
+    const fonts = dedupeFonts(cur.fonts.concat(newFaces || []));
+    const varsCss = (cur.css ? cur.css + '\n' : '') + window.ThemeIO.typographyCss(typoState);
+    editor.applyThemeKit({ name: cur.name, fonts, varsCss });
+    const style = editor.doc.getElementById('ve-theme');
+    if (style) style.dataset.veTypo = JSON.stringify(typoState);
+  }
+
+  // role: 'heading' | 'body' | 'selection'. faces==null means already embedded.
+  async function assignFont(role, family, getFaces) {
+    if (!editor) { status('Open a file first.'); return; }
+    if (role === 'selection' && !editor.selected) { status('اختر عنصرًا في الشريحة أولًا ثم طبّق الخط.'); return; }
+    let faces = [];
+    if (!embeddedFams.has(family)) {
+      status('تحميل خط ' + family + '…');
+      try { faces = await getFaces(); }
+      catch (e) { status('تعذّر تحميل الخط — تحقق من الاتصال بالإنترنت.'); return; }
+      embeddedFams.add(family);
+    }
+    if (role === 'selection') {
+      applyTypoKit(faces);   // faces must exist in the kit for the inline style to render
+      editor.selected.style.fontFamily = "'" + family + "', sans-serif";
+      editor.commit();
+      status('طُبّق ' + family + ' على العنصر المحدد.');
+    } else {
+      typoState[role] = { family };
+      applyTypoKit(faces);
+      editor.commit();
+      status(role === 'heading' ? 'خط العناوين الآن: ' + family : 'خط النص الآن: ' + family);
+    }
+    renderFontsPop();
+  }
+
+  function clearTypography() {
+    if (!editor) return;
+    typoState = { heading: null, body: null };
+    applyTypoKit([]);
+    editor.commit();
+    status('أُزيلت تخصيصات الخطوط (الهوية والألوان باقية).');
+    renderFontsPop();
+  }
+
+  // Restore typoState when a saved deck (or imported theme) carries it.
+  function readTypoFromDeck() {
+    typoState = { heading: null, body: null };
+    const style = editor && editor.doc.getElementById('ve-theme');
+    if (style && style.dataset.veTypo) {
+      try { typoState = Object.assign(typoState, JSON.parse(style.dataset.veTypo)); } catch (_) {}
+    }
+  }
+
+  let fontsPop = null, fontUpload = null, previewsLoaded = false;
+  function loadFontPreviews() {
+    if (previewsLoaded) return;
+    previewsLoaded = true;
+    FONT_LIB.forEach((f) => {
+      const l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = 'https://fonts.googleapis.com/css2?family=' +
+        encodeURIComponent(f.family).replace(/%20/g, '+') +
+        ':wght@700&text=' + encodeURIComponent(FONT_SAMPLE + f.family) + '&display=swap';
+      document.head.appendChild(l);
+    });
+  }
+
+  function fontRow(family, getFaces) {
+    const row = document.createElement('div');
+    row.className = 'fp-row';
+    const sample = document.createElement('div');
+    sample.className = 'fp-sample';
+    sample.style.fontFamily = "'" + family + "', sans-serif";
+    sample.innerHTML = '<strong>' + family + '</strong> — ' + FONT_SAMPLE;
+    row.appendChild(sample);
+    [['heading', 'عناوين'], ['body', 'نص'], ['selection', 'المحدد']].forEach(([role, label]) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.addEventListener('click', async () => {
+        row.classList.add('busy');
+        await assignFont(role, family, getFaces);
+        row.classList.remove('busy');
+      });
+      row.appendChild(b);
+    });
+    return row;
+  }
+
+  function renderFontsPop() {
+    if (!fontsPop) return;
+    const cur = fontsPop.querySelector('.fp-current');
+    cur.innerHTML = 'العناوين: <strong>' + (typoState.heading ? typoState.heading.family : 'الافتراضي') +
+      '</strong> · النص: <strong>' + (typoState.body ? typoState.body.family : 'الافتراضي') + '</strong>';
+  }
+
+  function ensureFontsPop() {
+    if (fontsPop) return fontsPop;
+    fontsPop = document.createElement('div');
+    fontsPop.id = 'fonts-pop';
+    fontsPop.innerHTML = '<div class="fp-current"></div><div class="fp-list"></div>' +
+      '<div class="fp-tools"><button data-upload>⬆ رفع ملف خط</button><button data-clear>إزالة تخصيصات الخط</button></div>';
+    const list = fontsPop.querySelector('.fp-list');
+    let lastCat = '';
+    FONT_LIB.forEach((f) => {
+      if (f.cat !== lastCat) {
+        lastCat = f.cat;
+        const h = document.createElement('div');
+        h.className = 'fp-cat';
+        h.textContent = f.cat;
+        list.appendChild(h);
+      }
+      list.appendChild(fontRow(f.family, () => fetchGoogleFontFaces(f.family, [400, 700])));
+    });
+    fontUpload = document.createElement('input');
+    fontUpload.type = 'file';
+    fontUpload.accept = '.ttf,.otf,.woff2,.woff';
+    fontUpload.hidden = true;
+    fontUpload.addEventListener('change', () => {
+      const file = fontUpload.files[0];
+      fontUpload.value = '';
+      if (!file) return;
+      const family = file.name.replace(/\.(ttf|otf|woff2?|)$/i, '').replace(/[-_]+/g, ' ').trim() || 'خط مرفوع';
+      const ext = (file.name.match(/\.(ttf|otf|woff2?)$/i) || [, 'otf'])[1].toLowerCase();
+      const rd = new FileReader();
+      rd.onload = () => {
+        const b64 = String(rd.result).split(',')[1];
+        const faces = [{ family, weight: 400, ext, b64 }, { family, weight: 700, ext, b64 }];
+        uploadedFonts.push({ family, faces });
+        embeddedFams.delete(family);   // force the new faces into the kit on first assign
+        const h = document.createElement('div');
+        h.className = 'fp-cat';
+        h.textContent = 'مرفوع';
+        list.insertBefore(h, list.firstChild);
+        // Register the face in the APP document too so the row previews itself.
+        const st = document.createElement('style');
+        st.textContent = "@font-face{font-family:'" + family + "';src:url(data:font/" + ext + ";base64," + b64 + ");}";
+        document.head.appendChild(st);
+        list.insertBefore(fontRow(family, () => Promise.resolve(faces)), h.nextSibling);
+        status('رُفع الخط ' + family + ' — اختر أين يُطبَّق.');
+      };
+      rd.readAsDataURL(file);
+    });
+    fontsPop.querySelector('[data-upload]').addEventListener('click', () => fontUpload.click());
+    fontsPop.querySelector('[data-clear]').addEventListener('click', clearTypography);
+    document.body.appendChild(fontsPop);
+    document.body.appendChild(fontUpload);
+    return fontsPop;
+  }
+
+  function toggleFontsPop() {
+    if (!editor) { status('Open a file first.'); return; }
+    const pop = ensureFontsPop();
+    loadFontPreviews();
+    readTypoFromDeck();
+    renderFontsPop();
+    const r = $('#btn-fonts').getBoundingClientRect();
+    pop.style.left = Math.max(4, Math.min(r.left, window.innerWidth - 336)) + 'px';
+    pop.classList.toggle('open');
+  }
 
   // ---------- drag & drop ----------
   ['dragover', 'drop'].forEach(evt =>
@@ -717,6 +957,7 @@
     status('Gregorian date inserted.');
   });
   $('#btn-theme').addEventListener('click', toggleThemePop);
+  $('#btn-fonts').addEventListener('click', toggleFontsPop);
   $('#btn-present').addEventListener('click', () => {
     if (!editor) { status('Open a file first.'); return; }
     if (window.Presenter) window.Presenter.start(editor);
