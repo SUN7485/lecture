@@ -560,9 +560,10 @@
     const decls = Object.keys(vars || {}).map(k => `${k}:${vars[k]};`).join('');
     return decls ? `:root{${decls}}` : '';
   }
+  // Role CSS only — the fonts themselves are EMBEDDED as data: faces by
+  // applyBuiltinPreset (was an @import here, which made presets online-only).
   function typoCss(p) {
-    return `@import url('https://fonts.googleapis.com/css2?family=${encodeURIComponent(p.heading)}:wght@700&family=${encodeURIComponent(p.body)}:wght@400;700&display=swap');\n` +
-      `.slide h1,.slide h2,.slide h3{font-family:'${p.heading}',sans-serif;}\n` +
+    return `.slide h1,.slide h2,.slide h3{font-family:'${p.heading}',sans-serif;}\n` +
       `.slide .content,.slide p,.slide li{font-family:'${p.body}',sans-serif;line-height:${p.lineHeight};}`;
   }
   const NEUTRAL_PRESETS = {
@@ -580,17 +581,32 @@
     },
   };
   let themeName = '';
-  function applyBuiltinPreset(name) {
+  async function applyBuiltinPreset(name) {
     if (!editor) { status('Open a file first.'); return; }
     if (name === 'MiM') {
       editor.applyBrandTheme([], 'MiM'); // exact BRAND_PALETTES.MiM; no font files client-side
-    } else {
-      const p = NEUTRAL_PRESETS[name];
-      if (!p) return;
-      editor.applyThemeKit({ name, fonts: [], varsCss: varsToCss(p.vars) + '\n' + typoCss(p.typo) });
+      themeName = name;
+      status(`Applied "${name}" preset.`);
+      if (themePop) themePop.classList.remove('open');
+      return;
     }
+    const p = NEUTRAL_PRESETS[name];
+    if (!p) return;
+    // Embed the preset's Google fonts as data: URLs so the saved deck renders
+    // offline + in PDF (was an @import before — online-only). Colors still
+    // apply if the fetch fails; the fonts then fall back to system.
+    let fonts = [];
+    try {
+      status(`تحميل خطوط نمط "${name}"…`);
+      const heading = await fetchGoogleFontFaces(p.typo.heading, [700]);
+      const body = await fetchGoogleFontFaces(p.typo.body, [400, 700]);
+      fonts = dedupeFonts(heading.concat(body));
+    } catch (e) { /* offline: fall through with colors only */ }
+    editor.applyThemeKit({ name, fonts, varsCss: varsToCss(p.vars) + '\n' + typoCss(p.typo) });
     themeName = name;
-    status(`Applied "${name}" preset.`);
+    status(fonts.length
+      ? `طُبّق نمط "${name}" بخطوط مضمّنة (تعمل دون اتصال).`
+      : `طُبّقت ألوان "${name}"؛ تعذّر تضمين الخطوط (بدون اتصال).`);
     if (themePop) themePop.classList.remove('open'); // else it can overlap neighboring toolbar buttons
   }
   function extractLiveFonts(cssText) {
