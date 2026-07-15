@@ -28,6 +28,10 @@
   var TITLE_SIZE_TOL = 2;    // px drift between slide titles before flagged
   var OFFPAL_DIST = 4000;    // squared RGB distance from palette = foreign color
   var GREY_SPAN = 24;        // channel spread under which a color is neutral
+  var OVERLOAD_FACTOR = 1.5;  // deck-relative overload: only slides >1.5x the deck's own median are outliers
+  // Families safe without @font-face (CSS generics + fonts on effectively
+  // every Windows/Office machine these decks are shown on).
+  var GENERIC_FAMS = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-serif|ui-sans-serif|ui-monospace|math|emoji|arial|helvetica|helvetica neue|tahoma|verdana|segoe ui|calibri|cambria|georgia|times|times new roman|courier|courier new|trebuchet ms|impact)$/i;
 
   // ---- WCAG 2.1 relative luminance + contrast ratio ----
   function _srgb(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
@@ -157,6 +161,7 @@
     var doc = editor.doc, win = editor.win;
     var slides = editor.slides();
     var issues = [];
+    var wordCounts = [], charCounts = [], famData = [];
 
     // Deck palette (for the on-brand low-contrast fix) + brand-theme flag (for the
     // on-brand font-zoo fix). detectVars() returns the deck's declared CSS custom
@@ -177,13 +182,12 @@
     slides.forEach(function (slide, si) {
       var texts = _textEls(slide);
 
-      // Rule 1 — text overload (advisory)
+      // Rule 1 (v4) — text overload became deck-relative; counts are collected
+      // here and judged after the loop (a lecture deck is dense by genre —
+      // only outliers vs the deck's own median are worth flagging).
       var raw = (slide.textContent || '').replace(/\s+/g, ' ').trim();
       var words = raw ? raw.split(' ').length : 0;
-      if (words > TEXT_WORD_LIMIT || raw.length > TEXT_CHAR_LIMIT) {
-        issues.push({ ruleId: 'text-overload', severity: 'warn', slideIndex: si, el: slide,
-          message: 'الشريحة مزدحمة بالنص (' + words + ' كلمة) — فكّر في تقسيمها إلى شريحتين.', fix: null });
-      }
+      wordCounts[si] = words; charCounts[si] = raw.length;
 
       // Rule 2 — low contrast (advisory; report the single worst text element)
       var worst = null;
@@ -208,39 +212,15 @@
           }; })(worst.el, worst.fg, worst.bg, worst.need) });
       }
 
-      // Rule 3 — font zoo (>2 primary families on one slide). Auto-fix collapses
-      // every text element onto the slide's dominant family (the one the most
-      // elements already use), copying that element's full computed stack so its
-      // fallbacks survive.
+      // Rule 3 (v4) — font families are collected per slide; the zoo verdict
+      // is deck-aware and happens after the loop.
       var famCount = {}, famRep = {};
       texts.forEach(function (el) {
         var f = _fam(win, el); if (!f) return;
         famCount[f] = (famCount[f] || 0) + 1;
         if (!famRep[f]) famRep[f] = el;
       });
-      var famList = Object.keys(famCount);
-      if (famList.length > FONT_LIMIT) {
-        var fzMsg, fzFix;
-        if (brandOn) {
-          // A brand kit defines the deck's fonts in CSS; extra families are inline
-          // style="font-family" overrides. Clear them so the brand pairing wins again
-          // (same philosophy as the brand-spacing rule below).
-          fzMsg = 'الشريحة تستخدم ' + famList.length + ' خطوط مختلفة — الإصلاح يزيل تجاوزات الخط ليعود خطّ الهوية.';
-          fzFix = (function (els) { return function () {
-            els.forEach(function (el) { if (el.style && el.style.fontFamily) el.style.fontFamily = ''; });
-          }; })(texts.slice());
-        } else {
-          // No brand active: unify onto the family the most elements already use,
-          // copying its full computed stack so fallbacks survive.
-          var dom = famList.reduce(function (a, b) { return famCount[b] > famCount[a] ? b : a; });
-          var domStack = win.getComputedStyle(famRep[dom]).fontFamily;
-          fzMsg = 'الشريحة تستخدم ' + famList.length + ' خطوط مختلفة — الإصلاح يوحّدها على الخطّ الأكثر استخدامًا.';
-          fzFix = (function (els, stack, domFam) { return function () {
-            els.forEach(function (el) { if (_fam(win, el) !== domFam) el.style.fontFamily = stack; });
-          }; })(texts.slice(), domStack, dom);
-        }
-        issues.push({ ruleId: 'font-zoo', severity: 'warn', slideIndex: si, el: slide, message: fzMsg, fix: fzFix });
-      }
+      famData[si] = { count: famCount, rep: famRep, list: Object.keys(famCount), texts: texts.slice() };
 
       // Rules 4 & 5 — one pass over images
       var imgs = slide.querySelectorAll('img');
@@ -307,12 +287,29 @@
 
       // Rule 7 — overflow: what spills outside the slide box is invisible in
       // PDF export and present mode.
-      // (a) flow overflow — the slide scrolls taller than its box. Each fix
-      // click = one 7% font step down on this slide (floored so it never
-      // creates tiny text); the re-scan shows whether one step was enough.
-      if (slide.scrollHeight > slide.clientHeight + OVERFLOW_TOL) {
+      // (a) flow overflow (v4) — measured by what actually paints past the
+      // slide box. scrollHeight lied on whole templates (padding artifacts +
+      // design-time overflow:hidden produced a constant phantom "25px" on
+      // every slide); only visible content extent can be cut in export.
+      // Drag-floated absolute units are the off-slide rule's job — skipped
+      // here so one escapee doesn't fire two rules. Each fix click = one 7%
+      // font step down on this slide (floored so it never creates tiny text).
+      var srect3 = slide.getBoundingClientRect();
+      var maxBottom3 = -Infinity;
+      var kids3 = slide.querySelectorAll('*');
+      for (var k3 = 0; k3 < kids3.length; k3++) {
+        var kel3 = kids3[k3];
+        if (kel3.closest('.ve-overlay, .ve-toolbar, .ve-palette, .ve-wandmenu, .ve-guide, .ve-ghost')) continue;
+        var kcs3 = win.getComputedStyle(kel3);
+        if (kcs3.position === 'absolute' && kel3.style.left && kel3.style.top) continue;
+        var kr3 = kel3.getBoundingClientRect();
+        if (!kr3.width || !kr3.height) continue;
+        if (kr3.bottom > maxBottom3) maxBottom3 = kr3.bottom;
+      }
+      var spill3 = maxBottom3 === -Infinity ? 0 : Math.round(maxBottom3 - srect3.bottom);
+      if (spill3 > OVERFLOW_TOL) {
         issues.push({ ruleId: 'overflow', severity: 'error', slideIndex: si, el: slide,
-          message: 'المحتوى أطول من الشريحة بـ ' + (slide.scrollHeight - slide.clientHeight) + 'px وسيُقصّ عند التصدير — الإصلاح يصغّر الخط درجة واحدة (كرّره أو قسّم الشريحة).',
+          message: 'المحتوى أطول من الشريحة بـ ' + spill3 + 'px وسيُقصّ عند التصدير — الإصلاح يصغّر الخط درجة واحدة (كرّره أو قسّم الشريحة).',
           fix: (function (els) { return function () {
             els.forEach(function (el) {
               var fs = parseFloat(win.getComputedStyle(el).fontSize);
@@ -439,6 +436,120 @@
       }
     });
 
+    // Rule 3 (v4) — font zoo, deck-aware. A family set repeated on most slides
+    // IS the deck's design system (brand pairings are 2–3 families by design);
+    // flagging it on every slide was noise. Deviating slides — families outside
+    // the deck's dominant set — are the real zoo. Decks too small for a
+    // "dominant" verdict keep the old per-slide rule.
+    var famPass = [];
+    if (slides.length >= 4) {
+      var setCount = {};
+      famData.forEach(function (d) {
+        if (!d) return;
+        var key = d.list.slice().sort().join('|');
+        setCount[key] = (setCount[key] || 0) + 1;
+      });
+      var setKeys = Object.keys(setCount);
+      var domKey = setKeys.length ? setKeys.reduce(function (a, b) { return setCount[b] > setCount[a] ? b : a; }) : '';
+      var domSet = domKey ? domKey.split('|') : [];
+      famData.forEach(function (d, si2) {
+        if (!d) return;
+        var intruders = d.list.filter(function (f) { return domSet.indexOf(f) === -1; });
+        if (!intruders.length || d.list.length <= FONT_LIMIT) return;
+        famPass.push({ si: si2, d: d, intruders: intruders });
+      });
+    } else {
+      famData.forEach(function (d, si2) {
+        if (d && d.list.length > FONT_LIMIT) famPass.push({ si: si2, d: d, intruders: null });
+      });
+    }
+    famPass.forEach(function (p) {
+      var d = p.d, si3 = p.si, fzMsg, fzFix;
+      if (brandOn) {
+        // A brand kit defines the deck's fonts in CSS; extra families are inline
+        // style="font-family" overrides. Clear them so the brand pairing wins again.
+        fzMsg = 'الشريحة تستخدم ' + d.list.length + ' خطوط مختلفة — الإصلاح يزيل تجاوزات الخط ليعود خطّ الهوية.';
+        fzFix = (function (els) { return function () {
+          els.forEach(function (el) { if (el.style && el.style.fontFamily) el.style.fontFamily = ''; });
+        }; })(d.texts);
+      } else if (p.intruders) {
+        // Strip only the intruder families back onto the slide's dominant one.
+        var domF = d.list.reduce(function (a, b) { return d.count[b] > d.count[a] ? b : a; });
+        var domStack = win.getComputedStyle(d.rep[domF]).fontFamily;
+        fzMsg = 'خط دخيل على نظام خطوط العرض في هذه الشريحة (' + p.intruders.join('، ') + ') — الإصلاح يعيده إلى خطوط العرض.';
+        fzFix = (function (els, stack, bad) { return function () {
+          els.forEach(function (el) { if (bad.indexOf(_fam(win, el)) !== -1) el.style.fontFamily = stack; });
+        }; })(d.texts, domStack, p.intruders);
+      } else {
+        // Small deck: unify onto the family the most elements already use.
+        var domF2 = d.list.reduce(function (a, b) { return d.count[b] > d.count[a] ? b : a; });
+        var domStack2 = win.getComputedStyle(d.rep[domF2]).fontFamily;
+        fzMsg = 'الشريحة تستخدم ' + d.list.length + ' خطوط مختلفة — الإصلاح يوحّدها على الخطّ الأكثر استخدامًا.';
+        fzFix = (function (els, stack, domFam) { return function () {
+          els.forEach(function (el) { if (_fam(win, el) !== domFam) el.style.fontFamily = stack; });
+        }; })(d.texts, domStack2, domF2);
+      }
+      issues.push({ ruleId: 'font-zoo', severity: 'warn', slideIndex: si3, el: slides[si3], message: fzMsg, fix: fzFix });
+    });
+
+    // Rule 1 (v4) — text overload, deck-relative: flag only outliers above
+    // OVERLOAD_FACTOR x the deck's own median (floored by the absolute
+    // limits), so a uniformly dense lecture deck isn't nagged on 24 of 26 slides.
+    var sortedW = wordCounts.slice().sort(function (a, b) { return a - b; });
+    var medW = sortedW.length ? sortedW[Math.floor(sortedW.length / 2)] : 0;
+    var sortedC = charCounts.slice().sort(function (a, b) { return a - b; });
+    var medC = sortedC.length ? sortedC[Math.floor(sortedC.length / 2)] : 0;
+    var wLimit = Math.max(TEXT_WORD_LIMIT, Math.round(medW * OVERLOAD_FACTOR));
+    var cLimit = Math.max(TEXT_CHAR_LIMIT, Math.round(medC * OVERLOAD_FACTOR));
+    slides.forEach(function (slide, si4) {
+      if (wordCounts[si4] > wLimit || charCounts[si4] > cLimit) {
+        issues.push({ ruleId: 'text-overload', severity: 'warn', slideIndex: si4, el: slide,
+          message: 'الشريحة مزدحمة بالنص (' + wordCounts[si4] + ' كلمة — أعلى بكثير من بقية العرض) — فكّر في تقسيمها إلى شريحتين.', fix: null });
+      }
+    });
+
+    // Rule 19 — fonts at genuine risk. A distinctive family (not web-safe, not
+    // @font-face embedded) is only a real problem when its OWN fallback stack
+    // has nothing web-safe to degrade to — then a machine without the font gets
+    // an unpredictable substitute or tofu. A stack that ends in a system font
+    // or generic (the responsible pattern our templates deliberately use)
+    // renders fine everywhere, so it is NOT flagged — no nagging a deliberate
+    // offline-stack design. This catches the true landmine: a custom font used
+    // with no safe fallback (common in AI-generated decks). One deck-level
+    // finding (slideIndex -1, anchored to slide 1 so «تجاهل» persists in the
+    // saved file); skipped when a cross-origin stylesheet may supply faces we
+    // cannot read.
+    var declared = {}, sheetsUnreadable = false;
+    try {
+      for (var sh = 0; sh < doc.styleSheets.length; sh++) {
+        var sRules;
+        try { sRules = doc.styleSheets[sh].cssRules; } catch (e1) { sheetsUnreadable = true; continue; }
+        if (!sRules) continue;
+        for (var r4 = 0; r4 < sRules.length; r4++) {
+          if (sRules[r4].type === 5) {
+            var fdecl = (sRules[r4].style.getPropertyValue('font-family') || '').trim().replace(/^['"]|['"]$/g, '');
+            if (fdecl) declared[fdecl.toLowerCase()] = true;
+          }
+        }
+      }
+    } catch (e2) { sheetsUnreadable = true; }
+    var atRisk = {}, atRiskOrder = [];
+    famData.forEach(function (d) {
+      if (!d) return;
+      d.texts.forEach(function (el) {
+        var stack = win.getComputedStyle(el).fontFamily.split(',').map(function (s) { return s.trim().replace(/^['"]|['"]$/g, ''); });
+        var primary = stack[0];
+        if (!primary || GENERIC_FAMS.test(primary) || declared[primary.toLowerCase()]) return;
+        var hasSafeFallback = stack.slice(1).some(function (f) { return GENERIC_FAMS.test(f); });
+        if (!hasSafeFallback && !atRisk[primary]) { atRisk[primary] = true; atRiskOrder.push(primary); }
+      });
+    });
+    if (!sheetsUnreadable && atRiskOrder.length && slides.length) {
+      var famLabel = atRiskOrder.slice(0, 3).join('، ') + (atRiskOrder.length > 3 ? '…' : '');
+      issues.push({ ruleId: 'fonts-not-embedded', severity: 'warn', slideIndex: -1, el: slides[0],
+        message: 'خط غير مضمّن وبلا بديل آمن (' + famLabel + ') — قد يظهر بخط غير متوقّع على جهاز لا تملكه. ضمّنه من 🔤 الخطوط أو أضف بديلًا آمنًا.', fix: null });
+    }
+
     // Rule 17 — title drift (deck-level): once >=3 content slides carry
     // titles and a clear majority share one size, stragglers get flagged.
     // Size-only: family drift is already the font-zoo rule's job.
@@ -482,5 +593,31 @@
     return issues.filter(function (iss) { return !_ignored(iss.el, iss.ruleId); });
   }
 
-  window.SlideDoctor = { analyze: analyze, version: 3 };
+  // Group the flat issue list into root-cause cards: same rule + same
+  // digit-stripped message text = one decision or template artifact repeated
+  // across slides (e.g. the same low-contrast title color on 25 slides).
+  // The UI renders one card per group; per-slide granularity stays available
+  // via card.issues. analyze() keeps its flat shape — Electron's renderer
+  // consumes it unchanged.
+  function aggregate(issues) {
+    var map = {}, order = [];
+    for (var i = 0; i < issues.length; i++) {
+      var iss = issues[i];
+      var sig = iss.ruleId + '|' + iss.severity + '|' + iss.message.replace(/[0-9٠-٩٫.,]+/g, '#');
+      if (!map[sig]) {
+        map[sig] = { ruleId: iss.ruleId, severity: iss.severity, message: iss.message, issues: [], slides: [] };
+        order.push(sig);
+      }
+      map[sig].issues.push(iss);
+      if (map[sig].slides.indexOf(iss.slideIndex) === -1) map[sig].slides.push(iss.slideIndex);
+    }
+    return order.map(function (k) {
+      var g = map[k];
+      g.count = g.issues.length;
+      g.fixable = g.issues.filter(function (x) { return !!x.fix; }).length;
+      return g;
+    });
+  }
+
+  window.SlideDoctor = { analyze: analyze, aggregate: aggregate, version: 4 };
 })();

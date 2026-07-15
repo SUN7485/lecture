@@ -19,8 +19,45 @@
   let zoom = 1;
   let saveName = 'lecture-edited.html';
   let imgMode = 'insert';   // what the hidden image input is being used for
+  let fileHandle = null;    // File System Access handle (null = plain download fallback)
+  let dirty = false;        // unsaved edits since the last successful save
 
   function status(msg) { statusEl.textContent = msg; }
+
+  // ---------- persistence (019): IndexedDB = autosave (1 record) + recents (<=8) ----------
+  const IDB_NAME = 'lve', IDB_VER = 1;
+  function idb() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open(IDB_NAME, IDB_VER);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        if (!db.objectStoreNames.contains('autosave')) db.createObjectStore('autosave');
+        if (!db.objectStoreNames.contains('recents')) db.createObjectStore('recents', { keyPath: 'id' });
+      };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  function idbPut(store, key, val) {
+    return idb().then(db => new Promise((res, rej) => {
+      const os = db.transaction(store, 'readwrite').objectStore(store);
+      const req = os.keyPath ? os.put(val) : os.put(val, key);
+      req.onsuccess = () => res(); req.onerror = () => rej(req.error);
+    }));
+  }
+  function idbGet(store, key) {
+    return idb().then(db => new Promise((res, rej) => {
+      const req = db.transaction(store).objectStore(store).get(key);
+      req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error);
+    }));
+  }
+  function idbAll(store) {
+    return idb().then(db => new Promise((res, rej) => {
+      const req = db.transaction(store).objectStore(store).getAll();
+      req.onsuccess = () => res(req.result || []); req.onerror = () => rej(req.error);
+    }));
+  }
+  async function clearAutosave() { try { await idbPut('autosave', 'cur', null); } catch (_) {} }
 
   // ---------- Arabic-first pack (011E): RTL + Arabic UI when the browser asks for it ----------
   // Simple lookup, no i18n framework — English is the default/fallback.
@@ -62,6 +99,7 @@
   // ---------- open ----------
   async function openFile(file) {
     if (!file) return;
+    fileHandle = null; // cleared here; openViaPicker restores it for .html only
     if (/\.docx$/i.test(file.name)) { openDocx(file); return; }
     saveName = file.name.replace(/\.html?$/i, '') + '-edited.html';
     const html = await file.text();
@@ -92,6 +130,7 @@
       editor.onChange = ({ canUndo, canRedo }) => {
         btnUndo.disabled = !canUndo;
         btnRedo.disabled = !canRedo;
+        if (canUndo) { dirty = true; scheduleAutosave(); } // 019: only autosave once a real edit exists (not on fresh load)
         if (window.SlideDoctor) runDoctor(); // keep the 🩺 badge live as the user edits
       };
       editor.onReplaceRequest = () => { imgMode = 'replace'; imgInput.click(); };
@@ -106,6 +145,7 @@
       readTypoFromDeck(); // restore per-role font assignments saved in the deck
       if (window.SlideDoctor) runDoctor(); // seed the 🩺 badge count for this deck
       fitZoom();
+      saveRecent(); // 019: remember this deck for the empty-state recents list
       status('Ready. Double-click any text to edit it; drag any element to move it.');
     };
     emptyState.hidden = true;
@@ -121,6 +161,7 @@
   let drDock = null;
   let drScanMs = 0;
   let drView = 'type';   // 'type' | 'slide' — dock grouping mode
+  let drCards = [];      // root-cause cards from SlideDoctor.aggregate — score + type view read these
 
   function ensureDoctorDock() {
     if (drDock) return drDock;
@@ -166,16 +207,17 @@
     drIssues = window.SlideDoctor.analyze(editor);
     drScanMs = Math.max(1, Math.round(performance.now() - t0));
     const btn = $('#btn-doctor');
-    btn.textContent = '🩺 الفحص' + (drIssues.length ? ` (${drIssues.length})` : '');
-    btn.classList.toggle('has-issues', drIssues.length > 0);
+    drCards = window.SlideDoctor.aggregate ? window.SlideDoctor.aggregate(drIssues) : [];
+    btn.textContent = '🩺 الفحص' + (drCards.length ? ` (${drCards.length})` : '');
+    btn.classList.toggle('has-issues', drCards.length > 0);
     if (drOpen) renderDoctor();
   }
 
-  // Health score: start at 100, errors cost 12, warnings 4. Purely a
-  // motivational readout — the list is the real product.
+  // Health score counts root causes (cards), not repeated rows — one bad
+  // title color is one problem, not 25. Purely a motivational readout.
   function doctorScore() {
-    const errs = drIssues.filter((i) => i.severity === 'error').length;
-    const warns = drIssues.length - errs;
+    const errs = drCards.filter((c) => c.severity === 'error').length;
+    const warns = drCards.length - errs;
     return Math.max(0, 100 - 12 * errs - 4 * warns);
   }
   function renderDoctorMeta() {
@@ -215,26 +257,95 @@
         const rows = bySlide.get(sIdx);
         const gh = document.createElement('div');
         gh.className = 'dr-group';
-        gh.textContent = 'شريحة ' + (sIdx + 1) + ' (' + rows.length + ')';
+        gh.textContent = (sIdx === -1 ? 'العرض كله' : 'شريحة ' + (sIdx + 1)) + ' (' + rows.length + ')';
         list.appendChild(gh);
         rows.sort((a, b) => (a.severity === 'error' ? 0 : 1) - (b.severity === 'error' ? 0 : 1));
         rows.forEach((iss) => list.appendChild(doctorRow(iss, iss.severity === 'error' ? 'err' : 'warn')));
       });
       return;
     }
-    // Errors first, then warnings.
+    // Type view (v4): one card per root cause. Errors first, then warnings.
     [{ sev: 'error', label: 'أخطاء', cls: 'err' }, { sev: 'warn', label: 'تنبيهات', cls: 'warn' }]
       .forEach((g) => {
-        const rows = drIssues
-          .map((iss, idx) => ({ iss, idx }))
-          .filter((x) => x.iss.severity === g.sev);
-        if (!rows.length) return;
+        const cards = drCards.filter((c) => c.severity === g.sev);
+        if (!cards.length) return;
         const gh = document.createElement('div');
         gh.className = 'dr-group';
-        gh.textContent = `${g.label} (${rows.length})`;
+        gh.textContent = `${g.label} (${cards.length})`;
         list.appendChild(gh);
-        rows.forEach(({ iss }) => list.appendChild(doctorRow(iss, g.cls)));
+        cards.forEach((card) => list.appendChild(doctorCard(card, g.cls)));
       });
+  }
+
+  // One card = one root cause. Multi-slide cards show a count pill + clickable
+  // slide chips; the fix button runs every member fix in ONE undo step.
+  function doctorCard(card, cls) {
+    const row = document.createElement('div');
+    row.className = `dr-row ${cls}`;
+    if (card.count > 1) {
+      const pill = document.createElement('span');
+      pill.className = 'dr-count';
+      pill.textContent = `${card.count} موضعًا في ${card.slides.length} شريحة`;
+      row.appendChild(pill);
+    }
+    const msg = document.createElement('div');
+    msg.textContent = card.message;
+    row.appendChild(msg);
+    const chips = document.createElement('div');
+    chips.className = 'dr-chips';
+    const MAX_CHIPS = 12;
+    card.slides.slice(0, MAX_CHIPS).forEach((sIdx) => {
+      const chip = document.createElement('span');
+      chip.className = 'dr-chip';
+      chip.textContent = sIdx === -1 ? 'العرض كله' : `شريحة ${sIdx + 1}`;
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const target = card.issues.find((i) => i.slideIndex === sIdx);
+        if (target) focusIssue(target);
+      });
+      chips.appendChild(chip);
+    });
+    if (card.slides.length > MAX_CHIPS) {
+      const more = document.createElement('span');
+      more.className = 'dr-chip';
+      more.textContent = `+${card.slides.length - MAX_CHIPS}`;
+      chips.appendChild(more);
+    }
+    row.appendChild(chips);
+    const actions = document.createElement('div');
+    actions.className = 'dr-actions';
+    if (card.fixable) {
+      const fix = document.createElement('button');
+      fix.className = 'dr-fix';
+      fix.textContent = card.fixable > 1 ? `إصلاح الكل (${card.fixable})` : 'إصلاح';
+      fix.addEventListener('click', (e) => {
+        e.stopPropagation();
+        card.issues.forEach((i) => { if (i.fix) i.fix(); });
+        editor.commit(); // ONE undo step for the whole card
+        runDoctor();     // re-scan: card + issues are stale after commit
+        status(`أصلحت ${card.fixable} موضعًا.`);
+      });
+      actions.appendChild(fix);
+    }
+    const ign = document.createElement('button');
+    ign.className = 'dr-ign';
+    ign.textContent = '✕';
+    ign.title = 'تجاهل هذه الملاحظة في كل مواضعها (تُحفظ مع الملف)';
+    ign.addEventListener('click', (e) => {
+      e.stopPropagation();
+      card.issues.forEach((i) => {
+        const cur = i.el.getAttribute('data-ve-dr-ignore') || '';
+        if (!(' ' + cur + ' ').includes(' ' + i.ruleId + ' ')) {
+          i.el.setAttribute('data-ve-dr-ignore', (cur + ' ' + i.ruleId).trim());
+        }
+      });
+      editor.commit(); runDoctor();
+      status('تم تجاهل الملاحظة — «استعادة» في أسفل القائمة تعيدها.');
+    });
+    actions.appendChild(ign);
+    row.appendChild(actions);
+    row.addEventListener('click', () => focusIssue(card.issues[0]));
+    return row;
   }
 
   function doctorRow(iss, cls) {
@@ -242,7 +353,7 @@
     row.className = `dr-row ${cls}`;
     const chip = document.createElement('span');
     chip.className = 'dr-chip';
-    chip.textContent = `شريحة ${iss.slideIndex + 1}`;
+    chip.textContent = iss.slideIndex === -1 ? 'العرض كله' : `شريحة ${iss.slideIndex + 1}`;
     const msg = document.createElement('div');
     msg.textContent = iss.message;
     row.appendChild(chip);
@@ -324,17 +435,124 @@
     setZoom(Math.min(1.5, avail / iframe.offsetWidth));
   }
 
-  // ---------- save (download) ----------
-  function saveHtml() {
+  // ---------- save (019): save-in-place via File System Access, download fallback ----------
+  const HAS_FS = 'showSaveFilePicker' in window;
+  async function saveHtml() {
     if (!editor) { status('Nothing to save.'); return; }
     const html = editor.getCleanHtml();
+    if (HAS_FS) {
+      try {
+        if (!fileHandle) {
+          fileHandle = await window.showSaveFilePicker({
+            suggestedName: saveName,
+            types: [{ description: 'HTML', accept: { 'text/html': ['.html'] } }],
+          });
+        }
+        const w = await fileHandle.createWritable();
+        await w.write(html);
+        await w.close();
+        dirty = false;
+        await clearAutosave();
+        status('Saved: ' + fileHandle.name);
+        return;
+      } catch (e) {
+        if (e && e.name === 'AbortError') { status('Save cancelled.'); return; }
+        // any other FS error (permission, disk) → fall through to the download path
+      }
+    }
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = saveName;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    dirty = false;
+    await clearAutosave();
     status('Downloaded: ' + saveName);
+  }
+
+  // ---------- open via File System Access so save-in-place has a handle (019) ----------
+  async function openViaPicker() {
+    if (!('showOpenFilePicker' in window)) { fileInput.click(); return; }
+    try {
+      const [h] = await window.showOpenFilePicker({
+        types: [{ description: 'HTML', accept: { 'text/html': ['.html', '.htm'] } }],
+      });
+      const file = await h.getFile();
+      await openFile(file);                              // resets fileHandle=null internally
+      if (/\.html?$/i.test(file.name)) fileHandle = h;   // reuse handle for .html save-in-place only
+    } catch (e) { if (!(e && e.name === 'AbortError')) fileInput.click(); }
+  }
+
+  // ---------- autosave + crash recovery (019) ----------
+  let autosaveTimer = null;
+  function scheduleAutosave() { clearTimeout(autosaveTimer); autosaveTimer = setTimeout(doAutosave, 1500); }
+  async function doAutosave() {
+    if (!editor || !dirty) return;
+    try { await idbPut('autosave', 'cur', { html: editor.getCleanHtml(), name: saveName, ts: Date.now() }); } catch (_) {}
+  }
+  window.addEventListener('beforeunload', () => { if (dirty) doAutosave(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) doAutosave(); });
+
+  // ---------- recent decks (019): thumbnail + store + empty-state list ----------
+  async function makeThumb() {
+    try {
+      const s = editor.slides()[0]; if (!s) return '';
+      const bg = iframe.contentWindow.getComputedStyle(s).backgroundColor || '#ffffff';
+      const title = ((s.querySelector('h1,h2') || {}).textContent || '').slice(0, 40);
+      const esc = t => t.replace(/[<&>]/g, c => ({ '<': '&lt;', '&': '&amp;', '>': '&gt;' }[c]));
+      const svg = "<svg xmlns='http://www.w3.org/2000/svg' width='160' height='90'>" +
+        "<rect width='160' height='90' fill='" + bg + "'/>" +
+        "<text x='8' y='50' font-family='sans-serif' font-size='11' fill='#333'>" + esc(title) + "</text></svg>";
+      return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    } catch (_) { return ''; }
+  }
+  async function saveRecent() {
+    if (!editor) return;
+    try {
+      const rec = { id: saveName, name: saveName, html: editor.getCleanHtml(), thumb: await makeThumb(), ts: Date.now() };
+      await idbPut('recents', null, rec);
+      const all = (await idbAll('recents')).sort((a, b) => b.ts - a.ts);
+      if (all.length > 8) {
+        const db = await idb();
+        const tx = db.transaction('recents', 'readwrite');
+        all.slice(8).forEach(r => tx.objectStore('recents').delete(r.id));
+      }
+    } catch (_) {}
+  }
+  function openRecent(rec) {
+    fileHandle = null; saveName = rec.name || saveName;
+    loadIntoIframe(rec.html);
+    status('Opened recent: ' + saveName);
+  }
+  function offerRecovery(rec) {
+    const bar = document.createElement('div');
+    bar.className = 've-recover';
+    bar.innerHTML = '<span>استعادة العرض غير المحفوظ؟</span>' +
+      '<button class="primary" data-yes>استعادة</button><button data-no>تجاهل</button>';
+    document.body.appendChild(bar);
+    bar.querySelector('[data-yes]').addEventListener('click', () => { openRecent(rec); bar.remove(); });
+    bar.querySelector('[data-no]').addEventListener('click', () => { clearAutosave(); bar.remove(); });
+  }
+  function renderRecents(list) {
+    if (!list || !list.length) return;
+    const host = document.getElementById('empty-state'); if (!host) return;
+    const old = document.getElementById('recents'); if (old) old.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'recents';
+    wrap.innerHTML = '<div class="rc-title">المشاريع الأخيرة</div>';
+    const row = document.createElement('div'); row.className = 'rc-row';
+    list.sort((a, b) => b.ts - a.ts).slice(0, 8).forEach(rec => {
+      const card = document.createElement('button');
+      card.className = 'rc-card';
+      card.innerHTML = (rec.thumb ? '<img alt="">' : '<div class="rc-noimg"></div>') + '<span class="rc-name"></span>';
+      if (rec.thumb) card.querySelector('img').src = rec.thumb;
+      card.querySelector('.rc-name').textContent = rec.name || 'بدون اسم';
+      card.addEventListener('click', () => openRecent(rec));
+      row.appendChild(card);
+    });
+    wrap.appendChild(row);
+    host.appendChild(wrap);
   }
 
   // ---------- images (embedded as data URLs so the saved file stays portable) ----------
@@ -936,8 +1154,8 @@
   });
 
   // ---------- wire up ----------
-  $('#btn-open').addEventListener('click', () => fileInput.click());
-  $('#btn-open-2').addEventListener('click', () => fileInput.click());
+  $('#btn-open').addEventListener('click', openViaPicker);
+  $('#btn-open-2').addEventListener('click', openViaPicker);
   fileInput.addEventListener('change', () => { openFile(fileInput.files[0]); fileInput.value = ''; });
   imgInput.addEventListener('change', () => { handleImages(imgInput.files); imgInput.value = ''; });
   $('#btn-add-text').addEventListener('click', () => {
@@ -998,6 +1216,16 @@
     else if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); gotoSlide(1); }
     else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); gotoSlide(-1); }
   });
+
+  // ---------- startup (019): offer crash recovery + render recents on the empty state ----------
+  (async () => {
+    if (location.search.includes('template=')) return; // the template route loads a deck itself
+    try {
+      const rec = await idbGet('autosave', 'cur');
+      if (rec && rec.html && !editor) offerRecovery(rec);
+    } catch (_) {}
+    try { renderRecents(await idbAll('recents')); } catch (_) {}
+  })();
 
   // ---------- Template gallery route (013): ?template=<name> ----------
   // Loads a same-origin template deck straight into the editor, bypassing
