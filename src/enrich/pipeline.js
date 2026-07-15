@@ -24,6 +24,17 @@
 
   const SOURCE_LABEL = { chart: 'رسم بياني', diagram: 'مخطط', image: 'صورة', equation: 'معادلة', quiz: 'اختبار قصير' };
 
+  // Appended to every prompt that writes Arabic. Left free, GLM paraphrases
+  // technical terms into misspelled inventions (e.g. «عديم الفحمات» for a
+  // slide that says «عديم الفرش») — so it is ordered to copy slide wording.
+  const AR_RULES =
+    '\nArabic quality rules (CRITICAL):\n' +
+    '- Any technical term that appears in the given slide text must be copied CHARACTER-FOR-CHARACTER; ' +
+    'never re-spell it, translate it, or substitute a synonym for it.\n' +
+    '- Correct Modern Standard Arabic orthography is mandatory: hamza forms (أ/إ/ئ/ؤ/ء), ' +
+    'taa marbuta (ة) vs haa (ه), alif maqsura (ى) vs yaa (ي).\n' +
+    '- Unsure how to name something? Reuse the exact words from the slide text rather than inventing a name.';
+
   const P = {
     editor: null,
     lecturePath: null,
@@ -114,7 +125,7 @@
         return {
           id: k,
           slideTitle: d.h1 || '', slideSubtitle: d.h2 || '',
-          slideText: (d.text || '').slice(0, 380),
+          slideText: (d.text || '').slice(0, 600),
           reservedSlotText: p.slotText || ''
         };
       });
@@ -135,7 +146,7 @@
         ' "imagePrompt":"<English, concrete photorealistic scene, NO text/letters/numbers in the image>",\n' +
         ' "latex":"<LaTeX, equation only>"}\n' +
         'Include ONLY the sub-field matching the chosen type. 3-6 nodes for most layouts; ' +
-        '2-3 for comparison (put column content in sub). Arabic must be natural and concise.';
+        '2-3 for comparison (put column content in sub). Arabic must be natural and concise.' + AR_RULES;
       const user = 'Lecture palette: ' + ctx.palette.join(', ') + '\nSlots:\n' + JSON.stringify(items);
 
       const res = await api.aiChat({ system, user, temperature: 0.3, maxTokens: 8000, timeoutMs: 240000 });
@@ -269,7 +280,7 @@
         '"question":"<Arabic — only if quiz>","options":["<Arabic>", "..."] (3-4 items, only if quiz),' +
         '"correctIndex":<0-based integer — only if quiz>,"explanation":"<Arabic ≤15 words — only if quiz>"}\n' +
         'No diagram node lists. Use "quiz" sparingly — at most ONE per review, only for a slide with a ' +
-        'single clear testable fact. Prefer "newslide" for quiz and diagram. "slide" MUST be one of the given indices.';
+        'single clear testable fact. Prefer "newslide" for quiz and diagram. "slide" MUST be one of the given indices.' + AR_RULES;
       const user = 'Slides:\n' + batch.map(s => `${s.slide}: ${s.title} — ${s.subtitle} — ${s.text}`).join('\n');
       for (let attempt = 0; attempt < 2; attempt++) {
         const res = await api.aiChat({ system, user, temperature: 0.35, maxTokens: 1500, timeoutMs: 90000, fast: true });
@@ -291,7 +302,7 @@
       const system =
         'You write concise Arabic speaker notes (2-4 short sentences) for ONE slide of a ministry ' +
         'training lecture — talking points and a concrete example for the presenter, not a repeat of ' +
-        'the slide text. Return STRICT JSON, no prose, no fences: {"notes":"<Arabic>"}';
+        'the slide text. Return STRICT JSON, no prose, no fences: {"notes":"<Arabic>"}' + AR_RULES;
       const user = 'العنوان: ' + (d.h1 || '') + ' — ' + (d.h2 || '') + '\nنص الشريحة: ' + (d.text || '').slice(0, 400);
       const res = await api.aiChat({ system, user, temperature: 0.4, maxTokens: 600 });
       this.meter.glm++;
@@ -574,10 +585,10 @@
         '{"layout":"flow|steps|cycle|hierarchy|timeline|comparison|pyramid","title":"<Arabic>",' +
         '"nodes":[{"label":"<Arabic 2-4 words>","sub":"<Arabic ≤8 words, optional>"}],' +
         '"links":[[parent,child]...] (hierarchy only),"emphasis":<idx optional>}\n' +
-        '3-6 nodes. Content only — software draws it.';
+        '3-6 nodes. Content only — software draws it.' + AR_RULES;
       const user =
         'Slide: ' + (d.h1 || '') + ' — ' + (d.h2 || '') + '\n' +
-        'Slide text: ' + (d.text || '').slice(0, 350) + '\n' +
+        'Slide text: ' + (d.text || '').slice(0, 600) + '\n' +
         'Slot description: ' + (p.slotText || p.caption || '') + '\n' +
         (p.spec.diagram && (p.spec.diagram.nodes || []).length
           ? 'Current spec: ' + JSON.stringify(p.spec.diagram) + '\n' : '') +
