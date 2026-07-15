@@ -11,3 +11,6 @@ config.json
 
 # Claude Code tooling (handoffs, local settings) — not part of the project.
 .claude/
+# External-agent rules copies (distributed from Downloads master) — not project code.
+.clinerules/
+.kilocode/
