@@ -1,6 +1,13 @@
 # SESSION LOG — newest first, 3–5 bullets per session (done · broken · next)
 <!-- Every /wrap appends here. This is how a new chat knows where we are. -->
 
+## 2026-07-16 — trust audit + strategy lock (local-first)
+- **Strategy locked**: Arabic-first wedge, market ME → EU → world. **LOCAL-FIRST**: no Hostinger/deploy/domain spend until proven great locally. `docs/resell-study.md` is the product bible.
+- **Committed the backlog** (5 commits, `afb3b0f`..`583fb24`): Doctor v4, AR_RULES prompts, gitignore, memory spine, resell study. ⚠️ **Honesty note**: `afb3b0f "Doctor v4"` also carries all of **mission 019** (save-in-place/autosave/recents) — 019 was sitting **uncommitted + undocumented** on disk at session start and got bundled under the doctor message. Mislabel is local-only (nothing pushed); left as-is rather than rewrite history.
+- **Doctor v4 VERIFIED accurate** on the real 26-slide lecture (`Chp1-Lec1-2.html`): 29 raw issues → **3 root-cause cards, score 72**. Hostile-reviewer pass proved the findings are REAL, not noise: teal `#1AD9C7` H2s = 1.8:1 on white, gold `#C5A059` titles = 2.5:1 (both < WCAG 3) + 1 broken image + 2 text-heavy slides. The gold is the off-brand gold the MiM memory already flagged. Doctor correctly collapses 26 low-contrast instances into ONE card.
+- **Mission 019 VERIFIED live** (drove the real app via synthetic drop): recents record + thumbnail written on load; autosave empty on fresh load then 45KB snapshot after one edit; save-in-place + crash-recovery paths present and wired. Works end-to-end.
+- **Next**: (1) the real lecture genuinely fails contrast — offer «إصلاح الكل» or one-click on-brand recolor as the trust demo. (2) Electron doctor dock still on old row UI (KNOWN_ISSUES). (3) remaining trust audit: theme/fonts + PDF export on the real lecture. (4) verified-not-committed disease is cured for now — keep it that way.
+
 ## 2026-07-12 (afternoon) — orientation + spine scaffold (this file created)
 - Done: kickoff audit after user lost track across chats. Reconstructed state: 016A committed (`d2b108b`), 016B written to disk 13:51 (uncommitted, unverified), mission 017 queued unexecuted.
 - Done: memory spine created (CONTEXT / SESSION_LOG / KNOWN_ISSUES); VIBE_CODING_RULES distributed to `.clinerules/` + `.kilocode/rules/`; both + `.claude/` gitignored.
