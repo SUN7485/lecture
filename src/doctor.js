@@ -550,6 +550,39 @@
         message: 'خط غير مضمّن وبلا بديل آمن (' + famLabel + ') — قد يظهر بخط غير متوقّع على جهاز لا تملكه. ضمّنه من 🔤 الخطوط أو أضف بديلًا آمنًا.', fix: null });
     }
 
+    // Rule 19b — fonts loaded from the network. An @import or <link> to a web-font
+    // host (Google Fonts, Typekit, …) renders on the author's connected machine but
+    // the intended face vanishes on any device without a connection — the deck then
+    // silently falls back to a substitute (no crash, no tofu, just the wrong
+    // typeface). Distinct from Rule 19: there a fallback is missing; here one exists
+    // but the design still isn't portable. Deterministic, zero false positives (a
+    // network dependency is a fact) — and the responsible offline stacks our
+    // templates use carry no external @import, so a deliberate design stays silent.
+    // Deck-level (slideIndex -1, anchored to slide 1 so «تجاهل» persists).
+    var FONT_HOST = /fonts\.googleapis\.com|fonts\.gstatic\.com|use\.typekit\.net|fonts\.bunny\.net|fontlibrary\.org|use\.fontawesome\.com/i;
+    var hostOf = function (u) { var m = /^https?:\/\/([^\/?#]+)/i.exec(u); return m ? m[1] : u; };
+    var netHosts = {};
+    try {
+      for (var ssi = 0; ssi < doc.styleSheets.length; ssi++) {
+        var impRules;
+        try { impRules = doc.styleSheets[ssi].cssRules; } catch (eImp) { continue; }
+        if (!impRules) continue;
+        for (var ri = 0; ri < impRules.length; ri++) {
+          if (impRules[ri].type === 3 && impRules[ri].href && FONT_HOST.test(impRules[ri].href)) netHosts[hostOf(impRules[ri].href)] = true;
+        }
+      }
+    } catch (eSheets) { /* cross-origin sheet — ignore, we only care about readable @imports */ }
+    var fontLinks = doc.querySelectorAll('link[href]');
+    for (var li = 0; li < fontLinks.length; li++) {
+      var lhref = fontLinks[li].getAttribute('href') || '';
+      if (FONT_HOST.test(lhref)) netHosts[hostOf(lhref)] = true;
+    }
+    var netKeys = Object.keys(netHosts);
+    if (netKeys.length && slides.length) {
+      issues.push({ ruleId: 'fonts-external', severity: 'warn', slideIndex: -1, el: slides[0],
+        message: 'خطوط تُحمَّل من الإنترنت (' + netKeys.slice(0, 2).join('، ') + ') — على جهاز دون اتصال تظهر الشرائح بخط بديل. ضمّنها من 🔤 الخطوط ليظهر العرض كما صمّمته على كل جهاز.', fix: null });
+    }
+
     // Rule 17 — title drift (deck-level): once >=3 content slides carry
     // titles and a clear majority share one size, stragglers get flagged.
     // Size-only: family drift is already the font-zoo rule's job.
