@@ -828,6 +828,7 @@
   let drDock = null;
   let drScanMs = 0;
   let drView = 'type';   // 'type' | 'slide' — dock grouping mode
+  let drCards = [];      // root-cause cards from SlideDoctor.aggregate — score + type view read these
 
   function ensureDoctorDock() {
     if (drDock) return drDock;
@@ -873,16 +874,17 @@
     drIssues = window.SlideDoctor.analyze(editor);
     drScanMs = Math.max(1, Math.round(performance.now() - t0));
     const btn = $('#btn-doctor');
-    btn.textContent = '🩺 الفحص' + (drIssues.length ? ` (${drIssues.length})` : '');
-    btn.classList.toggle('has-issues', drIssues.length > 0);
+    drCards = window.SlideDoctor.aggregate ? window.SlideDoctor.aggregate(drIssues) : [];
+    btn.textContent = '🩺 الفحص' + (drCards.length ? ` (${drCards.length})` : '');
+    btn.classList.toggle('has-issues', drCards.length > 0);
     if (drOpen) renderDoctor();
   }
 
-  // Health score: start at 100, errors cost 12, warnings 4. Purely a
-  // motivational readout — the list is the real product.
+  // Health score counts root causes (cards), not repeated rows — one bad
+  // title color is one problem, not 25. Purely a motivational readout.
   function doctorScore() {
-    const errs = drIssues.filter((i) => i.severity === 'error').length;
-    const warns = drIssues.length - errs;
+    const errs = drCards.filter((c) => c.severity === 'error').length;
+    const warns = drCards.length - errs;
     return Math.max(0, 100 - 12 * errs - 4 * warns);
   }
   function renderDoctorMeta() {
@@ -922,26 +924,95 @@
         const rows = bySlide.get(sIdx);
         const gh = document.createElement('div');
         gh.className = 'dr-group';
-        gh.textContent = 'شريحة ' + (sIdx + 1) + ' (' + rows.length + ')';
+        gh.textContent = (sIdx === -1 ? 'العرض كله' : 'شريحة ' + (sIdx + 1)) + ' (' + rows.length + ')';
         list.appendChild(gh);
         rows.sort((a, b) => (a.severity === 'error' ? 0 : 1) - (b.severity === 'error' ? 0 : 1));
         rows.forEach((iss) => list.appendChild(doctorRow(iss, iss.severity === 'error' ? 'err' : 'warn')));
       });
       return;
     }
-    // Errors first, then warnings.
+    // Type view (v4): one card per root cause. Errors first, then warnings.
     [{ sev: 'error', label: 'أخطاء', cls: 'err' }, { sev: 'warn', label: 'تنبيهات', cls: 'warn' }]
       .forEach((g) => {
-        const rows = drIssues
-          .map((iss, idx) => ({ iss, idx }))
-          .filter((x) => x.iss.severity === g.sev);
-        if (!rows.length) return;
+        const cards = drCards.filter((c) => c.severity === g.sev);
+        if (!cards.length) return;
         const gh = document.createElement('div');
         gh.className = 'dr-group';
-        gh.textContent = `${g.label} (${rows.length})`;
+        gh.textContent = `${g.label} (${cards.length})`;
         list.appendChild(gh);
-        rows.forEach(({ iss }) => list.appendChild(doctorRow(iss, g.cls)));
+        cards.forEach((card) => list.appendChild(doctorCard(card, g.cls)));
       });
+  }
+
+  // One card = one root cause. Multi-slide cards show a count pill + clickable
+  // slide chips; the fix button runs every member fix in ONE undo step.
+  function doctorCard(card, cls) {
+    const row = document.createElement('div');
+    row.className = `dr-row ${cls}`;
+    if (card.count > 1) {
+      const pill = document.createElement('span');
+      pill.className = 'dr-count';
+      pill.textContent = `${card.count} موضعًا في ${card.slides.length} شريحة`;
+      row.appendChild(pill);
+    }
+    const msg = document.createElement('div');
+    msg.textContent = card.message;
+    row.appendChild(msg);
+    const chips = document.createElement('div');
+    chips.className = 'dr-chips';
+    const MAX_CHIPS = 12;
+    card.slides.slice(0, MAX_CHIPS).forEach((sIdx) => {
+      const chip = document.createElement('span');
+      chip.className = 'dr-chip';
+      chip.textContent = sIdx === -1 ? 'العرض كله' : `شريحة ${sIdx + 1}`;
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const target = card.issues.find((i) => i.slideIndex === sIdx);
+        if (target) focusIssue(target);
+      });
+      chips.appendChild(chip);
+    });
+    if (card.slides.length > MAX_CHIPS) {
+      const more = document.createElement('span');
+      more.className = 'dr-chip';
+      more.textContent = `+${card.slides.length - MAX_CHIPS}`;
+      chips.appendChild(more);
+    }
+    row.appendChild(chips);
+    const actions = document.createElement('div');
+    actions.className = 'dr-actions';
+    if (card.fixable) {
+      const fix = document.createElement('button');
+      fix.className = 'dr-fix';
+      fix.textContent = card.fixable > 1 ? `إصلاح الكل (${card.fixable})` : 'إصلاح';
+      fix.addEventListener('click', (e) => {
+        e.stopPropagation();
+        card.issues.forEach((i) => { if (i.fix) i.fix(); });
+        editor.commit(); // ONE undo step for the whole card
+        runDoctor();     // re-scan: card + issues are stale after commit
+        status(`أصلحت ${card.fixable} موضعًا.`);
+      });
+      actions.appendChild(fix);
+    }
+    const ign = document.createElement('button');
+    ign.className = 'dr-ign';
+    ign.textContent = '✕';
+    ign.title = 'تجاهل هذه الملاحظة في كل مواضعها (تُحفظ مع الملف)';
+    ign.addEventListener('click', (e) => {
+      e.stopPropagation();
+      card.issues.forEach((i) => {
+        const cur = i.el.getAttribute('data-ve-dr-ignore') || '';
+        if (!(' ' + cur + ' ').includes(' ' + i.ruleId + ' ')) {
+          i.el.setAttribute('data-ve-dr-ignore', (cur + ' ' + i.ruleId).trim());
+        }
+      });
+      editor.commit(); runDoctor();
+      status('تم تجاهل الملاحظة — «استعادة» في أسفل القائمة تعيدها.');
+    });
+    actions.appendChild(ign);
+    row.appendChild(actions);
+    row.addEventListener('click', () => focusIssue(card.issues[0]));
+    return row;
   }
 
   function doctorRow(iss, cls) {
@@ -949,7 +1020,7 @@
     row.className = `dr-row ${cls}`;
     const chip = document.createElement('span');
     chip.className = 'dr-chip';
-    chip.textContent = `شريحة ${iss.slideIndex + 1}`;
+    chip.textContent = iss.slideIndex === -1 ? 'العرض كله' : `شريحة ${iss.slideIndex + 1}`;
     const msg = document.createElement('div');
     msg.textContent = iss.message;
     row.appendChild(chip);
