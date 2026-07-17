@@ -187,18 +187,39 @@
     return drDock;
   }
 
-  // Run every auto-fixable issue on the live DOM, then a SINGLE commit (one undo
-  // step). Issue `el` refs stay valid across fixes because no fix replaces an
-  // element or innerHTML — only commit/undo does, so we commit just once at the end.
-  function fixAll() {
-    if (!editor || !drIssues.length) return;
-    const fixable = drIssues.filter((i) => i.fix);
-    if (!fixable.length) { status('لا توجد ملاحظات قابلة للإصلاح تلقائيًا.'); return; }
-    const before = drIssues.length;
-    fixable.forEach((i) => i.fix());
-    editor.commit();
-    runDoctor(); // re-scan; drIssues now reflects what actually remains
-    status(`أصلحت ${before - drIssues.length} ملاحظة، المتبقّي ${drIssues.length}.`);
+  // Run every auto-fixable issue on the live DOM, one commit per pass (each
+  // pass = one undo step). Fixes may remove/insert elements (v5: slide deletes
+  // & splits) — stale `el` refs then no-op safely on detached nodes; and a fix
+  // may return a Promise (fonts-external), so each is awaited with its own
+  // failure counted. Passes repeat until the scan converges (a split can push
+  // a new issue into view), stopping the moment a pass makes no progress.
+  let drFixing = false; // async guard: one fix run at a time
+  async function fixAll() {
+    if (!editor || !drIssues.length || drFixing) return;
+    if (!drIssues.some((i) => i.fix)) { status('لا توجد ملاحظات قابلة للإصلاح تلقائيًا.'); return; }
+    drFixing = true;
+    const btn = drDock && drDock.querySelector('.dr-fixall');
+    if (btn) btn.disabled = true;
+    status('جارٍ الإصلاح…');
+    const MAX_PASSES = 5;
+    let fixed = 0, failed = 0, passes = 0;
+    while (passes < MAX_PASSES) {
+      const fixable = drIssues.filter((i) => i.fix);
+      if (!fixable.length) break;
+      const before = drIssues.length;
+      for (const i of fixable) {
+        try { await i.fix(); } catch (_) { failed++; }
+      }
+      editor.commit();
+      runDoctor(); // re-scan; drIssues now reflects what actually remains
+      passes++;
+      if (drIssues.length >= before) break; // no progress — stop honestly
+      fixed += before - drIssues.length;
+    }
+    drFixing = false;
+    if (btn) btn.disabled = false;
+    status(`أصلحت ${fixed} ملاحظة، المتبقّي ${drIssues.length}.` +
+      (failed ? ` تعذّر ${failed} — تحقق من الاتصال بالإنترنت.` : ''));
   }
 
   function runDoctor() {
@@ -318,12 +339,20 @@
       const fix = document.createElement('button');
       fix.className = 'dr-fix';
       fix.textContent = card.fixable > 1 ? `إصلاح الكل (${card.fixable})` : 'إصلاح';
-      fix.addEventListener('click', (e) => {
+      fix.addEventListener('click', async (e) => {
         e.stopPropagation();
-        card.issues.forEach((i) => { if (i.fix) i.fix(); });
+        if (drFixing) return;
+        drFixing = true;
+        fix.disabled = true;
+        let failed = 0;
+        for (const i of card.issues) {
+          if (!i.fix) continue;
+          try { await i.fix(); } catch (_) { failed++; }
+        }
         editor.commit(); // ONE undo step for the whole card
         runDoctor();     // re-scan: card + issues are stale after commit
-        status(`أصلحت ${card.fixable} موضعًا.`);
+        drFixing = false;
+        status(failed ? `تعذّر الإصلاح — تحقق من الاتصال بالإنترنت.` : `أصلحت ${card.fixable} موضعًا.`);
       });
       actions.appendChild(fix);
     }
@@ -362,10 +391,16 @@
       const fix = document.createElement('button');
       fix.className = 'dr-fix';
       fix.textContent = 'إصلاح';
-      fix.addEventListener('click', (e) => {
+      fix.addEventListener('click', async (e) => {
         e.stopPropagation();
-        iss.fix(); editor.commit(); runDoctor(); // re-scan: iss is stale after commit
-        status('تم الإصلاح.');
+        if (drFixing) return;
+        drFixing = true;
+        fix.disabled = true;
+        let ok = true;
+        try { await iss.fix(); } catch (_) { ok = false; }
+        editor.commit(); runDoctor(); // re-scan: iss is stale after commit
+        drFixing = false;
+        status(ok ? 'تم الإصلاح.' : 'تعذّر الإصلاح — تحقق من الاتصال بالإنترنت.');
       });
       row.appendChild(fix);
     }

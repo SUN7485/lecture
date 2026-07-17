@@ -1,12 +1,16 @@
 /*
  * doctor.js — Slide Doctor: a deterministic "Grammarly for slides" lint engine.
- * Pure DOM, zero AI, zero network. Loaded verbatim by BOTH the Electron renderer
+ * Pure DOM, zero AI. Analysis is zero-network; the single exception is the
+ * fonts-external FIX, which fetches web fonts once in order to REMOVE the
+ * deck's network dependency. Loaded verbatim by BOTH the Electron renderer
  * and the static web port — keep web/doctor.js byte-identical to src/doctor.js.
  * Exposes window.SlideDoctor.analyze(editor) -> issues[]. Each issue:
  *   { ruleId, severity: 'error'|'warn', slideIndex, el, message (ar), fix|null }
- * fix() (when present) mutates the DOM in place; the caller records one undo
- * step via editor.commit(). After any fix/undo the caller MUST re-run analyze()
+ * fix() (when present) mutates the DOM in place — and MAY return a Promise
+ * (fonts-external does); callers must await it, then record one undo step via
+ * editor.commit(). After any fix/undo the caller MUST re-run analyze()
  * because undo replaces body.innerHTML and invalidates every `el` reference.
+ * v5: every rule is now auto-fixable, so «إصلاح الكل» really fixes all.
  */
 (function () {
   'use strict';
@@ -29,9 +33,14 @@
   var OFFPAL_DIST = 4000;    // squared RGB distance from palette = foreign color
   var GREY_SPAN = 24;        // channel spread under which a color is neutral
   var OVERLOAD_FACTOR = 1.5;  // deck-relative overload: only slides >1.5x the deck's own median are outliers
+  var SPLIT_MIN_WORDS = 10;  // don't split content thinner than this
   // Families safe without @font-face (CSS generics + fonts on effectively
   // every Windows/Office machine these decks are shown on).
   var GENERIC_FAMS = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-serif|ui-sans-serif|ui-monospace|math|emoji|arial|helvetica|helvetica neue|tahoma|verdana|segoe ui|calibri|cambria|georgia|times|times new roman|courier|courier new|trebuchet ms|impact)$/i;
+  // Known web-font hosts (Rule 19b detection + its embed fix share this).
+  var FONT_HOST = /fonts\.googleapis\.com|fonts\.gstatic\.com|use\.typekit\.net|fonts\.bunny\.net|fontlibrary\.org|use\.fontawesome\.com/i;
+  // Editor chrome that must never count as slide content.
+  var CHROME_SEL = '.ve-overlay, .ve-toolbar, .ve-palette, .ve-wandmenu, .ve-guide, .ve-ghost';
 
   // ---- WCAG 2.1 relative luminance + contrast ratio ----
   function _srgb(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
@@ -139,6 +148,177 @@
     return false;
   }
 
+  // ---- v5 fix helpers: slide surgery + font embedding ----
+
+  // Delete a whole slide (empty-slide / duplicate-slide fixes). Plain DOM
+  // removal so the caller's single commit() records one undo step; deselect
+  // first so the editor overlay never floats over a detached element.
+  function _removeSlideFix(editor, slide) {
+    return function () {
+      if (!slide.isConnected) return;
+      if (editor.selected && slide.contains(editor.selected) && editor._deselect) editor._deselect();
+      slide.remove();
+    };
+  }
+
+  // The blocks of a slide that may move to a continuation slide. Inside a
+  // .content host everything is flow content; at slide level, headings,
+  // footers, logos and drag-floated (inline position:absolute) units stay put.
+  function _splitBlocks(slide, host) {
+    var out = [];
+    for (var i = 0; i < host.children.length; i++) {
+      var b = host.children[i];
+      if (b.matches && b.matches(CHROME_SEL)) continue;
+      if (host === slide) {
+        if (/^(H1|H2|H3|H4|H5|H6|HEADER|FOOTER|NAV|IMG)$/i.test(b.tagName)) continue;
+        if (/(^|\s)(footer|slide-footer|mim-logo|logo)(\s|$)/i.test(b.className || '')) continue;
+      }
+      if (b.style && b.style.position === 'absolute') continue;
+      out.push(b);
+    }
+    return out;
+  }
+  function _wordsOf(el) {
+    var t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    return t ? t.split(' ').length : 0;
+  }
+  // Flatten a slide's splittable content into ordered units: list items open
+  // up individually (the common overload shape — one giant UL), every other
+  // block moves whole. `list` remembers the parent so halves rebuild cleanly.
+  function _splitUnits(slide, host) {
+    var units = [];
+    _splitBlocks(slide, host).forEach(function (b) {
+      if (/^(UL|OL)$/i.test(b.tagName) && b.children.length >= 2) {
+        for (var i = 0; i < b.children.length; i++) units.push({ el: b.children[i], list: b });
+      } else {
+        units.push({ el: b, list: null });
+      }
+    });
+    return units;
+  }
+  function _dropUnit(u) {
+    var list = u.list;
+    u.el.remove();
+    if (list && !list.children.length) list.remove();
+  }
+  // Where an overloaded slide can be cut in two: the unit boundary that best
+  // balances the word count, never right after a heading (it would dangle at
+  // the bottom of the first half). null = no clean cut exists (single
+  // paragraph, lone table…) — the issue stays advisory.
+  function _splitPlan(slide) {
+    var host = slide.querySelector('.content') || slide;
+    var units = _splitUnits(slide, host);
+    if (units.length < 2) return null;
+    var total = 0;
+    var w = units.map(function (u) { var n = _wordsOf(u.el); total += n; return n; });
+    if (total < SPLIT_MIN_WORDS) return null;
+    var acc = 0, cut = -1, bestDiff = Infinity;
+    for (var i = 0; i < units.length - 1; i++) {
+      acc += w[i];
+      if (/^H[1-6]$/i.test(units[i].el.tagName)) continue; // no dangling heading
+      var diff = Math.abs(acc - total / 2);
+      if (diff < bestDiff) { bestDiff = diff; cut = i + 1; }
+    }
+    return cut > 0 ? { cut: cut } : null;
+  }
+  // Execute a split plan: clone the slide shell (title, footer, logo ride
+  // along), keep the first half here, the second half on the clone, and mark
+  // the clone's title as a continuation. Bails silently if the slide changed
+  // shape since the scan — the next re-scan re-offers a correct fix.
+  function _splitFix(editor, slide, plan) {
+    return function () {
+      if (!slide.isConnected || !slide.parentNode) return;
+      var clone = editor._cleanClone ? editor._cleanClone(slide) : slide.cloneNode(true);
+      clone.removeAttribute('id'); // duplicate ids corrupt anchors
+      var ids = clone.querySelectorAll('[id]');
+      for (var i = 0; i < ids.length; i++) ids[i].removeAttribute('id');
+      var srcU = _splitUnits(slide, slide.querySelector('.content') || slide);
+      var dstU = _splitUnits(clone, clone.querySelector('.content') || clone);
+      if (srcU.length !== dstU.length || plan.cut >= srcU.length) return;
+      for (var k = srcU.length - 1; k >= plan.cut; k--) _dropUnit(srcU[k]);
+      for (k = plan.cut - 1; k >= 0; k--) _dropUnit(dstU[k]);
+      var head = clone.querySelector('h1, h2, h3');
+      if (head && !/\(تابع\)\s*$/.test(head.textContent)) head.textContent = head.textContent.replace(/\s+$/, '') + ' (تابع)';
+      slide.parentNode.insertBefore(clone, slide.nextSibling);
+    };
+  }
+
+  // Rule 19b's one-click fix — the doctor's ONLY network operation, and it
+  // exists to REMOVE a network dependency: download each web-font stylesheet
+  // once, inline its binaries as data: @font-face rules in the deck's head
+  // (kept by getCleanHtml, so the saved file is self-contained), THEN strip
+  // the <link>s/@imports. Nothing is removed unless embedding succeeded, so a
+  // failed/offline run leaves the deck exactly as it was. Returns a Promise.
+  function _embedExternalFonts(doc) {
+    var IMP_RE = /@import\s+(?:url\(\s*)?['"]?(https?:[^'")\s]+)['"]?\s*\)?[^;]*;?/gi;
+    var links = [], styles = [], urls = [], seen = {};
+    var linkEls = doc.querySelectorAll('link[href]');
+    for (var i = 0; i < linkEls.length; i++) {
+      var href = linkEls[i].getAttribute('href') || '';
+      if (!FONT_HOST.test(href)) continue;
+      links.push(linkEls[i]);
+      var abs = linkEls[i].href || href;
+      if (!seen[abs]) { seen[abs] = 1; urls.push(abs); }
+    }
+    var styleEls = doc.querySelectorAll('style');
+    for (var s = 0; s < styleEls.length; s++) {
+      var txt = styleEls[s].textContent || '', m, hit = false;
+      IMP_RE.lastIndex = 0;
+      while ((m = IMP_RE.exec(txt))) {
+        if (!FONT_HOST.test(m[1])) continue;
+        hit = true;
+        if (!seen[m[1]]) { seen[m[1]] = 1; urls.push(m[1]); }
+      }
+      if (hit) styles.push(styleEls[s]);
+    }
+    if (!urls.length) return Promise.reject(new Error('لا توجد روابط خطوط خارجية'));
+    return Promise.all(urls.map(function (u) {
+      return fetch(u).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); });
+    })).then(function (cssTexts) {
+      var faces = [];
+      cssTexts.forEach(function (css) {
+        // css2 labels each face with a /* subset */ comment — keep arabic +
+        // latin (digits/Latin terms) and drop the rest to keep the file lean.
+        // A sheet without subset labels keeps all its faces.
+        var labelled = /\/\*\s*[\w-]+\s*\*\/\s*@font-face/.test(css);
+        var re = /(?:\/\*\s*([\w-]+)\s*\*\/\s*)?@font-face\s*\{([^}]*)\}/g;
+        var m2;
+        while ((m2 = re.exec(css))) {
+          var subset = m2[1] || '';
+          if (labelled && subset && subset !== 'arabic' && subset !== 'latin') continue;
+          faces.push(m2[2]);
+        }
+      });
+      if (!faces.length) throw new Error('لم يُعثر على أوجه خطوط في الرابط');
+      return Promise.all(faces.map(function (body) {
+        var src = (body.match(/url\(\s*['"]?(https?:[^'")\s]+)['"]?\s*\)/) || [])[1];
+        if (!src) return null;
+        return fetch(src).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); })
+          .then(function (buf) {
+            var bytes = new Uint8Array(buf), bin = '';
+            for (var j = 0; j < bytes.length; j += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(j, j + 0x8000));
+            var ext = ((src.match(/\.(woff2|woff|ttf|otf)(\?|#|$)/i) || [])[1] || 'woff2').toLowerCase();
+            var fmt = ext === 'ttf' ? 'truetype' : ext === 'otf' ? 'opentype' : ext;
+            var mime = ext === 'ttf' ? 'font/ttf' : ext === 'otf' ? 'font/otf' : 'font/' + ext;
+            var decls = body.replace(/src\s*:[^;]+;?/i, '').replace(/\s+/g, ' ').trim();
+            if (decls && !/;$/.test(decls)) decls += ';';
+            return '@font-face{' + decls + "src:url(data:" + mime + ';base64,' + btoa(bin) + ") format('" + fmt + "');}";
+          });
+      }));
+    }).then(function (rules) {
+      var cssOut = rules.filter(Boolean).join('\n');
+      if (!cssOut) throw new Error('تعذّر تضمين أوجه الخطوط');
+      var st = doc.getElementById('ve-embedded-fonts');
+      if (!st) { st = doc.createElement('style'); st.id = 've-embedded-fonts'; doc.head.appendChild(st); }
+      st.textContent = (st.textContent ? st.textContent + '\n' : '') + cssOut;
+      // Only now that the binaries live in the file: cut the network cords.
+      links.forEach(function (l) { l.remove(); });
+      styles.forEach(function (stl) {
+        stl.textContent = stl.textContent.replace(IMP_RE, function (full, u) { return FONT_HOST.test(u) ? '' : full; });
+      });
+    });
+  }
+
   // Wrap an uncaptioned image in the editor's numbered-figure convention so
   // renumberFigures() (run by editor.commit) auto-labels it «شكل N — …».
   function _captionFix(img, doc) {
@@ -189,8 +369,11 @@
       var words = raw ? raw.split(' ').length : 0;
       wordCounts[si] = words; charCounts[si] = raw.length;
 
-      // Rule 2 — low contrast (advisory; report the single worst text element)
-      var worst = null;
+      // Rule 2 — low contrast. v5: collect EVERY failing text element — the
+      // old worst-only report meant each fix click just surfaced the next
+      // worst and the card never cleared in one pass. The fix snaps each to
+      // the nearest passing palette color (on-brand); else nudges black/white.
+      var lowItems = [], lowWorst = null;
       texts.forEach(function (el) {
         var cs = win.getComputedStyle(el);
         var fg = _rgb(cs.color); if (!fg) return;
@@ -200,16 +383,19 @@
         var bold = (parseInt(cs.fontWeight, 10) || 400) >= 700;
         var large = size >= 24 || (bold && size >= 18.66);
         var need = large ? 3 : 4.5;
-        if (ratio < need && (!worst || ratio < worst.ratio)) worst = { el: el, ratio: ratio, need: need, fg: fg, bg: bg };
+        if (ratio >= need) return;
+        lowItems.push({ el: el, fg: fg, bg: bg, need: need });
+        if (!lowWorst || ratio < lowWorst.ratio) lowWorst = { el: el, ratio: ratio, need: need };
       });
-      if (worst) {
-        issues.push({ ruleId: 'low-contrast', severity: 'error', slideIndex: si, el: worst.el,
-          message: 'تباين ضعيف بين النص والخلفية (النسبة ' + worst.ratio.toFixed(1) + ':1، المطلوب ≥' + worst.need + ') — الإصلاح يضبط لون النص من لوحة الألوان حتى يمرّ.',
-          fix: (function (el, fg, bg, need) { return function () {
-            // Prefer the nearest passing palette color (on-brand); else nudge to black/white.
-            var c = _snapPalette(fg, bg, need, palette) || _nudge(fg, bg, need);
-            el.style.color = 'rgb(' + c[0] + ', ' + c[1] + ', ' + c[2] + ')';
-          }; })(worst.el, worst.fg, worst.bg, worst.need) });
+      if (lowWorst) {
+        issues.push({ ruleId: 'low-contrast', severity: 'error', slideIndex: si, el: lowWorst.el,
+          message: 'تباين ضعيف بين النص والخلفية في ' + lowItems.length + ' عنصر (الأسوأ ' + lowWorst.ratio.toFixed(1) + ':1، المطلوب ≥' + lowWorst.need + ') — الإصلاح يضبط اللون من لوحة الألوان حتى يمرّ.',
+          fix: (function (items) { return function () {
+            items.forEach(function (it) {
+              var c = _snapPalette(it.fg, it.bg, it.need, palette) || _nudge(it.fg, it.bg, it.need);
+              it.el.style.color = 'rgb(' + c[0] + ', ' + c[1] + ', ' + c[2] + ')';
+            });
+          }; })(lowItems) });
       }
 
       // Rule 3 (v4) — font families are collected per slide; the zoo verdict
@@ -228,10 +414,17 @@
         var img = imgs[k];
         if (img.closest('.ve-ghost') || img.closest('[data-ve-figlist]')) continue;
 
-        // Rule 9 — broken image: a src is present but nothing decoded.
+        // Rule 9 — broken image: a src is present but nothing decoded. The
+        // pixels can't be conjured back, so the honest one-click fix removes
+        // it (undo-able); click the image first if you'd rather replace it.
         if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) {
           issues.push({ ruleId: 'broken-image', severity: 'error', slideIndex: si, el: img,
-            message: 'صورة مكسورة (المصدر لا يُحمَّل) — انقرها لاستبدالها أو احذفها.', fix: null });
+            message: 'صورة مكسورة (المصدر لا يُحمَّل) — الإصلاح يحذفها، أو انقرها لاستبدالها قبل الإصلاح.',
+            fix: (function (image) { return function () {
+              var fig = image.closest('figure');
+              image.remove();
+              if (fig && !fig.querySelector('img, svg, canvas, video')) fig.remove();
+            }; })(img) });
           continue;
         }
 
@@ -250,11 +443,18 @@
           }
         }
 
-        // Rule 10 — upscaled beyond its pixels: will project blurry.
+        // Rule 10 — upscaled beyond its pixels: will project blurry. Sharpness
+        // can't be invented, so the fix takes the message's second option:
+        // shrink the image back to its true pixel size (crisp again).
         if (nw && rw && !/\.svg(\?|#|$)|image\/svg/i.test(img.currentSrc || img.src || '') &&
             rw * rh >= IMG_MIN_AREA && rw / nw > UPSCALE_LIMIT) {
           issues.push({ ruleId: 'blurry-image', severity: 'warn', slideIndex: si, el: img,
-            message: 'الصورة معروضة أكبر من دقتها الأصلية (' + (rw / nw).toFixed(1) + '×) وستظهر مبكسلة — استبدلها بدقة أعلى أو صغّرها.', fix: null });
+            message: 'الصورة معروضة أكبر من دقتها الأصلية (' + (rw / nw).toFixed(1) + '×) وستظهر مبكسلة — الإصلاح يصغّرها إلى حجمها الحقيقي، أو استبدلها بدقة أعلى.',
+            fix: (function (image, natW) { return function () {
+              image.style.width = Math.round(natW) + 'px';
+              image.style.height = 'auto';
+              image.style.maxWidth = '100%';
+            }; })(img, nw) });
         }
 
         // Rule 5 — content image with no numbered «شكل N» caption (auto-fixable)
@@ -431,7 +631,8 @@
         }
         if (words < 3 && !hasHead && !slide.querySelector('img, svg, table, canvas, video')) {
           issues.push({ ruleId: 'empty-slide', severity: 'warn', slideIndex: si, el: slide,
-            message: 'شريحة شبه فارغة — املأها أو احذفها (Ctrl+Delete).', fix: null });
+            message: 'شريحة شبه فارغة — الإصلاح يحذفها، أو املأها بالمحتوى.',
+            fix: _removeSlideFix(editor, slide) });
         }
       }
     });
@@ -473,8 +674,13 @@
           els.forEach(function (el) { if (el.style && el.style.fontFamily) el.style.fontFamily = ''; });
         }; })(d.texts);
       } else if (p.intruders) {
-        // Strip only the intruder families back onto the slide's dominant one.
-        var domF = d.list.reduce(function (a, b) { return d.count[b] > d.count[a] ? b : a; });
+        // Strip only the intruder families back onto the slide's dominant
+        // LEGIT one. The intruders must be excluded from that vote: a chart
+        // with many labels can make the intruder the slide's most-used family,
+        // and "restore to itself" is a silent no-op (real case: 8 SVG labels
+        // in Cairo vs 5 Lyon elements — the fix targeted Cairo).
+        var legit = d.list.filter(function (f) { return p.intruders.indexOf(f) === -1; });
+        var domF = (legit.length ? legit : d.list).reduce(function (a, b) { return d.count[b] > d.count[a] ? b : a; });
         var domStack = win.getComputedStyle(d.rep[domF]).fontFamily;
         fzMsg = 'خط دخيل على نظام خطوط العرض في هذه الشريحة (' + p.intruders.join('، ') + ') — الإصلاح يعيده إلى خطوط العرض.';
         fzFix = (function (els, stack, bad) { return function () {
@@ -503,8 +709,14 @@
     var cLimit = Math.max(TEXT_CHAR_LIMIT, Math.round(medC * OVERLOAD_FACTOR));
     slides.forEach(function (slide, si4) {
       if (wordCounts[si4] > wLimit || charCounts[si4] > cLimit) {
+        // Fixable when a clean cut point exists (block boundary or a long
+        // list); a lone paragraph/table stays advisory rather than pretending.
+        var plan = _splitPlan(slide);
         issues.push({ ruleId: 'text-overload', severity: 'warn', slideIndex: si4, el: slide,
-          message: 'الشريحة مزدحمة بالنص (' + wordCounts[si4] + ' كلمة — أعلى بكثير من بقية العرض) — فكّر في تقسيمها إلى شريحتين.', fix: null });
+          message: plan
+            ? 'الشريحة مزدحمة بالنص (' + wordCounts[si4] + ' كلمة — أعلى بكثير من بقية العرض) — الإصلاح يقسمها إلى شريحتين.'
+            : 'الشريحة مزدحمة بالنص (' + wordCounts[si4] + ' كلمة — أعلى بكثير من بقية العرض) — فكّر في تقسيمها إلى شريحتين.',
+          fix: plan ? _splitFix(editor, slide, plan) : null });
       }
     });
 
@@ -547,7 +759,23 @@
     if (!sheetsUnreadable && atRiskOrder.length && slides.length) {
       var famLabel = atRiskOrder.slice(0, 3).join('، ') + (atRiskOrder.length > 3 ? '…' : '');
       issues.push({ ruleId: 'fonts-not-embedded', severity: 'warn', slideIndex: -1, el: slides[0],
-        message: 'خط غير مضمّن وبلا بديل آمن (' + famLabel + ') — قد يظهر بخط غير متوقّع على جهاز لا تملكه. ضمّنه من 🔤 الخطوط أو أضف بديلًا آمنًا.', fix: null });
+        message: 'خط غير مضمّن وبلا بديل آمن (' + famLabel + ') — قد يظهر بخط غير متوقّع على جهاز لا تملكه. الإصلاح يثبّت له بديلًا آمنًا (Tahoma)؛ وللمظهر الأصلي ضمّنه من 🔤 الخطوط.',
+        // A local() fallback chain per at-risk family: a machine WITH the font
+        // still uses it; a machine without gets Tahoma instead of a random
+        // substitute. Declaring the face also satisfies this rule's own
+        // `declared` check, deterministically and offline.
+        fix: (function (fams) { return function () {
+          var st = doc.getElementById('ve-font-fallback');
+          if (!st) { st = doc.createElement('style'); st.id = 've-font-fallback'; doc.head.appendChild(st); }
+          var css = st.textContent || '';
+          for (var fi = 0; fi < fams.length; fi++) {
+            var f = fams[fi].replace(/['"\\]/g, '');
+            if (css.indexOf("font-family:'" + f + "'") !== -1) continue;
+            css += "\n@font-face{font-family:'" + f + "';src:local('" + f + "'),local('Tahoma');}" +
+              "\n@font-face{font-family:'" + f + "';font-weight:bold;src:local('" + f + "'),local('Tahoma Bold'),local('Tahoma');}";
+          }
+          st.textContent = css;
+        }; })(atRiskOrder.slice(0)) });
     }
 
     // Rule 19b — fonts loaded from the network. An @import or <link> to a web-font
@@ -559,7 +787,6 @@
     // network dependency is a fact) — and the responsible offline stacks our
     // templates use carry no external @import, so a deliberate design stays silent.
     // Deck-level (slideIndex -1, anchored to slide 1 so «تجاهل» persists).
-    var FONT_HOST = /fonts\.googleapis\.com|fonts\.gstatic\.com|use\.typekit\.net|fonts\.bunny\.net|fontlibrary\.org|use\.fontawesome\.com/i;
     var hostOf = function (u) { var m = /^https?:\/\/([^\/?#]+)/i.exec(u); return m ? m[1] : u; };
     var netHosts = {};
     try {
@@ -580,7 +807,10 @@
     var netKeys = Object.keys(netHosts);
     if (netKeys.length && slides.length) {
       issues.push({ ruleId: 'fonts-external', severity: 'warn', slideIndex: -1, el: slides[0],
-        message: 'خطوط تُحمَّل من الإنترنت (' + netKeys.slice(0, 2).join('، ') + ') — على جهاز دون اتصال تظهر الشرائح بخط بديل. ضمّنها من 🔤 الخطوط ليظهر العرض كما صمّمته على كل جهاز.', fix: null });
+        message: 'خطوط تُحمَّل من الإنترنت (' + netKeys.slice(0, 2).join('، ') + ') — على جهاز دون اتصال تظهر الشرائح بخط بديل. الإصلاح يضمّنها داخل الملف نفسه (يحتاج اتصالًا مرة واحدة) فيظهر العرض كما صمّمته على كل جهاز.',
+        // Async fix (returns a Promise — the docks await it). Fails safe: the
+        // deck is untouched unless the binaries actually landed in the file.
+        fix: function () { return _embedExternalFonts(doc); } });
     }
 
     // Rule 17 — title drift (deck-level): once >=3 content slides carry
@@ -618,7 +848,8 @@
       if (norm.split(' ').length < DUP_MIN_WORDS) return;
       if (seenText[norm] != null) {
         issues.push({ ruleId: 'duplicate-slide', severity: 'warn', slideIndex: si, el: slide,
-          message: 'الشريحة مطابقة تمامًا للشريحة ' + (seenText[norm] + 1) + ' — غالبًا نسخة منسيّة.', fix: null });
+          message: 'الشريحة مطابقة تمامًا للشريحة ' + (seenText[norm] + 1) + ' — غالبًا نسخة منسيّة؛ الإصلاح يحذف النسخة.',
+          fix: _removeSlideFix(editor, slide) });
       } else { seenText[norm] = si; }
     });
 
@@ -652,5 +883,5 @@
     });
   }
 
-  window.SlideDoctor = { analyze: analyze, aggregate: aggregate, version: 4 };
+  window.SlideDoctor = { analyze: analyze, aggregate: aggregate, version: 5 };
 })();
