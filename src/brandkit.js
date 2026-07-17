@@ -39,17 +39,76 @@
     const decls = Object.keys(vars || {}).map(k => `${k}:${vars[k]};`).join('');
     return decls ? `:root{${decls}}` : '';
   }
+  // Role CSS only — the fonts themselves are EMBEDDED as data: faces by the
+  // caller (was an @import here, which made presets online-only and tripped
+  // the doctor's fonts-external rule on every deck they touched).
   function typoCss(p) {
-    return `@import url('https://fonts.googleapis.com/css2?family=${encodeURIComponent(p.heading)}:wght@700&family=${encodeURIComponent(p.body)}:wght@400;700&display=swap');\n` +
-      `.slide h1,.slide h2,.slide h3{font-family:'${p.heading}',sans-serif;}\n` +
+    return `.slide h1,.slide h2,.slide h3{font-family:'${p.heading}',sans-serif;}\n` +
       `.slide .content,.slide p,.slide li{font-family:'${p.body}',sans-serif;line-height:${p.lineHeight};}`;
   }
-  function applyTypography(p) {
+  // Google Fonts css2 -> embedded faces (ported from web/app.js — keep in
+  // spirit-sync). gstatic serves CORS *, so the woff2 binaries can be fetched
+  // and inlined as data: URLs. css2 labels each block with a /* subset */
+  // comment — keep arabic + latin (digits/Latin terms) to keep the file lean.
+  async function fetchGoogleFontFaces(family, weights) {
+    const url = 'https://fonts.googleapis.com/css2?family=' +
+      encodeURIComponent(family).replace(/%20/g, '+') +
+      ':wght@' + weights.join(';') + '&display=swap';
+    const css = await (await fetch(url)).text();
+    const wanted = [];
+    const re = /\/\*\s*([\w-]+)\s*\*\/\s*@font-face\s*\{([^}]*)\}/g;
+    let m;
+    while ((m = re.exec(css))) {
+      const subset = m[1], body = m[2];
+      if (subset !== 'arabic' && subset !== 'latin') continue;
+      const weight = parseInt((body.match(/font-weight:\s*(\d+)/) || [])[1], 10) || 400;
+      const src = (body.match(/src:\s*url\((https:[^)]+\.woff2)\)/) || [])[1];
+      if (src) wanted.push({ weight, src });
+    }
+    if (!wanted.length) throw new Error('no usable faces for ' + family);
+    const fonts = [];
+    for (const f of wanted) {
+      const buf = await (await fetch(f.src)).arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      }
+      fonts.push({ family, weight: f.weight, ext: 'woff2', b64: btoa(bin) });
+    }
+    return fonts;
+  }
+  function dedupeFonts(fonts) {
+    const seen = new Set();
+    return fonts.filter((f) => {
+      const k = f.family + '|' + (f.weight || 400) + '|' + (f.style || 'normal');
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+  // Both preset paths pair a heading face @700 with a body face @400+700.
+  async function fetchPresetFaces(heading, body) {
+    const h = await fetchGoogleFontFaces(heading, [700]);
+    const b = await fetchGoogleFontFaces(body, [400, 700]);
+    return dedupeFonts(h.concat(b));
+  }
+  async function applyTypography(p) {
     const editor = getEditor();
     if (!editor) return;
-    editor.applyThemeKit({ name: kit.name || editor.activeThemeKit() || 'custom', fonts: kit.fonts, varsCss: varsToCss(kit.vars) + '\n' + typoCss(p) });
+    // Embed the pairing's fonts so the saved deck renders offline + in PDF.
+    // Roles still apply if the fetch fails; text then falls back to system fonts.
+    let faces = [];
+    try {
+      setStatus(`Downloading "${p.label}" fonts…`);
+      faces = await fetchPresetFaces(p.heading, p.body);
+    } catch (_) { faces = []; }
+    // Uploaded kit fonts stay and WIN dedupe ties — a customer file beats a preset face.
+    editor.applyThemeKit({ name: kit.name || editor.activeThemeKit() || 'custom', fonts: dedupeFonts((kit.fonts || []).concat(faces)), varsCss: varsToCss(kit.vars) + '\n' + typoCss(p) });
     refreshActive();
-    setStatus(`Applied "${p.label}" typography preset.`);
+    setStatus(faces.length
+      ? `Applied "${p.label}" typography — fonts embedded (offline & PDF safe).`
+      : `Applied "${p.label}" roles only — fonts couldn't be downloaded (offline?); text falls back to system fonts.`);
   }
 
   // ---------- Theme files (.theme.json) + built-in presets (012) ----------
@@ -60,13 +119,13 @@
     Slate: {
       vars: { '--purple': '#2B3A55', '--cyan': '#5AA9C9', '--pink': '#8AA6B8', '--gold': '#8AA6B8',
         '--dark': '#1A1A1A', '--bg-gray': '#F2F4F6', '--white': '#FFFFFF',
-        '--grey-dark': '#5B6470', '--grey-mid': '#9AA5B1', '--grey-light': '#E3E7EC' },
+        '--grey-dark': '#5B6470', '--grey-mid': '#9AA5B1', '--grey-light': '#E3E7EC', '--ve-line-height': '1.75' },
       typo: { heading: 'Cairo', body: 'Tajawal', lineHeight: 1.75 },
     },
     Warm: {
       vars: { '--purple': '#7A4E2D', '--cyan': '#C97B4A', '--pink': '#E3B27B', '--gold': '#E3B27B',
         '--dark': '#241A12', '--bg-gray': '#FBF3EA', '--white': '#FFFFFF',
-        '--grey-dark': '#6B5A4A', '--grey-mid': '#B39B86', '--grey-light': '#EFE2D3' },
+        '--grey-dark': '#6B5A4A', '--grey-mid': '#B39B86', '--grey-light': '#EFE2D3', '--ve-line-height': '1.8' },
       typo: { heading: 'Almarai', body: 'Cairo', lineHeight: 1.8 },
     },
   };
@@ -80,14 +139,23 @@
     refreshActive();
     setStatus('Applied MiM preset (screen palette).');
   }
-  function applyNeutralPreset(name) {
+  async function applyNeutralPreset(name) {
     const editor = getEditor();
     const p = NEUTRAL_PRESETS[name];
     if (!editor || !p) return;
-    editor.applyThemeKit({ name, fonts: [], varsCss: varsToCss(p.vars) + '\n' + typoCss(p.typo) });
+    // Embed the preset's Google fonts as data: URLs so the saved deck renders
+    // offline + in PDF. Colors still apply if the fetch fails.
+    let faces = [];
+    try {
+      setStatus(`Downloading "${name}" fonts…`);
+      faces = await fetchPresetFaces(p.typo.heading, p.typo.body);
+    } catch (_) { faces = []; }
+    editor.applyThemeKit({ name, fonts: faces, varsCss: varsToCss(p.vars) + '\n' + typoCss(p.typo) });
     kit = { name, vars: Object.assign({}, p.vars), fonts: [] };
     refreshActive();
-    setStatus(`Applied "${name}" preset.`);
+    setStatus(faces.length
+      ? `Applied "${name}" preset — fonts embedded (offline & PDF safe).`
+      : `Applied "${name}" colors only — fonts couldn't be downloaded (offline?).`);
   }
   function applyBuiltinPreset(name) {
     if (name === 'MiM') applyMiMPreset(); else applyNeutralPreset(name);
