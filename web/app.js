@@ -837,9 +837,27 @@
   async function applyBuiltinPreset(name) {
     if (!editor) { status('Open a file first.'); return; }
     if (name === 'MiM') {
-      editor.applyBrandTheme([], 'MiM'); // exact BRAND_PALETTES.MiM; no font files client-side
+      // The licensed Lyon/Diodrum files stay desktop-only, but colors-alone
+      // made this button look like it did nothing (decks authored on the MiM
+      // palette see zero color change). Web stand-in: embed Cairo — the
+      // identity's official secondary face — under BOTH canonical families,
+      // so the same adoption machinery re-types the whole deck with it.
+      let raw = [];
+      try {
+        status('تحميل خط الهوية (Cairo)…');
+        const faces = await fetchGoogleFontFaces('Cairo', [400, 700]);
+        faces.forEach((f) => {
+          const w = f.weight >= 700 ? 'bold' : 'regular';
+          raw.push({ name: `diodrum-${w}`, b64: f.b64, ext: f.ext });
+          raw.push({ name: `lyon-${w}`, b64: f.b64, ext: f.ext });
+        });
+      } catch (_) { raw = []; /* offline: colors still apply below */ }
+      editor.applyBrandTheme(raw, 'MiM'); // exact BRAND_PALETTES.MiM — not retyped
       themeName = name;
-      status(`Applied "${name}" preset.`);
+      const audit = editor.themeAudit();
+      status(raw.length
+        ? `طُبّقت هوية MiM: الألوان الرسمية + خط Cairo (الثانوي الرسمي) يغطي ${audit ? audit.fontPct : 0}% من النص — خطا Lyon/Diodrum الأساسيان في تطبيق سطح المكتب.`
+        : 'طُبّقت ألوان MiM فقط — تعذّر تحميل الخط (بدون اتصال).');
       if (themePop) themePop.classList.remove('open');
       return;
     }

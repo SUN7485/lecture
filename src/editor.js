@@ -1613,14 +1613,16 @@
     }
 
     // MiM preset — a one-click shortcut layered on the general kit system.
-    // `fonts` = [{ name:'diodrum-bold', b64:'…' }] read from src/fonts by main.
+    // `fonts` = [{ name:'diodrum-bold', b64:'…', ext? }] read from src/fonts by
+    // main (otf), or stand-in woff2 faces fetched by the web app — `ext` rides
+    // through so the @font-face format hint matches the actual bytes.
     applyBrandTheme(rawFonts, variant) {
-      // Index the raw font files: canonical family -> { weight: b64 }.
+      // Index the raw font files: canonical family -> { weight: {b64, ext} }.
       const byFam = {};
       for (const f of (rawFonts || [])) {
         const spec = BRAND_FONTS[f.name];
         if (!spec || !f.b64) continue;
-        (byFam[spec.fam] = byFam[spec.fam] || {})[spec.weight] = f.b64;
+        (byFam[spec.fam] = byFam[spec.fam] || {})[spec.weight] = { b64: f.b64, ext: f.ext || 'otf' };
       }
 
       // Font weights the deck actually renders (sampled). 400 + 700 always
@@ -1664,7 +1666,7 @@
           for (const a of avail) if (Math.abs(a - w) < Math.abs(best - w)) best = a;
           emit.add(best);
         }
-        for (const w of emit) fonts.push({ family: docFam, weight: w, style: 'normal', b64: files[w], ext: 'otf' });
+        for (const w of emit) fonts.push({ family: docFam, weight: w, style: 'normal', b64: files[w].b64, ext: files[w].ext });
       }
       const kit = BRAND_PALETTES[variant] ? variant : 'MiM';
       this.applyThemeKit({ name: kit, fonts, varsCss: BRAND_PALETTES[kit] + BRAND_POLISH_CSS });
