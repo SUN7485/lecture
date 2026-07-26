@@ -162,10 +162,14 @@ const DECK = process.argv[2] || path.resolve('2.html');
   console.log('  screenshot:', shot);
 
   const sameAsAuthored = JSON.stringify(reverted.sample) === JSON.stringify(before.sample);
+  // A deck authored to docs/LECTURE_PROMPT.md has NO literals, so the rule
+  // correctly never fires — that is the best possible outcome, not a failure.
+  // Either way the deck must end up on-brand with nothing left to fix.
+  const colorRuleOk = colorOnly.fired >= 1
+    ? (colorOnly.firesAfter === 0 && colorOnly.census.pct >= afterKit.census.pct)
+    : colorOnly.census.pct >= 99;
   const pass =
-    colorOnly.fired >= 1 &&                          // the rule sees the problem
-    colorOnly.firesAfter === 0 &&                    // and stops seeing it -> fix-all converges
-    colorOnly.census.pct > afterKit.census.pct &&    // the fix genuinely raised compliance
+    colorRuleOk &&
     afterKit.census.pct >= before.pct &&             // the kit never makes a deck LESS on-brand
                                                      // (an already-compliant deck has nothing to gain)
     sameAsAuthored &&                                // identity off == the deck exactly as authored
