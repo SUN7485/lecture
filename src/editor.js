@@ -152,6 +152,90 @@
   .content{line-height:1.68}
   th,td{border-width:1px}`;
 
+  // ---- color snapping ----------------------------------------------------
+  // Shared with the Slide Doctor's hardcoded-color rule (via the instance
+  // methods below) so the kit and the fix can never disagree about which brand
+  // color is "nearest" — two different answers would recolor the same deck two
+  // different ways.
+  // How colorful a value is, 0 (grey) to 1 (pure hue). Above CHROMATIC a color
+  // reads as deliberately colored and must never snap to a neutral; below it
+  // (pale tints, near-greys) every token stays a candidate — that is what keeps
+  // a pale mint panel pale instead of flooding it with brand teal.
+  const CHROMATIC = 0.15;
+  const NEUTRAL_TARGET = 0.05;
+  // Kit-private alias prefix. Anything outside the kit that wants to point at a
+  // brand color (the doctor's hardcoded-color fix) references --ve-k-purple,
+  // never --purple: decks declare --purple themselves, which would swallow the
+  // var(--purple, #original) fallback and make the rewrite irreversible.
+  const KIT_ALIAS = '--ve-k-';
+
+  // [r,g,b] for FULLY OPAQUE colors only. Translucent values (shadows, veils,
+  // scrims) are deliberately not brand colors and are left alone everywhere.
+  function solidColor(str) {
+    if (!str) return null;
+    const s = String(str).trim();
+    const fn = s.match(/^rgba?\(([^()]*)\)$/i);
+    if (fn) {
+      const p = fn[1].split(/[,/]/).map(x => parseFloat(x.trim()));
+      if (p.length < 3 || p.slice(0, 3).some(isNaN)) return null;
+      if (p.length >= 4 && !(p[3] >= 1)) return null;
+      return [p[0], p[1], p[2]];
+    }
+    const h = s.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (!h) return null;
+    const hex = h[1].length === 3 ? h[1].replace(/./g, c => c + c) : h[1];
+    return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
+  }
+  function hexOf(c) {
+    return '#' + c.slice(0, 3).map(v =>
+      Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('').toUpperCase();
+  }
+  function chromaOf(c) { return (Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2])) / 255; }
+  function hueOf(c) {
+    const r = c[0] / 255, g = c[1] / 255, b = c[2] / 255;
+    const mx = Math.max(r, g, b), d = mx - Math.min(r, g, b);
+    if (!d) return -1; // achromatic — hue is meaningless, compare by lightness only
+    const h = 60 * (mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4);
+    return h < 0 ? h + 360 : h;
+  }
+  const _srgb = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  function lumOf(c) { return 0.2126 * _srgb(c[0]) + 0.7152 * _srgb(c[1]) + 0.0722 * _srgb(c[2]); }
+
+  // Nearest palette color, judged the way an eye judges a redesign: lightness
+  // first (a dark cover has to stay dark), then how colorful it is (a hairline
+  // grey must not turn purple, and a green must not turn grey), then hue as the
+  // tiebreak. Hue-first sends a dark green cover to bright teal; lightness-only
+  // sends gold to grey. The weights keep both mistakes out.
+  function nearestToken(c, tokens) {
+    const srcChroma = chromaOf(c), srcHue = hueOf(c), srcLum = lumOf(c);
+    let pool = srcChroma > CHROMATIC ? tokens.filter(t => chromaOf(t.rgb) > NEUTRAL_TARGET) : tokens;
+    if (!pool.length) pool = tokens;
+    let best = null, bestScore = Infinity;
+    for (const t of pool) {
+      const tChroma = chromaOf(t.rgb);
+      let score = 3 * Math.abs(srcLum - lumOf(t.rgb)) + 2 * Math.abs(srcChroma - tChroma);
+      if (srcChroma > NEUTRAL_TARGET && tChroma > NEUTRAL_TARGET) {
+        let hd = Math.abs(srcHue - hueOf(t.rgb));
+        if (hd > 180) hd = 360 - hd;
+        score += hd / 180;
+      }
+      if (score < bestScore) { bestScore = score; best = t; }
+    }
+    return best;
+  }
+  // The color tokens a :root block declares — the exact set an applied kit can
+  // recolor, and the target palette everything else gets snapped to.
+  function tokensOf(css) {
+    const block = String(css || '').match(/:root\{([^}]*)\}/);
+    if (!block) return [];
+    const out = [];
+    for (const m of block[1].matchAll(/(--[\w-]+)\s*:\s*([^;}]+)/g)) {
+      const c = solidColor(m[2].trim());
+      if (c) out.push({ name: m[1], rgb: c });
+    }
+    return out;
+  }
+
   class LectureEditor {
     constructor() {
       this.doc = null;
@@ -1602,7 +1686,7 @@
       if (!style) { style = this.doc.createElement('style'); style.id = 've-theme'; }
       style.dataset.kit = kit.name || 'custom';
       // Append last so its :root wins over the lecture's own :root.
-      style.textContent = faces + '\n' + varsCss;
+      style.textContent = faces + '\n' + varsCss + this._kitAliases(varsCss) + this._adoptDeckVars(varsCss);
       this.doc.head.appendChild(style);
       this._reflowAfterFonts();
     }
@@ -1673,6 +1757,62 @@
     }
     removeBrandTheme() { this.removeThemeKit(); }
 
+    // Color tokens the ACTIVE kit declares (empty when no kit is applied), and
+    // the snapping helpers built on them. Exposed so the Slide Doctor's
+    // hardcoded-color fix snaps by exactly the same rule this kit does.
+    kitTokens() {
+      const style = this.doc && this.doc.getElementById('ve-theme');
+      if (!style) return [];
+      // `alias` is the name outsiders should reference — see KIT_ALIAS.
+      return tokensOf(style.textContent)
+        .map(t => ({ name: t.name, rgb: t.rgb, alias: KIT_ALIAS + t.name.slice(2) }));
+    }
+    parseSolidColor(v) { return solidColor(v); }
+    colorToHex(c) { return hexOf(c); }
+    nearestKitToken(rgb, tokens) {
+      const pool = tokens || this.kitTokens();
+      return pool.length ? nearestToken(rgb, pool) : null;
+    }
+
+    // One alias per palette color, so anything outside the kit can point at a
+    // brand color through a name no deck will ever declare. Aliases vanish with
+    // the kit, which is what makes `var(--ve-k-purple, #original)` fall back to
+    // the authored color the moment the identity is switched off.
+    _kitAliases(varsCss) {
+      const tokens = tokensOf(varsCss);
+      if (!tokens.length) return '';
+      const decls = tokens.map(t => `${KIT_ALIAS}${t.name.slice(2)}:var(${t.name});`).join('');
+      return `\n:root{${decls}}`;
+    }
+
+    // A kit recolors a deck by overriding CSS variables — but every deck names
+    // its own (--gold, --light-cyan, --green, --red…). Anything the kit doesn't
+    // declare simply keeps its authored color, which is what users see as "the
+    // identity only half applied". So the kit ADOPTS the rest of the deck's
+    // color variables: each is snapped to the nearest kit token and re-declared
+    // in this same managed style, so `var(--anything-the-deck-invented)` lands
+    // on brand. Written as var(--kitToken) rather than a copied hex so one kit
+    // swap moves everything, and removing the kit restores the deck's own
+    // colors exactly — nothing authored is edited. Non-color variables
+    // (sizes, font stacks, shadows) never parse as a solid color and are
+    // therefore left untouched.
+    _adoptDeckVars(varsCss) {
+      const tokens = tokensOf(varsCss);
+      if (!tokens.length) return '';
+      const declared = new Set(tokens.map(t => t.name));
+      const extra = [];
+      let deckVars = [];
+      try { deckVars = this.detectVars({ skipKit: true }); } catch (_) { return ''; }
+      for (const v of deckVars) {
+        if (declared.has(v.name)) continue; // the kit already owns this name
+        const c = solidColor(v.declared || v.value);
+        if (!c) continue;
+        const t = nearestToken(c, tokens);
+        if (t) extra.push(`${v.name}:var(${t.name});`);
+      }
+      return extra.length ? `\n:root{${extra.join('')}}` : '';
+    }
+
     // How much of the deck the active kit actually restyles. Fonts: % of text
     // elements whose requested family the kit ships a face for (name-based —
     // a shipped data: face for that exact family WILL render). Colors: which
@@ -1691,15 +1831,39 @@
         const first = (this.win.getComputedStyle(el).fontFamily.split(',')[0] || '').trim().replace(/^['"]|['"]$/g, '');
         if (kitFams.has(first)) covered++;
       }
-      const kitVars = new Set();
-      const rootBlock = style.textContent.match(/:root\{([^}]*)\}/);
-      if (rootBlock) for (const m of rootBlock[1].matchAll(/(--[\w-]+)\s*:/g)) kitVars.add(m[1]);
+      // Kit variables WITH their declared values, so we can verify each
+      // override actually WON the cascade — not merely that the names matched.
+      // (A deck stylesheet parsed into <body> — quirks mode, EVO-013 — beats a
+      // later <head> kit: name-matching reported "remapped" while zero colors
+      // changed. The computed value on :root is the ground truth.)
+      // EVERY :root block the kit writes — the palette, its aliases, and the
+      // deck variables it adopted. Reading only the first one under-reports the
+      // adopted ones as "missed", which is the same dishonest audit in a new
+      // costume.
+      const kitVars = new Map();
+      for (const block of style.textContent.matchAll(/:root\{([^}]*)\}/g)) {
+        for (const m of block[1].matchAll(/(--[\w-]+)\s*:\s*([^;}]+)/g)) kitVars.set(m[1], m[2].trim());
+      }
+      const rootCs = this.win.getComputedStyle(this.doc.documentElement);
+      const norm = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      // Adopted variables are declared as var(--kitToken); compare what that
+      // resolves to, not the reference itself.
+      const resolve = (v) => {
+        const m = /^var\((--[\w-]+)\)$/.exec(String(v || '').trim());
+        return m ? rootCs.getPropertyValue(m[1]).trim() : v;
+      };
       const deckVars = this.detectVars({ skipKit: true }).map(v => v.name);
+      const recolored = [], lost = [];
+      for (const n of deckVars) {
+        if (!kitVars.has(n)) continue;
+        (norm(rootCs.getPropertyValue(n)) === norm(resolve(kitVars.get(n))) ? recolored : lost).push(n);
+      }
       return {
         kit: style.dataset.kit || 'custom',
         fontPct: total ? Math.round(100 * covered / total) : 0,
         textEls: total,
-        recolored: deckVars.filter(n => kitVars.has(n)),
+        recolored,           // kit overrides that verifiably took effect
+        lost,                // kit re-declares these but the deck's CSS still wins → cascade problem (run 🩺)
         missed: deckVars.filter(n => !kitVars.has(n)),
       };
     }

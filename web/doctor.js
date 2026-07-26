@@ -106,13 +106,39 @@
     if (p.length >= 4 && p[3] === 0) return null;
     return [p[0], p[1], p[2]];
   }
-  // Effective background behind an element: first ancestor with a non-transparent
-  // background-color, else the given fallback (slide bg, else white).
+  // A gradient IS a background. background-color stays transparent when a deck
+  // paints a cover with linear-gradient(), so walking past it lands on the
+  // slide's white and reports white-on-white — and then "fixes" white cover text
+  // to dark grey ON A DARK GRADIENT, which is worse than the problem it set out
+  // to solve. Averaging the stops is close enough to judge contrast against, and
+  // it kills the false positive at the source. Photo backgrounds (url(...))
+  // still fall through: nobody can judge contrast against an unknown image.
+  function _gradientBg(cssImage) {
+    if (!cssImage || cssImage.indexOf('gradient(') === -1) return null;
+    var cols = [], m, re = /rgba?\(([^)]+)\)/g;
+    while ((m = re.exec(cssImage))) {
+      var p = m[1].split(',').map(function (s) { return parseFloat(s.trim()); });
+      if (p.length < 3 || (p.length >= 4 && p[3] === 0)) continue;
+      cols.push(p);
+    }
+    if (!cols.length) return null;
+    var sum = [0, 0, 0];
+    for (var i = 0; i < cols.length; i++) {
+      sum[0] += cols[i][0]; sum[1] += cols[i][1]; sum[2] += cols[i][2];
+    }
+    return [sum[0] / cols.length, sum[1] / cols.length, sum[2] / cols.length];
+  }
+  // Effective background behind an element: first ancestor painting something —
+  // a background-color or a gradient — else the given fallback (slide bg, else
+  // white).
   function _bgOf(el, win, fallback) {
     var n = el;
     while (n && n.nodeType === 1) {
-      var bg = _rgb(win.getComputedStyle(n).backgroundColor);
+      var cs = win.getComputedStyle(n);
+      var bg = _rgb(cs.backgroundColor);
       if (bg) return bg;
+      var grad = _gradientBg(cs.backgroundImage);
+      if (grad) return grad;
       n = n.parentElement;
     }
     return fallback;
@@ -146,6 +172,176 @@
       if (ig && (' ' + ig + ' ').indexOf(' ' + ruleId + ' ') !== -1) return true;
     }
     return false;
+  }
+
+  // ---- Rule 21 helpers: colors hardcoded past the reach of any theme kit ----
+  // A kit recolors a deck by overriding CSS variables. A literal color written
+  // into a rule, an inline style, or an SVG fill= attribute is simply invisible
+  // to it — the deck's fonts change, half its colors don't, and nothing reports
+  // an error. The fix rewrites each literal to var(--kitToken, #original): with
+  // a kit applied the brand color wins; with the kit removed the authored color
+  // comes back through the fallback, so the rewrite is reversible by
+  // construction rather than by undo. Snapping is delegated to the editor so
+  // the kit and this fix always pick the same "nearest" color.
+
+  // Colors inside url(...) (SVG data URIs) and quoted strings are content, not
+  // style — a var() there would corrupt them. Colors already inside var() are
+  // the fallbacks we wrote ourselves: counting those would make the rule fire
+  // forever (EVO-009). Masking with same-length spaces keeps match offsets
+  // valid against the original string.
+  function _maskNonColor(v) {
+    return String(v).replace(/url\([^)]*\)|"[^"]*"|'[^']*'|var\([^()]*\)/gi, function (m) {
+      return new Array(m.length + 1).join(' ');
+    });
+  }
+  var COLOR_LITERAL = /#[0-9a-f]{6}(?![0-9a-f])|#[0-9a-f]{3}(?![0-9a-f])|rgba?\([^()]*\)/gi;
+  // SVG paints live in presentation attributes, which no variable can reach. We
+  // never rewrite the attribute — it stays as the authored last-resort color —
+  // and instead set the matching INLINE STYLE, which outranks it and rides in
+  // the editor's undo snapshots.
+  var SVG_PAINT_ATTRS = ['fill', 'stroke', 'stop-color', 'flood-color', 'lighting-color'];
+
+  function _colorsIn(val) {
+    var masked = _maskNonColor(val), out = [], m;
+    COLOR_LITERAL.lastIndex = 0;
+    while ((m = COLOR_LITERAL.exec(masked))) out.push({ index: m.index, text: m[0] });
+    return out;
+  }
+  function _countSolid(val, ed) {
+    var hits = _colorsIn(val), n = 0;
+    for (var i = 0; i < hits.length; i++) if (ed.parseSolidColor(hits[i].text)) n++;
+    return n;
+  }
+  // Rewrite every opaque literal in one declaration value; null when nothing
+  // changed, so callers only touch what they must.
+  function _tokenizeColors(val, ed, idx, tokens) {
+    var hits = _colorsIn(val), out = '', last = 0, n = 0;
+    for (var i = 0; i < hits.length; i++) {
+      var c = ed.parseSolidColor(hits[i].text);
+      if (!c) continue;
+      var repl = _tokenRef(c, ed, idx, tokens);
+      if (!repl) continue;
+      out += val.slice(last, hits[i].index) + repl;
+      last = hits[i].index + hits[i].text.length;
+      n++;
+    }
+    return n ? out + val.slice(last) : null;
+  }
+  // A literal equal to a variable the deck already declares AND the kit
+  // overrides is that token spelled out: reference it by name, no fallback
+  // needed. Everything else snaps to the nearest kit color and keeps its
+  // original as the fallback.
+  function _tokenRef(c, ed, idx, tokens) {
+    var hx = ed.colorToHex(c);
+    // Deck-declared token: no fallback needed — with the kit off it still holds
+    // the deck's own authored color, so the reference is a no-op.
+    if (idx[hx]) return 'var(' + idx[hx] + ')';
+    var t = ed.nearestKitToken(c, tokens);
+    // Kit-private alias (--ve-k-*), never the palette name itself: decks declare
+    // --purple/--gold themselves, and a defined variable swallows the fallback,
+    // so var(--purple, #original) could never give the original color back.
+    return t ? 'var(' + (t.alias || t.name) + ', ' + hx + ')' : null;
+  }
+  function _deckTokenIndex(editor, tokens) {
+    var idx = {}, own = {};
+    for (var i = 0; i < tokens.length; i++) own[tokens[i].name] = true;
+    try {
+      editor.detectVars({ skipKit: true }).forEach(function (v) {
+        if (!own[v.name]) return;
+        var c = editor.parseSolidColor(v.declared || v.value);
+        if (!c) return;
+        var hx = editor.colorToHex(c);
+        if (!idx[hx]) idx[hx] = v.name;
+      });
+    } catch (eIdx) { /* unreadable sheet — fall through to nearest-color snapping */ }
+    return idx;
+  }
+  // The deck's OWN stylesheets. The kit sheet and the editor's sheets are ours
+  // and must never be rewritten (rewriting the kit would erase the palette).
+  function _deckSheets(doc) {
+    var out = [];
+    for (var i = 0; i < doc.styleSheets.length; i++) {
+      var sheet = doc.styleSheets[i], node = sheet.ownerNode;
+      if (!node || node.tagName !== 'STYLE') continue;
+      if (node.id && node.id.indexOf('ve-') === 0) continue;
+      var rules; try { rules = sheet.cssRules; } catch (eS) { continue; }
+      if (rules) out.push({ sheet: sheet, node: node });
+    }
+    return out;
+  }
+  // Style rules only, including inside @media/@supports. @font-face and
+  // @keyframes carry no selectorText and are skipped.
+  function _eachStyleDecl(rules, fn) {
+    for (var i = 0; i < rules.length; i++) {
+      var r = rules[i];
+      if (r.style && r.selectorText) fn(r.style);
+      if (r.cssRules && r.cssRules.length) _eachStyleDecl(r.cssRules, fn);
+    }
+  }
+  // One walker, two modes (count / rewrite) so detection and fix can never
+  // disagree — the rule stops firing exactly when the fix runs out of work.
+  function _walkHardcoded(editor, apply, idx, tokens) {
+    var doc = editor.doc, n = 0;
+    var maybeColor = function (v) { return !!v && (v.indexOf('#') !== -1 || v.toLowerCase().indexOf('rgb') !== -1); };
+
+    var sheets = _deckSheets(doc);
+    for (var s = 0; s < sheets.length; s++) {
+      var dirty = false;
+      _eachStyleDecl(sheets[s].sheet.cssRules, function (decl) {
+        var names = [];
+        for (var p = 0; p < decl.length; p++) names.push(decl[p]);
+        for (var q = 0; q < names.length; q++) {
+          var name = names[q];
+          if (name.indexOf('--') === 0) continue; // the deck's own tokens: the kit adopts those
+          var val = decl.getPropertyValue(name);
+          if (!maybeColor(val)) continue;
+          if (!apply) { n += _countSolid(val, editor); continue; }
+          var next = _tokenizeColors(val, editor, idx, tokens);
+          if (next != null) { decl.setProperty(name, next, decl.getPropertyPriority(name)); dirty = true; n++; }
+        }
+      });
+      // CSSOM edits do not touch the <style> element's text, and the saved file
+      // is serialized from the DOM — write the rules back or the fix would look
+      // right on screen and vanish on export.
+      if (apply && dirty) {
+        var parts = [];
+        for (var cr = 0; cr < sheets[s].sheet.cssRules.length; cr++) parts.push(sheets[s].sheet.cssRules[cr].cssText);
+        sheets[s].node.textContent = parts.join('\n');
+      }
+    }
+
+    var styled = doc.querySelectorAll('[style]');
+    for (var e = 0; e < styled.length; e++) {
+      var el = styled[e];
+      if (el.closest(CHROME_SEL)) continue;
+      var inNames = [];
+      for (var k = 0; k < el.style.length; k++) inNames.push(el.style[k]);
+      for (var j = 0; j < inNames.length; j++) {
+        var nm = inNames[j];
+        if (nm.indexOf('--') === 0) continue;
+        var v2 = el.style.getPropertyValue(nm);
+        if (!maybeColor(v2)) continue;
+        if (!apply) { n += _countSolid(v2, editor); continue; }
+        var nv = _tokenizeColors(v2, editor, idx, tokens);
+        if (nv != null) { el.style.setProperty(nm, nv, el.style.getPropertyPriority(nm)); n++; }
+      }
+    }
+
+    for (var a = 0; a < SVG_PAINT_ATTRS.length; a++) {
+      var attr = SVG_PAINT_ATTRS[a];
+      var painted = doc.querySelectorAll('[' + attr + ']');
+      for (var pi = 0; pi < painted.length; pi++) {
+        var pel = painted[pi];
+        if (pel.closest(CHROME_SEL)) continue;
+        if (pel.style && pel.style.getPropertyValue(attr)) continue; // already ours
+        var c2 = editor.parseSolidColor(pel.getAttribute(attr));
+        if (!c2) continue;
+        if (!apply) { n++; continue; }
+        var ref = _tokenRef(c2, editor, idx, tokens);
+        if (ref) { pel.style.setProperty(attr, ref); n++; }
+      }
+    }
+    return n;
   }
 
   // ---- v5 fix helpers: slide surgery + font embedding ----
@@ -333,6 +529,25 @@
       fig.setAttribute('data-ve-figure', '');
       if (!fig.getAttribute('data-ve-caption')) fig.setAttribute('data-ve-caption', 'وصف الشكل');
       if (!fig.querySelector('figcaption')) fig.appendChild(doc.createElement('figcaption'));
+    };
+  }
+
+  // Put elements back on `domFam`. Overrides come off first — an inline style,
+  // or SVG's font-family presentation ATTRIBUTE, neither of which a kit's CSS
+  // can outrank — and only if the element still renders in the wrong family is
+  // the stack stated outright. Skipping the attribute step made the brand-kit
+  // fix a silent no-op on chart labels: the card came back on every pass,
+  // forever (EVO-009). `only` limits the sweep to named intruder families;
+  // null means "everything not already on domFam".
+  function _famFix(win, els, stack, domFam, only) {
+    return function () {
+      els.forEach(function (el) {
+        var cur = _fam(win, el);
+        if (only ? only.indexOf(cur) === -1 : cur === domFam) return;
+        if (el.style && el.style.fontFamily) el.style.fontFamily = '';
+        if (el.hasAttribute && el.hasAttribute('font-family')) el.removeAttribute('font-family');
+        if (_fam(win, el) !== domFam) el.style.fontFamily = stack;
+      });
     };
   }
 
@@ -666,14 +881,7 @@
     }
     famPass.forEach(function (p) {
       var d = p.d, si3 = p.si, fzMsg, fzFix;
-      if (brandOn) {
-        // A brand kit defines the deck's fonts in CSS; extra families are inline
-        // style="font-family" overrides. Clear them so the brand pairing wins again.
-        fzMsg = 'الشريحة تستخدم ' + d.list.length + ' خطوط مختلفة — الإصلاح يزيل تجاوزات الخط ليعود خطّ الهوية.';
-        fzFix = (function (els) { return function () {
-          els.forEach(function (el) { if (el.style && el.style.fontFamily) el.style.fontFamily = ''; });
-        }; })(d.texts);
-      } else if (p.intruders) {
+      if (p.intruders) {
         // Strip only the intruder families back onto the slide's dominant
         // LEGIT one. The intruders must be excluded from that vote: a chart
         // with many labels can make the intruder the slide's most-used family,
@@ -682,18 +890,16 @@
         var legit = d.list.filter(function (f) { return p.intruders.indexOf(f) === -1; });
         var domF = (legit.length ? legit : d.list).reduce(function (a, b) { return d.count[b] > d.count[a] ? b : a; });
         var domStack = win.getComputedStyle(d.rep[domF]).fontFamily;
-        fzMsg = 'خط دخيل على نظام خطوط العرض في هذه الشريحة (' + p.intruders.join('، ') + ') — الإصلاح يعيده إلى خطوط العرض.';
-        fzFix = (function (els, stack, bad) { return function () {
-          els.forEach(function (el) { if (bad.indexOf(_fam(win, el)) !== -1) el.style.fontFamily = stack; });
-        }; })(d.texts, domStack, p.intruders);
+        fzMsg = brandOn
+          ? 'خط دخيل على هوية العرض في هذه الشريحة (' + p.intruders.join('، ') + ') — الإصلاح يعيده إلى خطّ الهوية.'
+          : 'خط دخيل على نظام خطوط العرض في هذه الشريحة (' + p.intruders.join('، ') + ') — الإصلاح يعيده إلى خطوط العرض.';
+        fzFix = _famFix(win, d.texts, domStack, domF, p.intruders);
       } else {
         // Small deck: unify onto the family the most elements already use.
         var domF2 = d.list.reduce(function (a, b) { return d.count[b] > d.count[a] ? b : a; });
         var domStack2 = win.getComputedStyle(d.rep[domF2]).fontFamily;
         fzMsg = 'الشريحة تستخدم ' + d.list.length + ' خطوط مختلفة — الإصلاح يوحّدها على الخطّ الأكثر استخدامًا.';
-        fzFix = (function (els, stack, domFam) { return function () {
-          els.forEach(function (el) { if (_fam(win, el) !== domFam) el.style.fontFamily = stack; });
-        }; })(d.texts, domStack2, domF2);
+        fzFix = _famFix(win, d.texts, domStack2, domF2, null);
       }
       issues.push({ ruleId: 'font-zoo', severity: 'warn', slideIndex: si3, el: slides[si3], message: fzMsg, fix: fzFix });
     });
@@ -811,6 +1017,63 @@
         // Async fix (returns a Promise — the docks await it). Fails safe: the
         // deck is untouched unless the binaries actually landed in the file.
         fix: function () { return _embedExternalFonts(doc); } });
+    }
+
+    // Rule 20 — stray pre-DOCTYPE markup / stylesheet parsed into <body>.
+    // LLM-generated decks often arrive wrapped in a markdown fence: any text
+    // before <!DOCTYPE> forces quirks mode and the parser hoists the deck's
+    // whole <style> into <body>, where it FOLLOWS (and beats) the <head>
+    // theme kit in cascade order — kits then change fonts but never colors
+    // (EVO-013). Fixable live: move the stylesheet(s) back to <head> (before
+    // #ve-theme so an applied kit keeps winning) and delete fence text nodes.
+    // Box-model quirks fully clear on save + reopen (getCleanHtml always
+    // writes the DOCTYPE). Fires only while fixable things remain, so the
+    // fix-all convergence loop terminates (EVO-009).
+    var SM_FENCE = /^\s*`{3,}[a-z]*\s*$/i;
+    var smStyles = [];
+    for (var smA = 0; smA < doc.body.children.length; smA++) {
+      if (doc.body.children[smA].tagName === 'STYLE') smStyles.push(doc.body.children[smA]);
+    }
+    var smFences = [];
+    var smEdges = [doc.body.firstChild, doc.body.lastChild];
+    for (var smB = 0; smB < smEdges.length; smB++) {
+      var smNode = smEdges[smB];
+      if (smNode && smNode.nodeType === 3 && SM_FENCE.test(smNode.nodeValue) &&
+          smFences.indexOf(smNode) === -1) smFences.push(smNode);
+    }
+    if ((smStyles.length || smFences.length) && slides.length) {
+      issues.push({ ruleId: 'stray-markup', severity: 'error', slideIndex: -1, el: slides[0],
+        message: 'الملف يبدأ بنص غريب قبل HTML (غالبًا سياج ماركداون من محادثة ذكاء اصطناعي) — انزلقت التنسيقات إلى داخل الصفحة فصارت تتقدّم على أي هوية/ثيم تطبّقه ولا تتغيّر الألوان. الإصلاح يعيد التنسيقات لمكانها ويحذف النص الغريب؛ احفظ الملف وأعد فتحه ليكتمل التصحيح.',
+        fix: (function (styles, fences) { return function () {
+          var theme = doc.getElementById('ve-theme');
+          for (var smC = 0; smC < styles.length; smC++) {
+            if (theme && theme.parentNode === doc.head) doc.head.insertBefore(styles[smC], theme);
+            else doc.head.appendChild(styles[smC]);
+          }
+          for (var smD = 0; smD < fences.length; smD++) {
+            if (fences[smD].parentNode) fences[smD].parentNode.removeChild(fences[smD]);
+          }
+        }; })(smStyles, smFences) });
+    }
+
+    // Rule 21 — colors hardcoded past the reach of the theme kit. A kit
+    // overrides CSS variables, so literal colors in the deck's rules, inline
+    // styles and SVG fills stay exactly as authored: the user clicks the
+    // identity, the fonts change, half the colors don't, and nothing anywhere
+    // says why. Only meaningful once a kit IS applied — without one there is no
+    // "right" color to snap to — so the rule is gated on an active kit and
+    // stays silent for every other deck. Deck-level (slideIndex -1, anchored to
+    // slide 1 so «تجاهل» persists in the saved file).
+    if (kitOn && slides.length && editor.kitTokens && editor.parseSolidColor) {
+      var hcTokens = editor.kitTokens();
+      var hcCount = hcTokens.length ? _walkHardcoded(editor, false) : 0;
+      if (hcCount) {
+        issues.push({ ruleId: 'hardcoded-colors', severity: 'warn', slideIndex: -1, el: slides[0],
+          message: 'العرض يكتب ' + hcCount + ' لونًا داخل التنسيقات مباشرة، فلا تصل إليها الهوية ولا أي ثيم — لهذا تتغيّر الخطوط ويبقى جزء من الألوان كما هو. الإصلاح يربط كل لون بأقرب لون رسمي ويُبقي الأصلي بديلًا، فتعود الألوان الأصلية فور إيقاف الهوية.',
+          fix: (function (toks) { return function () {
+            _walkHardcoded(editor, true, _deckTokenIndex(editor, toks), toks);
+          }; })(hcTokens) });
+      }
     }
 
     // Rule 17 — title drift (deck-level): once >=3 content slides carry
