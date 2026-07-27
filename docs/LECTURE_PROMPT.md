@@ -12,6 +12,7 @@ Paste the block below into ChatGPT / Claude / Gemini when you want a new lecture
 | Approved palette only, no gold | `#C5A059` is not a ministry color and never was. Neither is a per-lecture green cover. |
 | No `@import` from fonts.googleapis.com | The deck then needs the internet to look right; offline it silently falls back. |
 | Never pink or gold text on purple | 2.16:1 contrast — fails WCAG, and it's the single most common thing the doctor has to repair. |
+| Lyon for headings, Diodrum for body, nothing on SVG | MiM assigns type by role (guide pp.21–23). A deck that names one family everywhere gets that one face everywhere, so headlines silently lose Lyon. |
 
 Anything that still slips through is caught by the app: open the deck → **MiM** → **🩺 الفحص** → **«إصلاح الكل»**.
 
@@ -39,10 +40,10 @@ You are producing a university lecture as a single self-contained HTML slide dec
   --dark:#1A1A1A; --bg-gray:#F4F4F6; --white:#FFFFFF;
   --grey-dark:#666666; --grey-mid:#B3B3B3; --grey-light:#E6E6E6;
 }
-body{margin:0;background:var(--bg-gray);font-family:'Cairo','Segoe UI',Tahoma,sans-serif;direction:rtl;}
+body{margin:0;background:var(--bg-gray);font-family:'Diodrum Arabic','Cairo','Segoe UI',Tahoma,sans-serif;direction:rtl;}
 .slide{width:950px;height:650px;margin:40px auto;background:var(--white);padding:45px 60px;position:relative;box-shadow:0 25px 50px rgba(0,0,0,.12);border-right:12px solid var(--purple);overflow:hidden;box-sizing:border-box;}
-.slide h1{color:var(--purple);font-size:32px;margin:0 0 10px;border-bottom:3px solid var(--cyan);padding-bottom:8px;}
-.slide h2{color:var(--dark);font-size:20px;margin:0 0 16px;font-weight:600;}
+.slide h1{color:var(--purple);font-size:32px;margin:0 0 10px;border-bottom:3px solid var(--cyan);padding-bottom:8px;font-family:'Lyon Arabic Text','Diodrum Arabic','Cairo','Segoe UI',Tahoma,sans-serif;}
+.slide h2{color:var(--dark);font-size:20px;margin:0 0 16px;font-weight:600;font-family:'Lyon Arabic Text','Diodrum Arabic','Cairo','Segoe UI',Tahoma,sans-serif;}
 .content{font-size:17px;line-height:1.68;color:var(--dark);}
 .cover-slide{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:var(--purple);}
 .cover-slide h1{border:none;color:var(--white);font-size:38px;}
@@ -65,6 +66,11 @@ figcaption{color:var(--grey-dark);font-size:14px;margin-top:6px;}
 - Need a new style? Add a CSS rule that uses the existing tokens. Do NOT add new tokens and do NOT invent a color for this particular lecture — no gold, no green theme, no per-lesson palette. Every lecture in the course uses this same palette.
 - Backgrounds: solid `var(--purple)` or `var(--bg-gray)`. If you want a gradient, use `linear-gradient(135deg, var(--white), var(--bg-gray))` — never hand-written color stops.
 - Translucency is the one exception: `rgba(0,0,0,.12)` for shadows is fine.
+
+## FONTS
+- The two ministry typefaces are already named in the skeleton: **Lyon Arabic Text** for headings, **Diodrum Arabic** for body. Do not change those stacks and do not introduce any other family — no Cairo-only stacks, no Arial, no Times New Roman, no Georgia.
+- Never write `font-family` on an SVG element. SVG text inherits the page font; `font-family="Arial"` on chart labels is the single most common way an otherwise-clean deck goes off-brand.
+- Never add `@import` or a `<link>` for a font. The stacks above degrade gracefully on a machine that lacks the ministry files, and the editor embeds the real files when the identity is applied.
 
 ## READABILITY — checked automatically, so get it right the first time
 - On `var(--purple)` or any dark background, text is `var(--white)`. NEVER `var(--pink)` or `var(--gold)` on purple — that is 2.16:1 and fails.

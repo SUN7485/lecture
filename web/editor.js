@@ -1736,9 +1736,10 @@
           : SERIF_HINT.test(fam) ? 'Lyon Arabic Text' : 'Diodrum Arabic';
         if (byFam[canon]) famMap.set(fam, canon);
       }
-      // Deck with no detectable families (pure generic stacks): ship the
-      // canonical names so generated content still lands on brand fonts.
-      if (!famMap.size) for (const canon of Object.keys(byFam)) famMap.set(canon, canon);
+      // Always register the canonical families under their own names too —
+      // decks with no detectable families (pure generic stacks) need them, and
+      // the role rules below address the faces by canonical name.
+      for (const canon of Object.keys(byFam)) if (!famMap.has(canon)) famMap.set(canon, canon);
 
       const fonts = [];
       for (const [docFam, canon] of famMap) {
@@ -1753,7 +1754,30 @@
         for (const w of emit) fonts.push({ family: docFam, weight: w, style: 'normal', b64: files[w].b64, ext: files[w].ext });
       }
       const kit = BRAND_PALETTES[variant] ? variant : 'MiM';
-      this.applyThemeKit({ name: kit, fonts, varsCss: BRAND_PALETTES[kit] + BRAND_POLISH_CSS });
+      this.applyThemeKit({ name: kit, fonts, varsCss: BRAND_PALETTES[kit] + BRAND_POLISH_CSS + this._roleFontCss(byFam) });
+    }
+
+    // MiM assigns typography by ROLE — Lyon Arabic Text for headings, Diodrum
+    // Arabic for everything else (guide pp.21–23; the guide's own PDF embeds
+    // LyonArabicText + DiodrumArabic and nothing else). Adoption alone cannot
+    // express that: it maps by the family NAME a deck happens to use, so a
+    // lecture written entirely in 'Cairo' re-renders every word — headlines
+    // included — in Diodrum, and Lyon reaches only whatever the deck happened
+    // to call 'Times'. These rules assign the face by role instead.
+    // Emitted ONLY for faces actually registered: offline (no font files) they
+    // would point at families with no @font-face and drop the deck to a generic
+    // serif. No !important — the editor's own font tools must still win.
+    _roleFontCss(byFam) {
+      const heading = byFam && byFam['Lyon Arabic Text'];
+      const body = byFam && byFam['Diodrum Arabic'];
+      let css = '';
+      // [class*="title"] catches cover titles authored as <div>, which no
+      // heading tag would reach.
+      if (heading) css += `\n  h1,h2,h3,.slide h1,.slide h2,.slide h3,[class*="title"]{font-family:'Lyon Arabic Text',serif;}`;
+      // text/tspan: SVG chart labels are body copy, and a CSS rule outranks the
+      // font-family="Arial" presentation attribute LLM decks put there.
+      if (body) css += `\n  body,p,li,td,th,.content,text,tspan{font-family:'Diodrum Arabic',sans-serif;}`;
+      return css;
     }
     removeBrandTheme() { this.removeThemeKit(); }
 
