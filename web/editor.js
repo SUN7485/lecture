@@ -1685,6 +1685,13 @@
       let style = this.doc.getElementById('ve-theme');
       if (!style) { style = this.doc.createElement('style'); style.id = 've-theme'; }
       style.dataset.kit = kit.name || 'custom';
+      // Which brand face each deck family was re-registered as. The family NAME
+      // in a deck's CSS says nothing about what renders (we deliberately serve
+      // Diodrum bytes under the name 'Cairo'), so the brand report reads this
+      // map instead of guessing from font-family — the exact mistake every
+      // human reviewer makes when auditing the HTML by eye.
+      if (kit.fontMap) style.dataset.veFonts = JSON.stringify(kit.fontMap);
+      else delete style.dataset.veFonts;
       // Append last so its :root wins over the lecture's own :root.
       style.textContent = faces + '\n' + varsCss + this._kitAliases(varsCss) + this._adoptDeckVars(varsCss);
       this.doc.head.appendChild(style);
@@ -1754,7 +1761,10 @@
         for (const w of emit) fonts.push({ family: docFam, weight: w, style: 'normal', b64: files[w].b64, ext: files[w].ext });
       }
       const kit = BRAND_PALETTES[variant] ? variant : 'MiM';
-      this.applyThemeKit({ name: kit, fonts, varsCss: BRAND_PALETTES[kit] + BRAND_POLISH_CSS + this._roleFontCss(byFam) });
+      const fontMap = {};
+      for (const [docFam, canon] of famMap) fontMap[docFam] = canon;
+      this.applyThemeKit({ name: kit, fonts, fontMap,
+        varsCss: BRAND_PALETTES[kit] + BRAND_POLISH_CSS + this._roleFontCss(byFam) });
     }
 
     // MiM assigns typography by ROLE — Lyon Arabic Text for headings, Diodrum
@@ -1889,6 +1899,62 @@
         recolored,           // kit overrides that verifiably took effect
         lost,                // kit re-declares these but the deck's CSS still wins → cascade problem (run 🩺)
         missed: deckVars.filter(n => !kitVars.has(n)),
+      };
+    }
+
+    // A brand verdict measured the only way that can't be argued with: the
+    // COMPUTED color of every element and the physical face behind every word.
+    // Reading the deck's CSS by eye gives the WRONG answer — a deck still says
+    // font-family:'Cairo' while rendering Diodrum bytes, and a var() says
+    // nothing about what it resolves to. Everything here is post-cascade.
+    brandReport() {
+      const style = this.doc.getElementById('ve-theme');
+      if (!style) return null;
+      const allowed = new Set(this.kitTokens().map(t => hexOf(t.rgb)));
+      allowed.add('#000000'); // the guide's own palette table lists Black
+      let fontMap = {};
+      try { fontMap = JSON.parse(style.dataset.veFonts || '{}'); } catch (_) {}
+      const brandFaces = new Set(Object.keys(fontMap).concat(Object.values(fontMap)));
+      const faceOf = (fam) => fontMap[fam] || (brandFaces.has(fam) ? fam : null);
+      const famAt = (el) => (this.win.getComputedStyle(el).fontFamily.split(',')[0] || '')
+        .trim().replace(/^['"]|['"]$/g, '');
+
+      let cTotal = 0, cOn = 0, fTotal = 0, fOn = 0;
+      const offColors = {}, offFonts = {};
+      for (const el of this.doc.querySelectorAll('body *')) {
+        if (el.closest('.ve-overlay, .ve-toolbar, .ve-guide, .ve-ghost')) continue;
+        const cs = this.win.getComputedStyle(el);
+        const svg = el.namespaceURI === 'http://www.w3.org/2000/svg';
+        let hasText = false;
+        for (const n of el.childNodes) if (n.nodeType === 3 && /\S/.test(n.nodeValue)) { hasText = true; break; }
+        const props = svg ? ['fill', 'stroke'] : ['background-color'];
+        if (hasText) props.push('color');
+        for (const p of props) {
+          const c = solidColor(cs.getPropertyValue(p));
+          if (!c) continue; // translucent / none — depth, not brand
+          cTotal++;
+          const hex = hexOf(c);
+          if (allowed.has(hex)) cOn++; else offColors[hex] = (offColors[hex] || 0) + 1;
+        }
+        if (!hasText) continue;
+        fTotal++;
+        const face = faceOf(famAt(el));
+        if (face) fOn++; else offFonts[famAt(el)] = (offFonts[famAt(el)] || 0) + 1;
+      }
+      const top = (o) => Object.keys(o).map(k => ({ name: k, count: o[k] }))
+        .sort((a, b) => b.count - a.count).slice(0, 6);
+      const roleFace = (sel) => {
+        const el = this.doc.querySelector(sel);
+        return el ? faceOf(famAt(el)) : null;
+      };
+      return {
+        kit: style.dataset.kit || 'custom',
+        colorPct: cTotal ? Math.round(100 * cOn / cTotal) : 100,
+        colorTotal: cTotal, offColors: top(offColors),
+        fontPct: fTotal ? Math.round(100 * fOn / fTotal) : 100,
+        fontTotal: fTotal, offFonts: top(offFonts),
+        headingFace: roleFace('.slide h1, h1, .slide h2, h2'),
+        bodyFace: roleFace('.slide p, p, .slide li, li'),
       };
     }
 

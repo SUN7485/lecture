@@ -55,7 +55,22 @@
     }
   }
 
+  // LLM chats hand users HTML wrapped in a markdown fence or with prose
+  // before <!DOCTYPE>. Any text before the doctype forces quirks mode and
+  // the parser hoists the deck's <style> into <body>, where it beats the
+  // <head> theme kit in cascade order — kits then change fonts but never
+  // colors (EVO-013). Strip the junk before the markup reaches the DOM.
+  function sanitizeLlmHtml(html) {
+    if (!html) return html;
+    const m = /<!DOCTYPE\s+html/i.exec(html) || /<html[\s>]/i.exec(html);
+    let out = (m && m.index > 0) ? html.slice(m.index) : html;
+    const end = out.toLowerCase().lastIndexOf('</html>');
+    if (end !== -1) out = out.slice(0, end + 7) + '\n';
+    return out;
+  }
+
   function loadIntoIframe(html, dir) {
+    html = sanitizeLlmHtml(html);
     const baseHref = 'file:///' + dir.replace(/\\/g, '/') + '/';
     const htmlWithBase = injectBase(html, baseHref);
 
@@ -326,7 +341,7 @@
           done({ slides, heads: collectImportedHead(doc, baseHref) });
         } catch (_) { done(null); }
       }, 60);
-      frame.srcdoc = injectBase(html, baseHref);
+      frame.srcdoc = injectBase(sanitizeLlmHtml(html), baseHref);
       document.body.appendChild(frame);
       setTimeout(() => done(null), 8000); // safety net if onload never fires
     });
@@ -647,23 +662,25 @@
   $('#btn-preview').addEventListener('click', previewPdf);
 
   // ---------- MiM brand identity (one-click fonts + palette) ----------
+  // Single toggle: click = apply the Screen palette (brand book v1.1), click
+  // again = revert. The Pantone Print palette lives in the 🎨 Brand Kit modal
+  // (print-shop use). Replaced the old Screen→Print→off cycle (user, 2026-07-26).
   const btnBrand = $('#btn-brand');
   function updateBrandBtn() {
     const kit = editor ? editor.activeThemeKit() : null;
-    const on = kit === 'MiM' || kit === 'MiM-print';
+    const on = !!kit && /^MiM/.test(kit);
     btnBrand.classList.toggle('active', on);
-    btnBrand.textContent = kit === 'MiM' ? '✨ MiM Screen ✓'
-      : kit === 'MiM-print' ? '✨ MiM Print ✓' : '✨ MiM Identity';
-    btnBrand.title = kit === 'MiM'
-      ? 'MiM Screen palette (brand book v1.1) applied. Click for the Print palette (Pantone sheet).'
-      : kit === 'MiM-print'
-      ? 'MiM Print palette (official Pantone sheet) applied. Click to revert to the original.'
-      : 'Apply the MiM identity — ministry fonts + official palette. Cycles: Screen → Print → off.';
+    const brandLbl = btnBrand.querySelector('.lbl') || btnBrand;
+    brandLbl.textContent = kit === 'MiM-print' ? 'MiM Print ✓' : on ? 'MiM ✓' : 'MiM Identity';
+    btnBrand.title = on
+      ? 'MiM identity applied. Click to revert to the original fonts and colors.'
+      : 'Apply the MiM identity — ministry fonts + official screen palette. (Print palette: 🎨 Brand Kit.)';
   }
+  window.__updateBrandBtn = updateBrandBtn; // brandkit.js keeps the toggle in sync for modal-applied kits
   btnBrand.addEventListener('click', async () => {
     if (!editor) { status('Open a lecture first.'); return; }
     const kit = editor.activeThemeKit();
-    if (kit === 'MiM-print') {
+    if (kit && /^MiM/.test(kit)) {
       editor.removeBrandTheme();
       updateBrandBtn();
       status('Reverted to the original fonts and colors.');
@@ -673,19 +690,19 @@
       status('Loading ministry fonts…');
       try { brandFonts = await window.api.getFonts(); } catch (_) { brandFonts = []; }
     }
-    const next = kit === 'MiM' ? 'MiM-print' : 'MiM';
-    editor.applyBrandTheme(brandFonts, next);
+    editor.applyBrandTheme(brandFonts, 'MiM');
     updateBrandBtn();
     const audit = editor.themeAudit();
-    const label = next === 'MiM-print' ? 'Print palette' : 'Screen palette';
-    const hint = next === 'MiM-print' ? 'Click again to revert.' : 'Click again for the Print palette.';
     if (!brandFonts.length) {
-      status(`Applied MiM ${label}. (Fonts folder not found — colors only.) ${hint}`);
+      status('Applied the MiM identity. (Fonts folder not found — colors only.)');
     } else if (audit) {
       const fontMsg = audit.fontPct >= 90 ? `fonts cover ${audit.fontPct}% of text`
         : audit.fontPct > 0 ? `⚠ fonts only cover ${audit.fontPct}% of text`
         : '⚠ fonts embedded but no text uses them';
-      status(`Applied MiM ${label} — ${fontMsg}, ${audit.recolored.length}/${audit.recolored.length + audit.missed.length} colors remapped. ${hint}`);
+      const lostN = audit.lost ? audit.lost.length : 0;
+      const colorMsg = `${audit.recolored.length}/${audit.recolored.length + audit.missed.length + lostN} colors remapped`;
+      const lostMsg = lostN ? ` ⚠ ${lostN} blocked by the deck's own CSS — run 🩺.` : '';
+      status(`Applied the MiM identity — ${fontMsg}, ${colorMsg}.${lostMsg}`);
     }
   });
 
@@ -835,8 +852,8 @@
     drDock = document.createElement('aside');
     drDock.id = 'doctor-dock';
     drDock.innerHTML =
-      '<div class="dr-head">🩺 فحص الشرائح<span class="dr-score" title="درجة سلامة العرض"></span><span class="spacer"></span>' +
-      '<button class="dr-rescan" title="إعادة الفحص">🔄</button>' +
+      '<div class="dr-head"><svg class="ic"><use href="#i-pulse"/></svg>فحص الشرائح<span class="dr-score" title="درجة سلامة العرض"></span><span class="spacer"></span>' +
+      '<button class="dr-rescan" title="إعادة الفحص"><svg class="ic"><use href="#i-refresh"/></svg></button>' +
       '<button class="dr-fixall" title="إصلاح كل الملاحظات القابلة للإصلاح">إصلاح الكل</button>' +
       '<button class="dr-x" title="إغلاق">✕</button></div>' +
       '<div class="dr-tabs"><button data-v="type" class="on">حسب النوع</button><button data-v="slide">حسب الشريحة</button></div>' +
@@ -896,7 +913,9 @@
     drScanMs = Math.max(1, Math.round(performance.now() - t0));
     const btn = $('#btn-doctor');
     drCards = window.SlideDoctor.aggregate ? window.SlideDoctor.aggregate(drIssues) : [];
-    btn.textContent = '🩺 الفحص' + (drCards.length ? ` (${drCards.length})` : '');
+    const ct = btn.querySelector('.ct');
+    if (ct) { ct.textContent = drCards.length ? String(drCards.length) : ''; ct.hidden = !drCards.length; }
+    else btn.textContent = 'الفحص' + (drCards.length ? ` (${drCards.length})` : '');
     btn.classList.toggle('has-issues', drCards.length > 0);
     if (drOpen) renderDoctor();
   }
@@ -927,12 +946,41 @@
     });
   }
 
+  // Brand verdict — the answer to "is this really MiM?", read from computed
+  // styles. It exists because the HTML cannot be audited by eye: a deck still
+  // says font-family:'Cairo' while rendering Diodrum bytes, so every reviewer
+  // who reads the CSS reaches the wrong conclusion.
+  function brandBlock() {
+    if (!editor || !editor.brandReport) return null;
+    const div = document.createElement('div');
+    div.className = 'dr-brand';
+    const r = editor.brandReport();
+    if (!r) {
+      div.innerHTML = '<div class="db-row">الهوية غير مطبَّقة — اضغط «MiM» لتطبيق ألوان الوزارة وخطوطها.</div>';
+      return div;
+    }
+    const pill = (p) => '<b class="' + (p >= 100 ? 'ok' : p >= 90 ? 'mid' : 'bad') + '">' + p + '٪</b>';
+    const names = (l) => l.map((x) => x.name + ' ×' + x.count).join('، ');
+    div.innerHTML =
+      '<div class="db-head">هوية ' + r.kit + '</div>' +
+      '<div class="db-row">الألوان ' + pill(r.colorPct) + '<span>' +
+        (r.offColors.length ? 'خارج اللوحة: ' + names(r.offColors) : 'كل الألوان من اللوحة الرسمية') +
+      '</span></div>' +
+      '<div class="db-row">الخطوط ' + pill(r.fontPct) + '<span>' +
+        (r.headingFace ? 'العناوين ' + r.headingFace + ' · النصوص ' + (r.bodyFace || '—') : '') +
+        (r.offFonts.length ? ' · خارج الهوية: ' + names(r.offFonts) : '') +
+      '</span></div>';
+    return div;
+  }
+
   function renderDoctor() {
     renderDoctorMeta();
     const list = ensureDoctorDock().querySelector('.dr-list');
     list.innerHTML = '';
+    const bb = brandBlock();
+    if (bb) list.appendChild(bb);
     if (!drIssues.length) {
-      list.innerHTML = '<div class="dr-empty">لا توجد ملاحظات — الشرائح سليمة ✅</div>';
+      list.insertAdjacentHTML('beforeend', '<div class="dr-empty">لا توجد ملاحظات — الشرائح سليمة ✅</div>');
       return;
     }
     if (drView === 'slide') {

@@ -62,19 +62,20 @@
   // ---------- Arabic-first pack (011E): RTL + Arabic UI when the browser asks for it ----------
   // Simple lookup, no i18n framework — English is the default/fallback.
   const AR_LABELS = {
-    brand: { text: '📘 محرر الشرائح' },
-    'btn-open': { text: '📂 فتح', title: 'فتح ملف HTML' },
-    'btn-add-text': { text: '➕ نص', title: 'إدراج كتلة نص' },
-    'btn-add-image': { text: '🖼 صورة', title: 'إدراج صورة (تُضمَّن داخل الملف)' },
-    'btn-undo': { text: '↶ تراجع', title: 'تراجع (Ctrl+Z)' },
-    'btn-redo': { text: '↷ إعادة', title: 'إعادة (Ctrl+Y)' },
+    // texts land in each button's .lbl span — icons (SVG) survive the swap.
+    brand: { text: 'محرر الشرائح' },
+    'btn-open': { text: 'فتح', title: 'فتح ملف HTML' },
+    'btn-add-text': { text: 'نص', title: 'إدراج كتلة نص' },
+    'btn-add-image': { text: 'صورة', title: 'إدراج صورة (تُضمَّن داخل الملف)' },
+    'btn-undo': { title: 'تراجع (Ctrl+Z)' },
+    'btn-redo': { title: 'إعادة (Ctrl+Y)' },
     'btn-zoom-label': { title: 'ملء النافذة' },
-    'btn-export': { text: '⬇ PDF', title: "تصدير PDF — اختر «Save as PDF» في نافذة الطباعة" },
-    'btn-save': { text: '💾 حفظ HTML', title: 'تنزيل ملف HTML المعدّل (Ctrl+S)' },
-    'btn-open-2': { text: '📂 اختر ملف HTML' },
-    'btn-theme': { text: '🎨 الثيم', title: 'الثيمات الجاهزة، تصدير واستيراد .theme.json' },
-    'btn-fonts': { text: '🔤 الخطوط', title: 'مكتبة الخطوط — عناوين، نص، أو العنصر المحدد' },
-    'btn-present': { text: '🎤 عرض', title: 'عرض الشرائح ملء الشاشة + نافذة الملقّن' },
+    'btn-export': { text: 'PDF', title: "تصدير PDF — اختر «Save as PDF» في نافذة الطباعة" },
+    'btn-save': { text: 'حفظ HTML', title: 'تنزيل ملف HTML المعدّل (Ctrl+S)' },
+    'btn-open-2': { text: 'اختر ملف HTML' },
+    'btn-theme': { text: 'الثيم', title: 'الثيمات الجاهزة، تصدير واستيراد .theme.json' },
+    'btn-fonts': { title: 'مكتبة الخطوط — عناوين، نص، أو العنصر المحدد' },
+    'btn-present': { text: 'عرض', title: 'عرض الشرائح ملء الشاشة + نافذة الملقّن' },
   };
   function applyArabicUi() {
     document.documentElement.setAttribute('dir', 'rtl');
@@ -83,7 +84,7 @@
       const el = id === 'brand' ? document.querySelector('.toolbar .brand, #toolbar .brand') : document.getElementById(id);
       if (!el) return;
       const l = AR_LABELS[id];
-      if (l.text) el.textContent = l.text;
+      if (l.text) { const lbl = el.querySelector('.lbl'); (lbl || el).textContent = l.text; }
       if (l.title) el.title = l.title;
     });
     const h1 = document.querySelector('#empty-state h1');
@@ -92,6 +93,8 @@
     if (p1) p1.innerHTML = 'أفلت ملف .html هنا — من ChatGPT أو Claude أو Gemini؟ عدّل النص، وحرّك أي عنصر أو غيّر حجمه، ثم نزّل الملف أو صدّره PDF.';
     const p2 = document.querySelector('#empty-state p + p');
     if (p2) p2.innerHTML = '<strong>لا يُرفع شيء لأي خادم.</strong> كل شيء يعمل داخل متصفحك.';
+    const alt = document.querySelector('#empty-state .alt');
+    if (alt) { const icon = alt.querySelector('svg'); alt.textContent = 'أو ابدأ من قالب عربي جاهز ←'; if (icon) alt.prepend(icon); }
     status('افتح ملف HTML للبدء.');
   }
   if (navigator.language && navigator.language.toLowerCase().startsWith('ar')) applyArabicUi();
@@ -124,7 +127,22 @@
     }
   }
 
+  // LLM chats hand users HTML wrapped in a markdown fence or with prose
+  // before <!DOCTYPE>. Any text before the doctype forces quirks mode and
+  // the parser hoists the deck's <style> into <body>, where it beats the
+  // <head> theme kit in cascade order — kits then change fonts but never
+  // colors (EVO-013). Strip the junk before the markup reaches the DOM.
+  function sanitizeLlmHtml(html) {
+    if (!html) return html;
+    const m = /<!DOCTYPE\s+html/i.exec(html) || /<html[\s>]/i.exec(html);
+    let out = (m && m.index > 0) ? html.slice(m.index) : html;
+    const end = out.toLowerCase().lastIndexOf('</html>');
+    if (end !== -1) out = out.slice(0, end + 7) + '\n';
+    return out;
+  }
+
   function loadIntoIframe(html) {
+    html = sanitizeLlmHtml(html);
     iframe.onload = () => {
       editor = new window.LectureEditor();
       editor.onChange = ({ canUndo, canRedo }) => {
@@ -168,8 +186,8 @@
     drDock = document.createElement('aside');
     drDock.id = 'doctor-dock';
     drDock.innerHTML =
-      '<div class="dr-head">🩺 فحص الشرائح<span class="dr-score" title="درجة سلامة العرض"></span><span class="spacer"></span>' +
-      '<button class="dr-rescan" title="إعادة الفحص">🔄</button>' +
+      '<div class="dr-head"><svg class="ic"><use href="#i-pulse"/></svg>فحص الشرائح<span class="dr-score" title="درجة سلامة العرض"></span><span class="spacer"></span>' +
+      '<button class="dr-rescan" title="إعادة الفحص"><svg class="ic"><use href="#i-refresh"/></svg></button>' +
       '<button class="dr-fixall" title="إصلاح كل الملاحظات القابلة للإصلاح">إصلاح الكل</button>' +
       '<button class="dr-x" title="إغلاق">✕</button></div>' +
       '<div class="dr-tabs"><button data-v="type" class="on">حسب النوع</button><button data-v="slide">حسب الشريحة</button></div>' +
@@ -229,7 +247,9 @@
     drScanMs = Math.max(1, Math.round(performance.now() - t0));
     const btn = $('#btn-doctor');
     drCards = window.SlideDoctor.aggregate ? window.SlideDoctor.aggregate(drIssues) : [];
-    btn.textContent = '🩺 الفحص' + (drCards.length ? ` (${drCards.length})` : '');
+    const ct = btn.querySelector('.ct');
+    if (ct) { ct.textContent = drCards.length ? String(drCards.length) : ''; ct.hidden = !drCards.length; }
+    else btn.textContent = 'الفحص' + (drCards.length ? ` (${drCards.length})` : '');
     btn.classList.toggle('has-issues', drCards.length > 0);
     if (drOpen) renderDoctor();
   }
@@ -260,12 +280,46 @@
     });
   }
 
+  // Brand verdict — the answer to "is this really MiM?", read from computed
+  // styles. It exists because the HTML cannot be audited by eye: a deck still
+  // says font-family:'Cairo' while rendering brand bytes, so every reviewer who
+  // reads the CSS reaches the wrong conclusion.
+  function brandBlock() {
+    if (!editor || !editor.brandReport) return null;
+    const div = document.createElement('div');
+    div.className = 'dr-brand';
+    const r = editor.brandReport();
+    if (!r) {
+      div.innerHTML = '<div class="db-row">الهوية غير مطبَّقة — طبّق «✨ MiM» من 🎨 الثيم.</div>';
+      return div;
+    }
+    const pill = (p) => '<b class="' + (p >= 100 ? 'ok' : p >= 90 ? 'mid' : 'bad') + '">' + p + '٪</b>';
+    const names = (l) => l.map((x) => x.name + ' ×' + x.count).join('، ');
+    const th = editor.doc.getElementById('ve-theme');
+    const standin = r.kit === 'MiM' && th ? th.dataset.veStandin : '';
+    const standinNote = standin
+      ? ' — بخط ' + standin + ' البديل (الخطان الأصليان في تطبيق سطح المكتب)'
+      : '';
+    div.innerHTML =
+      '<div class="db-head">هوية ' + r.kit + '</div>' +
+      '<div class="db-row">الألوان ' + pill(r.colorPct) + '<span>' +
+        (r.offColors.length ? 'خارج اللوحة: ' + names(r.offColors) : 'كل الألوان من اللوحة الرسمية') +
+      '</span></div>' +
+      '<div class="db-row">الخطوط ' + pill(r.fontPct) + '<span>' +
+        (r.headingFace ? 'العناوين ' + r.headingFace + ' · النصوص ' + (r.bodyFace || '—') + standinNote : '') +
+        (r.offFonts.length ? ' · خارج الهوية: ' + names(r.offFonts) : '') +
+      '</span></div>';
+    return div;
+  }
+
   function renderDoctor() {
     renderDoctorMeta();
     const list = ensureDoctorDock().querySelector('.dr-list');
     list.innerHTML = '';
+    const bb = brandBlock();
+    if (bb) list.appendChild(bb);
     if (!drIssues.length) {
-      list.innerHTML = '<div class="dr-empty">لا توجد ملاحظات — الشرائح سليمة ✅</div>';
+      list.insertAdjacentHTML('beforeend', '<div class="dr-empty">لا توجد ملاحظات — الشرائح سليمة ✅</div>');
       return;
     }
     if (drView === 'slide') {
@@ -853,11 +907,19 @@
         });
       } catch (_) { raw = []; /* offline: colors still apply below */ }
       editor.applyBrandTheme(raw, 'MiM'); // exact BRAND_PALETTES.MiM — not retyped
+      // The web ships Cairo UNDER the Lyon/Diodrum names (the licensed files are
+      // desktop-only). Mark it, so the brand report names the stand-in instead
+      // of claiming a face this build cannot actually embed.
+      const th = editor.doc.getElementById('ve-theme');
+      if (th) { if (raw.length) th.dataset.veStandin = 'Cairo'; else delete th.dataset.veStandin; }
       themeName = name;
       const audit = editor.themeAudit();
+      const lostNote = audit && audit.lost && audit.lost.length
+        ? ` — ⚠ ${audit.lost.length} لونًا لم يتغيّر لأن أنماط العرض نفسها تتقدّم (شغّل 🩺 الفحص)`
+        : '';
       status(raw.length
-        ? `طُبّقت هوية MiM: الألوان الرسمية + خط Cairo (الثانوي الرسمي) يغطي ${audit ? audit.fontPct : 0}% من النص — خطا Lyon/Diodrum الأساسيان في تطبيق سطح المكتب.`
-        : 'طُبّقت ألوان MiM فقط — تعذّر تحميل الخط (بدون اتصال).');
+        ? `طُبّقت هوية MiM: الألوان الرسمية + خط Cairo (الثانوي الرسمي) يغطي ${audit ? audit.fontPct : 0}% من النص — خطا Lyon/Diodrum الأساسيان في تطبيق سطح المكتب.${lostNote}`
+        : `طُبّقت ألوان MiM فقط — تعذّر تحميل الخط (بدون اتصال).${lostNote}`);
       if (themePop) themePop.classList.remove('open');
       return;
     }
