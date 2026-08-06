@@ -569,8 +569,24 @@
     if (res.ok) status('Saved: ' + res.filePath);
   }
 
-  // Slide-deck detection: repeated same-size direct children of <body>
+  // Most frequent value in a list (ties -> the first seen).
+  function commonest(nums) {
+    const seen = new Map();
+    for (const v of nums) seen.set(v, (seen.get(v) || 0) + 1);
+    let best = nums[0], bestN = 0;
+    for (const [v, c] of seen) if (c > bestN) { best = v; bestN = c; }
+    return best;
+  }
+
+  // Slide-deck detection: repeated same-WIDTH direct children of <body>
   // (e.g. div.slide 950x650). Each becomes exactly one PDF page.
+  //
+  // Heights deliberately do NOT have to match. A deck authored with
+  // `min-height` (as the generator now emits) lets every slide grow to its own
+  // content, so a 16-slide lecture measured 680..1007px tall. Demanding equal
+  // heights made detection fail on exactly those files and silently dropped
+  // the export to Letter portrait, where a 1000px slide loses ~130px off each
+  // side — the clipped-title bug.
   function detectSlides() {
     const doc = editor.doc;
     const kids = Array.from(doc.body.children).filter(el =>
@@ -578,11 +594,22 @@
       !/^ve-/.test(el.className) &&
       el.offsetWidth > 400 && el.offsetHeight > 250);
     if (kids.length < 2) return null;
-    const w = kids[0].offsetWidth, h = kids[0].offsetHeight;
-    const same = kids.filter(k =>
-      Math.abs(k.offsetWidth - w) < 4 && Math.abs(k.offsetHeight - h) < 4);
-    if (same.length < 2 || same.length < kids.length * 0.8) return null;
-    return { width: w, height: h, els: same };
+    // Width is the trustworthy signal: a deck's slides are one fixed width.
+    const w = commonest(kids.map(k => k.offsetWidth));
+    const els = kids.filter(k => Math.abs(k.offsetWidth - w) < 4);
+    if (els.length < 2 || els.length < kids.length * 0.8) return null;
+
+    // The design box is the shortest slide — the floor `height`/`min-height`
+    // sets, which every slide is built on. Sanity-checked against the median
+    // so one freak short slide can't shrink the whole deck's page.
+    const hs = els.map(k => k.offsetHeight).sort((a, b) => a - b);
+    const median = hs[hs.length >> 1];
+    const design = hs[0] >= median * 0.6 ? hs[0] : median;
+    // One page size for the whole deck, tall enough for the tallest slide so
+    // nothing is ever cut — capped at 1.5x the design box so a single runaway
+    // slide can't inflate every other page (it is scaled to fit instead).
+    const height = Math.min(hs[hs.length - 1], Math.round(design * 1.5));
+    return { width: w, height, els };
   }
 
   // Build the print-ready HTML + page size (shared by export and preview).
@@ -590,21 +617,73 @@
     const slides = detectSlides();
     let html, pageSize = null;
     if (slides) {
+      const W = slides.width, H = slides.height;
       // Mark slides, snapshot HTML, then clean the live document again.
-      slides.els.forEach(el => el.setAttribute('data-ve-page', ''));
+      const fits = new Set();
+      slides.els.forEach((el, i) => {
+        el.setAttribute('data-ve-page', '');
+        if (i === slides.els.length - 1) el.setAttribute('data-ve-last', '');
+        // Taller than the page (only reachable once the 1.5x cap bites):
+        // shrink it to fit rather than let overflow:hidden cut it. `zoom`
+        // scales the slide's own layout box so its clip scales with it — a
+        // transform would clip at full size first, then shrink the stub.
+        const h = el.offsetHeight;
+        if (h > H + 1) {
+          const z = Math.floor(H / h * 1000) / 1000;
+          el.setAttribute('data-ve-fit', String(z));
+          fits.add(z);
+        }
+        // A slide stretched to page height needs something that absorbs the
+        // extra space or it prints with a white band. Content slides already
+        // have one (a body with flex:1); a cover slide is a single full-bleed
+        // wrapper plus an absolutely-positioned footer, so nothing grows.
+        // Judged on layout, not markup: :only-child misses the cover exactly
+        // because that footer is a second DOM child but not a flex item.
+        const cs = (c) => editor.win.getComputedStyle(c);
+        const inFlow = Array.from(el.children).filter(c => {
+          const pos = cs(c).position;
+          return pos !== 'absolute' && pos !== 'fixed';
+        });
+        if (inFlow.length === 1 && !(parseFloat(cs(inFlow[0]).flexGrow) > 0)) {
+          inFlow[0].setAttribute('data-ve-fill', '');
+        }
+      });
       html = editor.getCleanHtml();
-      slides.els.forEach(el => el.removeAttribute('data-ve-page'));
-      pageSize = { widthPx: slides.width, heightPx: slides.height };
+      slides.els.forEach(el => {
+        el.removeAttribute('data-ve-page');
+        el.removeAttribute('data-ve-last');
+        el.removeAttribute('data-ve-fit');
+        Array.from(el.children).forEach(c => c.removeAttribute('data-ve-fill'));
+      });
+      pageSize = { widthPx: W, heightPx: H };
       const printCss = `<style id="ve-print">
-        @page { size: ${slides.width}px ${slides.height}px; margin: 0; }
+        @page { size: ${W}px ${H}px; margin: 0; }
         html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+        /* Only slides make pages: a stray wrapper or leftover chrome left in
+           <body> would otherwise print as its own half-empty page. */
+        body > *:not([data-ve-page]) { display: none !important; }
         [data-ve-page] {
-          margin: 0 auto !important;
+          width: ${W}px !important;
+          margin: 0 !important;
           box-shadow: none !important;
+          border-radius: 0 !important;
+          overflow: hidden !important;
           page-break-after: always; break-after: page;
           page-break-inside: avoid; break-inside: avoid;
         }
-        [data-ve-page]:last-of-type { page-break-after: auto; break-after: auto; }
+        /* Short slides fill the page instead of leaving a white band under the
+           footer: these decks are flex columns with a growing body and a
+           bottom-pinned footer, so filling the box is what they are built for. */
+        [data-ve-page]:not([data-ve-fit]) {
+          height: ${H}px !important; min-height: 0 !important; max-height: none !important;
+        }
+        /* The one wrapper that has to grow with the stretched slide (cover
+           artwork), or it stops short of the page edge. min-height covers the
+           case where the slide is a plain block, flex the case where it isn't. */
+        [data-ve-fill] { flex: 1 1 auto !important; min-height: 100% !important; }
+        [data-ve-fit] { height: auto !important; }
+        ${[...fits].map(z => `[data-ve-fit="${z}"] { zoom: ${z}; }`).join('\n        ')}
+        [data-ve-last] { page-break-after: auto; break-after: auto; }
       </style>`;
       html = html.includes('</head>')
         ? html.replace('</head>', printCss + '</head>')

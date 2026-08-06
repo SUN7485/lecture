@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>محرر الشرائح — أصلح عروض الذكاء الاصطناعي وقدّمها بثقة</title>
+<meta name="description" content="محرر مجاني يفتح شرائح HTML التي أنشأها ChatGPT أو Claude أو Gemini، يصلح أخطاءها تلقائيًا — الخطوط، التباين، الأرقام العربية — ثم يصدّرها PDF. كل شيء داخل متصفحك، لا يُرفع أي ملف.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Reem+Kufi:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#080d1e; --panel:#111a35; --panel-2:#18244a; --panel-3:#22315e;
+    --line:#2b3c6e; --line-soft:#1d2a51;
+    --text:#eef3ff; --muted:#9db0dc; --faint:#6a7cae;
+    --accent:#2ee6c8; --accent-2:#6ff2dc; --accent-ink:#00201c; --accent-edge:#2ee6c8;
+    --ok:#3ddc84; --err:#ff5f6d;
+    --font-ui:'IBM Plex Sans Arabic','Segoe UI',system-ui,sans-serif;
+    --font-display:'Reem Kufi','IBM Plex Sans Arabic',sans-serif;
+  }
+  * { box-sizing:border-box; }
+  .sprite { position:absolute; width:0; height:0; overflow:hidden; }
+  html { scroll-behavior:smooth; }
+  .gold { filter:drop-shadow(0 0 14px rgba(245,192,79,.45)); }
+  body { margin:0; font:15px/1.8 var(--font-ui); background:var(--bg); color:var(--text);
+         background-image:radial-gradient(1200px 500px at 50% -8%, rgba(46,230,200,.07), transparent 65%),
+                          radial-gradient(rgba(157,176,220,.04) 1px, transparent 1.2px);
+         background-size:auto, 24px 24px; }
+  ::-webkit-scrollbar { width:11px; } ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:var(--panel-3); border-radius:8px; border:2px solid var(--bg); }
+  a { color:var(--accent-2); }
+  .wrap { max-width:1080px; margin:0 auto; padding:0 24px; }
+  .kufi { font-family:var(--font-display); font-weight:700; }
+  .star { color:var(--accent); flex:0 0 auto; }
+
+  /* ---------- top nav ---------- */
+  nav { display:flex; align-items:center; gap:10px; padding:18px 0; }
+  nav .brand { display:flex; align-items:center; gap:10px; font-family:var(--font-display);
+               font-weight:600; font-size:19px; }
+  nav .brand svg { width:24px; height:24px; }
+  nav .spacer { flex:1; }
+  nav a.link { color:var(--muted); text-decoration:none; font-size:13.5px; padding:6px 12px; border-radius:8px; }
+  nav a.link:hover { color:var(--text); background:var(--panel-2); }
+  nav a.go { background:linear-gradient(180deg,var(--accent-2),var(--accent)); color:var(--accent-ink);
+             font-weight:700; text-decoration:none; padding:9px 20px; border-radius:10px;
+             border:1px solid var(--accent-edge); font-size:14px; }
+  nav a.go:hover { box-shadow:0 2px 18px rgba(46,230,200,.35); }
+
+  /* ---------- hero ---------- */
+  header.hero { padding:52px 0 30px; text-align:center; position:relative; }
+  .hero h1 { font-family:var(--font-display); font-weight:700; font-size:clamp(30px, 5vw, 46px);
+             line-height:1.65; margin:14px 0 14px; }
+  .hero h1 em { font-style:normal; color:var(--accent); }
+  .hero .sub { color:var(--muted); font-size:clamp(14.5px, 1.6vw, 17px); max-width:640px; margin:0 auto 8px; }
+  .hero .en { color:var(--faint); font-size:12.5px; letter-spacing:.4px; direction:ltr; }
+  .hero .ctas { margin:26px 0 8px; display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+  .btn-hero { display:inline-flex; align-items:center; gap:9px; height:50px; padding:0 30px;
+              border-radius:13px; font-size:16px; font-weight:700; text-decoration:none;
+              background:linear-gradient(180deg,var(--accent-2),var(--accent)); color:var(--accent-ink);
+              border:1px solid var(--accent-edge); }
+  .btn-hero:hover { background:linear-gradient(180deg,#9dfced,var(--accent-2)); box-shadow:0 4px 24px rgba(46,230,200,.35); }
+  .btn-ghost { display:inline-flex; align-items:center; gap:8px; height:50px; padding:0 22px; border-radius:13px;
+               font-size:14.5px; text-decoration:none; color:var(--accent-2);
+               border:1px solid var(--line); background:rgba(157,176,220,.02); }
+  .btn-ghost:hover { border-color:var(--accent); background:rgba(46,230,200,.07); }
+  .hero .trust { color:var(--faint); font-size:12.5px; margin-top:10px; }
+  .hero .trust b { color:var(--muted); }
+
+  /* before/after stage */
+  .fixscene { display:flex; align-items:center; justify-content:center; gap:26px;
+              margin:44px auto 0; max-width:960px; flex-wrap:wrap; }
+  .mini { width:340px; aspect-ratio:950/650; border-radius:10px; position:relative; background:#fff;
+          box-shadow:0 24px 60px rgba(0,0,0,.55), 0 4px 16px rgba(0,0,0,.4); overflow:hidden; text-align:right; }
+  .mini .bar { position:absolute; inset-inline-start:0; top:0; bottom:0; width:14px; }
+  .mini .in { padding:26px 30px 0 20px; }
+  .mini.bad  { transform:rotate(2.5deg); }
+  .mini.good { transform:rotate(-2deg); }
+  .mini.bad .bar { background:#8e44ad; }
+  .mini.good .bar { background:#2ec4b6; }
+  .mini.bad h3 { font-size:15px; color:#d9d2c5; margin:0 0 6px; font-weight:700; }   /* washed-out low contrast */
+  .mini.bad p { font-size:7.5px; line-height:1.35; color:#555; margin:0 0 3px; letter-spacing:-.2px; }
+  .mini.bad .crowd { columns:2; column-gap:6px; }
+  .mini.good h3 { font-size:16px; color:#1f2733; margin:0 0 8px; font-weight:700; }
+  .mini.good p { font-size:10.5px; line-height:1.8; color:#3a4256; margin:0 0 5px; }
+  .mini.good li { font-size:10px; color:#3a4256; margin-bottom:3px; }
+  .mini .foot { position:absolute; bottom:8px; inset-inline-start:22px; font-size:7px; color:#9aa; direction:ltr; }
+  .chip { position:absolute; font-size:11px; font-weight:700; padding:3px 11px; border-radius:999px;
+          background:var(--panel); border:1px solid; box-shadow:0 8px 24px rgba(0,0,0,.5); }
+  .chip.err { color:#ff8b95; border-color:rgba(255,95,109,.6); }
+  .chip.okc { color:var(--ok); border-color:rgba(61,220,132,.55); }
+  .fixarrow { display:flex; flex-direction:column; align-items:center; gap:6px; color:var(--accent); }
+  .fixarrow svg { width:52px; height:52px; }
+  .fixarrow span { font-size:12px; color:var(--muted); font-weight:600; }
+
+  /* ---------- section scaffolding ---------- */
+  section { padding:64px 0 10px; }
+  .sechead { text-align:center; margin-bottom:34px; }
+  .sechead .orn { width:34px; height:34px; color:var(--accent); }
+  .sechead h2 { font-family:var(--font-display); font-weight:700; font-size:clamp(22px,3vw,30px);
+                line-height:1.6; margin:6px 0 8px; }
+  .sechead p { color:var(--muted); max-width:560px; margin:0 auto; font-size:14.5px; }
+
+  /* fixer powers */
+  .powers { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:18px; }
+  .power { background:var(--panel); border:1px solid var(--line-soft); border-radius:16px; padding:22px 20px 20px;
+           transition:transform .18s, border-color .18s; }
+  .power:hover { transform:translateY(-4px); border-color:var(--accent); }
+  .power .pic { height:74px; border-radius:10px; background:var(--bg); border:1px solid var(--line-soft);
+                display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:14px; overflow:hidden; }
+  .power h3 { font-size:16.5px; margin:0 0 6px; font-family:var(--font-display); font-weight:600; }
+  .power p { font-size:13px; color:var(--muted); margin:0; line-height:1.8; }
+  .p-score { font-size:13px; font-weight:800; border-radius:999px; padding:3px 12px; }
+  .p-score.bad { background:rgba(255,95,109,.14); color:#ff8b95; }
+  .p-score.ok { background:rgba(61,220,132,.14); color:var(--ok); }
+  .p-arrow { color:var(--accent); font-size:18px; }
+  .p-font { font-size:20px; font-weight:700; }
+  .p-font .ghost { color:var(--faint); text-decoration:line-through; }
+  .p-font .real { color:var(--accent-2); }
+  .p-num { font-size:19px; font-weight:700; letter-spacing:2px; }
+  .p-num .lat { color:var(--faint); } .p-num .ar { color:var(--accent-2); }
+
+  /* how it works */
+  .steps { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:18px; counter-reset:step; }
+  .step { position:relative; background:var(--panel); border:1px solid var(--line-soft); border-radius:16px;
+          padding:24px 20px 20px; }
+  .step::before { counter-increment:step; content:counter(step, arabic-indic);
+                  position:absolute; top:-16px; inset-inline-start:18px; width:34px; height:34px; border-radius:10px;
+                  background:linear-gradient(180deg,var(--accent-2),var(--accent)); color:var(--accent-ink);
+                  font-weight:800; font-size:16px; display:flex; align-items:center; justify-content:center;
+                  border:1px solid var(--accent-edge); }
+  .step h3 { font-size:15.5px; margin:4px 0 6px; }
+  .step p { font-size:13px; color:var(--muted); margin:0; }
+
+  /* privacy band */
+  .privacy { margin-top:64px; background:linear-gradient(180deg, var(--panel-2), var(--panel));
+             border-block:1px solid var(--line-soft); padding:44px 0; text-align:center; }
+  .privacy .kufi { font-size:clamp(20px,2.6vw,27px); line-height:1.7; }
+  .privacy .kufi em { font-style:normal; color:var(--accent); }
+  .privacy p { color:var(--muted); font-size:14px; max-width:600px; margin:10px auto 0; }
+  .privacy .badges { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:18px; }
+  .pbadge { font-size:12.5px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:6px 16px; }
+
+  /* templates strip */
+  .tgrid { display:grid; grid-template-columns:repeat(auto-fill, 300px); justify-content:center; gap:20px; }
+  .tcard { background:var(--panel); border:1px solid var(--line-soft); border-radius:14px; overflow:hidden;
+           text-decoration:none; color:var(--text); transition:transform .18s, border-color .18s; display:block; }
+  .tcard:hover { transform:translateY(-4px); border-color:var(--accent); }
+  .tthumb { position:relative; padding-top:68.42%; background:#080d1e; overflow:hidden; border-bottom:1px solid var(--line-soft); }
+  .tthumb iframe { position:absolute; top:0; right:0; width:950px; height:650px; border:0; pointer-events:none;
+                   transform:scale(0.3137); transform-origin:top right; background:#fff; }
+  .tcard .tname { padding:12px 16px; font-size:14px; font-weight:600; }
+  .tmore { text-align:center; margin-top:22px; }
+
+  /* footer */
+  footer { margin-top:70px; border-top:1px solid var(--line-soft); padding:30px 0 40px;
+           color:var(--faint); font-size:13px; text-align:center; }
+  footer .fbrand { display:flex; align-items:center; gap:8px; justify-content:center;
+                   font-family:var(--font-display); color:var(--muted); font-size:15px; margin-bottom:8px; }
+  footer .fbrand svg { width:18px; height:18px; }
+
+  /* entrance animation */
+  .rise { animation:rise .55s cubic-bezier(.2,.7,.2,1) both; }
+  .d1 { animation-delay:.06s; } .d2 { animation-delay:.12s; } .d3 { animation-delay:.18s; }
+  .d4 { animation-delay:.26s; } .d5 { animation-delay:.34s; }
+  @keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion:reduce) { .rise { animation:none; } .power:hover,.tcard:hover { transform:none; } }
+  @media (max-width:760px) {
+    .fixscene { gap:14px; padding:0 20px; }
+    .mini { width:min(340px, 80vw); }
+    .chip { font-size:10px; }
+    .fixarrow svg { transform:rotate(-90deg); }
+    nav a.link { display:none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- zero-size, NOT display:none: a hidden subtree can't serve the gradient as a paint source -->
+<svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g-gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffd97a"/><stop offset="55%" stop-color="#f5c04f"/><stop offset="100%" stop-color="#2ee6c8"/>
+    </linearGradient>
+  </defs>
+  <symbol id="star8" viewBox="0 0 24 24"><path d="M12 1.6 14.6 7l5.8-1.4L17 10.7l4.4 4-5.7 1.5.9 5.9-4.6-3.7-4.6 3.7.9-5.9L2.6 14.7l4.4-4L4.6 5.6 10.4 7Z" fill="currentColor"/></symbol>
+  <symbol id="star8g" viewBox="0 0 24 24"><path d="M12 1.6 14.6 7l5.8-1.4L17 10.7l4.4 4-5.7 1.5.9 5.9-4.6-3.7-4.6 3.7.9-5.9L2.6 14.7l4.4-4L4.6 5.6 10.4 7Z" fill="url(#g-gold)"/></symbol>
+  <symbol id="arrow" viewBox="0 0 24 24"><path d="M20 12H5M11 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+
+<div class="wrap">
+  <nav class="rise">
+    <span class="brand"><svg class="star gold"><use href="#star8g"/></svg>محرر الشرائح</span>
+    <span class="spacer"></span>
+    <a class="link" href="#powers">ماذا يُصلح؟</a>
+    <a class="link" href="#how">كيف يعمل</a>
+    <a class="link" href="templates.html">القوالب</a>
+    <a class="go" href="index.html">افتح المحرر</a>
+  </nav>
+</div>
+
+<header class="hero">
+  <div class="wrap">
+    <svg class="star gold rise" style="width:44px;height:44px;"><use href="#star8g"/></svg>
+    <h1 class="rise d1">الذكاء الاصطناعي كتب الشرائح…<br><em>والمحرر يجعلها تليق بك</em></h1>
+    <p class="sub rise d2">افتح ملف HTML الذي أنشأه ChatGPT أو Claude أو Gemini، وأصلح ما أفسده تلقائيًا —
+       الخطوط، التباين، الأرقام، الصور — ثم عدّل كل شيء كأنه PowerPoint وصدّره PDF.</p>
+    <p class="en rise d2">The fixer for AI-generated slides — Arabic-first, free, nothing leaves your browser.</p>
+    <div class="ctas rise d3">
+      <a class="btn-hero" href="index.html">افتح ملفك الآن</a>
+      <a class="btn-ghost" href="templates.html">أو جرّب قالبًا جاهزًا</a>
+    </div>
+    <p class="trust rise d3">مجاني · بلا حساب · <b>لا يُرفع أي ملف لأي خادم</b></p>
+
+    <div class="fixscene rise d4">
+      <div class="mini bad">
+        <div class="bar"></div>
+        <div class="in">
+          <h3>مقدمة في تحليل البيانات الصناعية واتخاذ القرار المبني على الأدلة</h3>
+          <div class="crowd">
+            <p>يُعدّ تحليل البيانات الصناعية من أهم الركائز التي تقوم عليها المصانع الحديثة في اتخاذ قراراتها اليومية والاستراتيجية على حدٍّ سواء حيث تتدفق البيانات من خطوط الإنتاج.</p>
+            <p>وتشمل مصادر البيانات أجهزة الاستشعار وأنظمة التنفيذ التصنيعي وسجلات الصيانة والجودة والتقارير اليدوية التي يدوّنها المشغّلون في نهاية كل وردية عمل.</p>
+            <p>كما تلعب لوحات المتابعة دورًا محوريًا في عرض المؤشرات اللحظية لمتخذي القرار وتمكينهم من الاستجابة السريعة لأي انحراف عن المعايير المستهدفة للتشغيل.</p>
+            <p>ولذلك فإن إتقان أدوات التمثيل البصري أصبح مهارة أساسية لكل مهندس صناعي معاصر بلا استثناء.</p>
+          </div>
+          <div class="foot">page 3 — generated</div>
+        </div>
+        <span class="chip err" style="top:10px; inset-inline-end:-14px;">تباين ضعيف 1.8:1</span>
+        <span class="chip err" style="bottom:34px; inset-inline-start:-12px;">نص مكتظ · 8px</span>
+      </div>
+      <div class="fixarrow">
+        <svg><use href="#arrow"/></svg>
+        <span>إصلاح الكل — بنقرة</span>
+      </div>
+      <div class="mini good">
+        <div class="bar"></div>
+        <div class="in">
+          <h3>تحليل البيانات الصناعية</h3>
+          <p>ثلاث ركائز يقوم عليها القرار داخل المصنع الحديث:</p>
+          <li>بيانات الحساسات وخطوط الإنتاج</li>
+          <li>سجلات الجودة والصيانة</li>
+          <li>لوحات متابعة لحظية للمؤشرات</li>
+          <div class="foot">شريحة ٣ من ١٥</div>
+        </div>
+        <span class="chip okc" style="top:12px; inset-inline-start:-12px;">100/100 ✓</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <section id="powers">
+    <div class="sechead">
+      <svg class="orn star"><use href="#star8"/></svg>
+      <h2>يعرف أخطاء الذكاء الاصطناعي… ويصلحها</h2>
+      <p>فاحص الشرائح يكشف ما يفسد العرض على الشاشة وجهاز العرض، وكل ملاحظة تُصلح بنقرة واحدة.</p>
+    </div>
+    <div class="powers">
+      <div class="power">
+        <div class="pic"><span class="p-score bad">52/100</span><span class="p-arrow">←</span><span class="p-score ok">100/100</span></div>
+        <h3>فحص وإصلاح شامل</h3>
+        <p>تباين ضعيف، نص مكتظ، صور مشوّهة أو مكسورة، شرائح متخمة — تُكتشف كلها، ويُصلحها زر «إصلاح الكل» حتى آخر ملاحظة.</p>
+      </div>
+      <div class="power">
+        <div class="pic p-font"><span class="ghost">Font?</span>&nbsp;<span class="real">خط عربي سليم</span></div>
+        <h3>خطوط عربية مضمونة</h3>
+        <p>يكشف الخطوط غير المضمّنة التي ستنهار عند مشاركة الملف، ويضمّن بدائل عربية جميلة داخل الملف نفسه — يعمل بلا إنترنت.</p>
+      </div>
+      <div class="power">
+        <div class="pic p-num"><span class="lat">123</span>&nbsp;⇄&nbsp;<span class="ar">١٢٣</span></div>
+        <h3>عربي حتى النخاع</h3>
+        <p>تبديل نظام الأرقام في كامل العرض، تاريخ هجري وميلادي، واتجاه RTL محترم في كل أداة — لأن جمهورك يقرأ بالعربية.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="sechead">
+      <svg class="orn star"><use href="#star8"/></svg>
+      <h2>ثلاث خطوات… وينتهي الأمر</h2>
+    </div>
+    <div class="steps">
+      <div class="step"><h3>أفلت الملف</h3><p>ملف HTML من أي نموذج ذكاء اصطناعي — أو ملف Word يتحول لشرائح تلقائيًا.</p></div>
+      <div class="step"><h3>أصلح وعدّل</h3><p>الفاحص يصلح الأخطاء بنقرة، وأنت تعدّل النصوص وتحرّك العناصر كأنه PowerPoint.</p></div>
+      <div class="step"><h3>قدّم أو صدّر</h3><p>عرض ملء الشاشة مع نافذة ملقّن، أو PDF متقن الطباعة — والملف يبقى ملفك.</p></div>
+    </div>
+  </section>
+</div>
+
+<div class="privacy">
+  <div class="wrap">
+    <div class="kufi">ملفاتك لا تغادر جهازك. <em>أبدًا.</em></div>
+    <p>كل شيء يعمل داخل متصفحك: الفتح، الفحص، الإصلاح، التصدير. لا حساب، لا رفع، لا تتبّع لمحتوى ملفاتك.</p>
+    <div class="badges">
+      <span class="pbadge">بلا تسجيل</span>
+      <span class="pbadge">بلا رفع ملفات</span>
+      <span class="pbadge">يعمل دون إنترنت بعد أول تحميل</span>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <section>
+    <div class="sechead">
+      <svg class="orn star"><use href="#star8"/></svg>
+      <h2>أو ابدأ من قالب تعليمي جاهز</h2>
+      <p>قوالب عربية واقعية — مقدمة درس، مراجعة اختبار، خطة فصل — تفتح في المحرر مباشرة.</p>
+    </div>
+    <div class="tgrid">
+      <a class="tcard" href="index.html?template=lesson-intro">
+        <div class="tthumb"><iframe src="templates/lesson-intro.html" tabindex="-1" loading="lazy"></iframe></div>
+        <div class="tname">مقدمة درس</div>
+      </a>
+      <a class="tcard" href="index.html?template=exam-review">
+        <div class="tthumb"><iframe src="templates/exam-review.html" tabindex="-1" loading="lazy"></iframe></div>
+        <div class="tname">مراجعة اختبار</div>
+      </a>
+      <a class="tcard" href="index.html?template=semester-plan">
+        <div class="tthumb"><iframe src="templates/semester-plan.html" tabindex="-1" loading="lazy"></iframe></div>
+        <div class="tname">خطة فصل دراسي</div>
+      </a>
+    </div>
+    <div class="tmore"><a class="btn-ghost" href="templates.html" style="height:44px;">كل القوالب الخمسة ←</a></div>
+  </section>
+</div>
+
+<footer>
+  <div class="fbrand"><svg class="star gold"><use href="#star8g"/></svg>محرر الشرائح</div>
+  <div>مجاني للمعلمين والمحاضرين — يعمل في متصفحك، وملفاتك ملكك.</div>
+</footer>
+
+</body>
+</html>

@@ -5,34 +5,69 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>قوالب شرائح تعليمية عربية جاهزة — مجانية</title>
 <meta name="description" content="خمسة قوالب شرائح تعليمية عربية جاهزة للاستخدام: مقدمة درس، مراجعة اختبار، خطة فصل دراسي، درس مقارنة، واختبار قصير. افتحها مباشرة في محرر الشرائح المجاني وعدّلها كأنها PowerPoint.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Reem+Kufi:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root{ --bg:#1e2430; --panel:#273041; --text:#e8ecf3; --muted:#9aa4b8; --accent:#4f8cff; }
-  *{box-sizing:border-box;}
-  body{margin:0;font-family:'Cairo',system-ui,sans-serif;background:var(--bg);color:var(--text);direction:rtl;}
-  header{padding:36px 24px 18px;text-align:center;max-width:760px;margin:0 auto;}
-  header h1{font-size:26px;margin:0 0 10px;}
-  header p{color:var(--muted);font-size:15px;line-height:1.7;margin:0;}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:22px;
-        max-width:1080px;margin:28px auto 60px;padding:0 24px;}
-  .card{background:var(--panel);border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.35);
-        display:flex;flex-direction:column;}
-  .thumb{position:relative;width:100%;padding-top:68.4%;background:#0e1420;overflow:hidden;}
-  .thumb iframe{position:absolute;top:0;left:0;width:950px;height:650px;border:0;pointer-events:none;
-    transform:scale(0.274);transform-origin:top left;}
-  .card-body{padding:16px 18px 18px;display:flex;flex-direction:column;gap:8px;flex:1;}
-  .card-body h2{font-size:17px;margin:0;}
-  .card-body p{font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;flex:1;}
-  .card-body a.use{margin-top:6px;display:inline-block;text-align:center;background:var(--accent);color:#fff;
-    text-decoration:none;padding:9px 14px;border-radius:8px;font-weight:700;font-size:14px;}
-  .card-body a.use:hover{opacity:.9;}
-  footer{text-align:center;color:var(--muted);font-size:13px;padding:0 24px 40px;}
-  footer a{color:var(--accent);}
-  @media (max-width:420px){ .grid{grid-template-columns:1fr;} }
+  :root {
+    --bg:#080d1e; --panel:#111a35; --panel-2:#18244a; --line:#2b3c6e; --line-soft:#1d2a51;
+    --text:#eef3ff; --muted:#9db0dc; --faint:#6a7cae;
+    --accent:#2ee6c8; --accent-2:#6ff2dc; --accent-ink:#00201c;
+    --font-ui:'IBM Plex Sans Arabic','Segoe UI',system-ui,sans-serif;
+    --font-display:'Reem Kufi','IBM Plex Sans Arabic',sans-serif;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.6 var(--font-ui); background:var(--bg); color:var(--text); direction:rtl;
+         background-image:radial-gradient(1100px 420px at 50% -8%, rgba(46,230,200,.06), transparent 65%),
+                          radial-gradient(rgba(157,176,220,.04) 1px, transparent 1.2px);
+         background-size:auto, 24px 24px; }
+  a:focus-visible { outline:none; box-shadow:0 0 0 2px rgba(46,230,200,.55); border-radius:8px; }
+
+  header { padding:44px 24px 10px; text-align:center; max-width:760px; margin:0 auto; }
+  header .orn { width:46px; height:46px; filter:drop-shadow(0 0 14px rgba(245,192,79,.45)); }
+  header h1 { font-family:var(--font-display); font-weight:700; font-size:30px; line-height:1.5; margin:8px 0 12px; }
+  header p { color:var(--muted); font-size:14.5px; line-height:1.9; margin:0; }
+
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, 300px); justify-content:center; gap:22px;
+          max-width:1080px; margin:32px auto 64px; padding:0 24px; }
+  .card { background:var(--panel); border:1px solid var(--line-soft); border-radius:16px; overflow:hidden;
+          display:flex; flex-direction:column; transition:transform .18s ease, border-color .18s, box-shadow .18s; }
+  .card:hover { transform:translateY(-4px); border-color:var(--accent);
+                box-shadow:0 18px 44px rgba(0,0,0,.45), 0 0 0 1px rgba(46,230,200,.25); }
+  /* 950×650 slide scaled to exactly fit the fixed 298px inner width: 298/950 */
+  .thumb { position:relative; width:100%; padding-top:68.42%; background:#080d1e; overflow:hidden;
+           border-bottom:1px solid var(--line-soft); }
+  .thumb iframe { position:absolute; top:0; right:0; width:950px; height:650px; border:0; pointer-events:none;
+                  transform:scale(0.3137); transform-origin:top right; background:#fff; }
+  .card-body { padding:15px 17px 17px; display:flex; flex-direction:column; gap:8px; flex:1; }
+  .card-body h2 { font-family:var(--font-display); font-weight:600; font-size:17px; margin:0; }
+  .card-body p { font-size:13px; color:var(--muted); line-height:1.75; margin:0; flex:1; }
+  .card-body a.use { margin-top:8px; display:block; text-align:center;
+                     background:linear-gradient(180deg, var(--accent-2), var(--accent)); color:var(--accent-ink);
+                     text-decoration:none; padding:10px 14px; border-radius:10px; font-weight:700; font-size:14px;
+                     border:1px solid #2ee6c8; transition:box-shadow .15s, background .15s; }
+  .card-body a.use:hover { background:linear-gradient(180deg, #9dfced, var(--accent-2));
+                           box-shadow:0 2px 16px rgba(46,230,200,.3); }
+
+  footer { text-align:center; color:var(--faint); font-size:13px; padding:0 24px 48px; }
+  footer a { color:var(--accent-2); }
+
+  .card { animation:rise .5s cubic-bezier(.2,.7,.2,1) both; }
+  .card:nth-child(2) { animation-delay:.06s; } .card:nth-child(3) { animation-delay:.12s; }
+  .card:nth-child(4) { animation-delay:.18s; } .card:nth-child(5) { animation-delay:.24s; }
+  @keyframes rise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce) { .card { animation:none; } .card:hover { transform:none; } }
+  @media (max-width:420px) { .grid { grid-template-columns:1fr; } .thumb iframe { transform:scale(0.36); } }
 </style>
 </head>
 <body>
 
 <header>
+  <svg class="orn" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="g-gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffd97a"/><stop offset="55%" stop-color="#f5c04f"/><stop offset="100%" stop-color="#2ee6c8"/>
+    </linearGradient></defs>
+    <path d="M12 1.6 14.6 7l5.8-1.4L17 10.7l4.4 4-5.7 1.5.9 5.9-4.6-3.7-4.6 3.7.9-5.9L2.6 14.7l4.4-4L4.6 5.6 10.4 7Z" fill="url(#g-gold)"/></svg>
   <h1>قوالب شرائح تعليمية عربية جاهزة</h1>
   <p>خمسة قوالب واقعية جاهزة للاستخدام مباشرة — مقدمة درس، مراجعة اختبار، خطة فصل دراسي، درس مقارنة، واختبار قصير.
      اضغط «استخدم القالب» ليُفتح فورًا في محرر الشرائح المجاني، حيث يمكنك تعديل كل نص وصورة كأنها PowerPoint، ثم تنزيله أو تصديره PDF. لا حاجة لحساب.</p>
@@ -55,7 +90,7 @@
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML =
-      `<div class="thumb"><iframe src="templates/${t.id}.html" tabindex="-1"></iframe></div>` +
+      `<div class="thumb"><iframe src="templates/${t.id}.html" tabindex="-1" loading="lazy"></iframe></div>` +
       `<div class="card-body"><h2>${t.name}</h2><p>${t.desc}</p>` +
       `<a class="use" href="index.html?template=${t.id}">استخدم القالب</a></div>`;
     grid.appendChild(card);

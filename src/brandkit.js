@@ -129,15 +129,18 @@
       typo: { heading: 'Almarai', body: 'Cairo', lineHeight: 1.8 },
     },
   };
-  async function applyMiMPreset() {
+  async function applyMiMPreset(variant) {
     const editor = getEditor();
     if (!editor) return;
     let fonts = [];
     try { fonts = await api.getFonts(); } catch (_) { fonts = []; }
-    editor.applyBrandTheme(fonts, 'MiM'); // exact BRAND_PALETTES.MiM — not retyped
-    kit = { name: 'MiM', vars: {}, fonts: [] };
+    const kitName = variant === 'MiM-print' ? 'MiM-print' : 'MiM';
+    editor.applyBrandTheme(fonts, kitName); // exact BRAND_PALETTES — not retyped
+    kit = { name: kitName, vars: {}, fonts: [] };
     refreshActive();
-    setStatus('Applied MiM preset (screen palette).');
+    setStatus(kitName === 'MiM-print'
+      ? 'Applied MiM PRINT preset (official Pantone sheet — print-accurate).'
+      : 'Applied MiM preset (screen palette).');
   }
   async function applyNeutralPreset(name) {
     const editor = getEditor();
@@ -158,7 +161,7 @@
       : `Applied "${name}" colors only — fonts couldn't be downloaded (offline?).`);
   }
   function applyBuiltinPreset(name) {
-    if (name === 'MiM') applyMiMPreset(); else applyNeutralPreset(name);
+    if (name === 'MiM' || name === 'MiM-print') applyMiMPreset(name); else applyNeutralPreset(name);
   }
 
   // Parse the live #ve-theme <style> for @font-face rules — reflects whatever
@@ -261,6 +264,7 @@
           `<div class="kit-sec"><div class="kit-stitle">🧩 ملف الثيم <span class="kit-hint">— presets, export &amp; import a .theme.json</span></div>` +
             `<div class="kit-fams" id="kit-presets">` +
               `<button class="kit-chip" data-preset="MiM">✨ MiM</button>` +
+              `<button class="kit-chip" data-preset="MiM-print">🖨 MiM Print</button>` +
               `<button class="kit-chip" data-preset="Slate">🩶 Slate</button>` +
               `<button class="kit-chip" data-preset="Warm">🟤 Warm</button>` +
             `</div>` +
@@ -404,8 +408,10 @@
       const fontMsg = audit.fontPct >= 90 ? `fonts cover ${audit.fontPct}% of text`
         : audit.fontPct > 0 ? `⚠ fonts only cover ${audit.fontPct}% of text`
         : '⚠ fonts embedded but no text uses them';
-      const colorMsg = `${audit.recolored.length}/${audit.recolored.length + audit.missed.length} colors remapped`;
-      setStatus(`Brand kit applied — ${fontMsg}, ${colorMsg}.`);
+      const lostN = audit.lost ? audit.lost.length : 0;
+      const colorMsg = `${audit.recolored.length}/${audit.recolored.length + audit.missed.length + lostN} colors remapped`;
+      const lostMsg = lostN ? ` ⚠ ${lostN} blocked by the deck's own CSS — run 🩺.` : '';
+      setStatus(`Brand kit applied — ${fontMsg}, ${colorMsg}.${lostMsg}`);
     }
   }
   function liveApply() {
@@ -413,6 +419,7 @@
     applyTimer = setTimeout(() => { getEditor().applyThemeKit(Object.assign({}, kit, { name: kit.name || 'custom' })); refreshActive(); }, 250);
   }
   function refreshActive() {
+    if (window.__updateBrandBtn) window.__updateBrandBtn(); // keep the toolbar MiM toggle in sync with modal-applied kits
     const head = modal && modal.querySelector('.modal-head');
     if (!head) return;
     const active = getEditor().activeThemeKit();

@@ -72,11 +72,11 @@
       if (!speakerWin) return;
       const d = speakerWin.document;
       d.title = 'Speaker view';
-      d.body.style.cssText = 'margin:0;font:15px/1.6 system-ui,sans-serif;background:#111;color:#eee;display:flex;flex-direction:column;height:100vh;';
+      d.body.style.cssText = 'margin:0;font:15px/1.7 \'IBM Plex Sans Arabic\',\'Segoe UI\',system-ui,sans-serif;background:#080d1e;color:#eef3ff;display:flex;flex-direction:column;height:100vh;';
       d.body.innerHTML =
-        '<div id="sp-timer" style="padding:10px 16px;font-size:22px;font-weight:700;background:#000;">00:00</div>' +
-        '<div id="sp-notes" style="padding:16px;flex:1;overflow:auto;white-space:pre-wrap;"></div>' +
-        '<div style="padding:10px 16px;background:#000;font-size:12px;color:#999;">Next</div>' +
+        '<div id="sp-timer" style="padding:10px 16px;font-size:24px;font-weight:700;background:#0a1024;color:#2ee6c8;font-variant-numeric:tabular-nums;letter-spacing:.5px;border-bottom:1px solid #1d2a51;">00:00</div>' +
+        '<div id="sp-notes" dir="auto" style="padding:16px 18px;flex:1;overflow:auto;white-space:pre-wrap;font-size:16px;line-height:1.9;"></div>' +
+        '<div style="padding:8px 16px;background:#0a1024;font-size:11px;font-weight:700;letter-spacing:.6px;color:#9db0dc;border-top:1px solid #1d2a51;">التالية · NEXT</div>' +
         '<iframe id="sp-next" style="border:0;width:100%;height:220px;background:#fff;"></iframe>';
     }
 
