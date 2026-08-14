@@ -350,12 +350,30 @@ def scene_write_runs(text_frame, runs, node_style, list_item=False, ordered=Fals
         pass
 
 
+def scene_name_shape(shape, node, suffix=''):
+    """Name every emitted shape after its scene node id.
+
+    The geometry audit re-opens the candidate deck and matches shapes back to
+    the nodes they came from by this name; without it a position regression is
+    invisible.
+    """
+    node_id = (node or {}).get('id')
+    if not node_id:
+        return shape
+    try:
+        shape.name = node_id + suffix
+    except Exception:
+        pass
+    return shape
+
+
 def scene_add_shape(slide, node, keep_text_body=False):
     x, y, w, h = scene_box(node)
     style = node.get('style') or {}
     radius = max(style.get('borderRadius') or [0])
     shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if radius > 0 else MSO_SHAPE.RECTANGLE
     shape = slide.shapes.add_shape(shape_type, px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
+    scene_name_shape(shape, node)
     gradient = style.get('gradient')
     if gradient:
         scene_set_gradient(shape, gradient)
@@ -518,6 +536,7 @@ def scene_add_measured_text_lines(slide, node, prepared_lines=None):
     for line in lines:
         x, y, w, h = line['bounds']
         shape = slide.shapes.add_textbox(px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
+        scene_name_shape(shape, node, '#line%d' % len(shapes))
         scene_write_runs(shape.text_frame, line['runs'], line['style'], split_paragraphs=False)
         # This is the key difference from whole-element fallback: PowerPoint
         # must never decide where to wrap a line Chromium already measured.
@@ -539,6 +558,7 @@ def scene_add_text(slide, node):
         return scene_add_measured_text_lines(slide, node, measured_lines)
     x, y, w, h = scene_box(node)
     shape = slide.shapes.add_textbox(px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
+    scene_name_shape(shape, node)
     scene_write_runs(shape.text_frame, node.get('runs') or [], node.get('style') or {})
     return shape
 
@@ -588,7 +608,10 @@ def scene_add_bake(slide, node, scene, scratch):
         }]}, ensure_ascii=False))
     path = scene_local_image(source, '', scratch)
     x, y, w, h = scene_box(node)
-    return slide.shapes.add_picture(path, px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
+    picture = slide.shapes.add_picture(path, px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
+    scene_name_shape(picture, node)
+    scene_name_shape(picture, node)
+    return picture
 
 
 def scene_add_image(slide, node, base_dir, scratch):
@@ -626,6 +649,7 @@ def scene_add_line(slide, node):
     edge = (style.get('border') or {}).get('top') or {}
     thickness = max(float(edge.get('width') or 0), h, 1)
     line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, px_to_emu(x), px_to_emu(y + (h - thickness) / 2), px_to_emu(w), px_to_emu(thickness))
+    scene_name_shape(line, node, '#rule')
     scene_set_fill(line, edge.get('color') or style.get('color') or '#000000')
     line.line.fill.background()
     scene_remove_text_body(line)
@@ -635,6 +659,7 @@ def scene_add_line(slide, node):
 def scene_add_list(slide, node):
     x, y, w, h = scene_box(node)
     shape = slide.shapes.add_textbox(px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
+    scene_name_shape(shape, node)
     list_data = node.get('list') or {}
     items = list_data.get('items') or []
     style = node.get('style') or {}
@@ -686,6 +711,7 @@ def scene_add_table(slide, node):
     num_cols = max([sum(int(cell.get('colSpan') or 1) for cell in row.get('cells') or []) for row in rows] or [1])
     x, y, w, h = scene_box(node)
     shape = slide.shapes.add_table(num_rows, num_cols, px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
+    scene_name_shape(shape, node)
     table = shape.table
     widths = [0.0] * num_cols
     for row in rows:

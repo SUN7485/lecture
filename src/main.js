@@ -519,6 +519,34 @@ function preflightNativePptxRuntime(timeoutMs = 15000) {
 // must still produce an editable deck — with verification deferred, not refused.
 const POWERPOINT_ONLY_ERRORS = new Set(['POWERPOINT_MISSING', 'WINDOWS_POWERPOINT_REQUIRED']);
 
+// Geometry read-back: python-pptx re-opens the candidate and checks every
+// emitted shape against the bounds the browser measured. No PowerPoint needed.
+function auditPptxGeometry(payload, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.join(__dirname, '..', 'tools', 'pptx', 'audit_geometry.py');
+    if (!fs.existsSync(scriptPath)) {
+      reject(new Error('Geometry audit script is missing: ' + scriptPath));
+      return;
+    }
+    const python = process.platform === 'win32' ? 'py' : 'python3';
+    const child = spawn(python, ['-X', 'utf8', scriptPath], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '', finished = false;
+    const settle = (fn) => { if (finished) return; finished = true; clearTimeout(timer); fn(); };
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch (_) {}
+      settle(() => reject(new Error(`Geometry audit timed out after ${timeoutMs}ms.`)));
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', (error) => settle(() => reject(new Error('Could not start Python for the geometry audit: ' + error.message))));
+    child.on('close', (code) => settle(() => {
+      if (code !== 0) return reject(new Error(stderr || `Geometry audit exited ${code}.`));
+      try { resolve(JSON.parse(stdout)); } catch (error) { reject(new Error('Geometry audit returned unparseable output: ' + stdout.slice(0, 300))); }
+    }));
+    child.stdin.end(JSON.stringify(payload), 'utf8');
+  });
+}
+
 async function preflightVerifiedPptx(options = {}) {
   const evidenceMode = options.evidenceMode || 'native';
   const needsPowerPoint = evidenceMode !== 'native';
@@ -650,6 +678,7 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
     evidenceMode,
     workDir,
     preflight: (input) => preflightVerifiedPptx({ ...input, evidenceMode }),
+    auditGeometry: auditPptxGeometry,
     renderPptx: ({ sceneGraph: graph, outputPath, baseDir: sceneBaseDir }) =>
       renderNativePptx({ sceneGraph: graph, baseDir: sceneBaseDir, suggestedName: outputPath }),
     ocr: runBundledOcr

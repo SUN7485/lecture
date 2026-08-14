@@ -40,7 +40,9 @@ const DEFAULT_THRESHOLDS = Object.freeze({
   maxDifferenceRegionWidth: 8,
   maxDifferenceRegionHeight: 8,
   maxDifferenceRegionArea: 64,
-  ocrPositionTolerancePx: 2
+  ocrPositionTolerancePx: 2,
+  // Position truth: half a rendered pixel at the 2x fidelity target.
+  geometryTolerancePx: 0.75
 });
 
 const GENERIC_FONT_FAMILIES = new Set([
@@ -1718,6 +1720,7 @@ async function verifyAndExport(options = {}) {
   const renderPowerPoint = adapters.renderPowerPoint || options.renderPowerPoint || renderPptxWithPowerPoint;
   const compare = adapters.compare || options.compare || compareSlideVisual;
   const audit = adapters.audit || options.audit || auditPptxStructure;
+  const auditGeometry = adapters.auditGeometry || options.auditGeometry || null;
   const ocr = adapters.ocr || options.ocr;
   const cleanup = adapters.cleanup || options.cleanup || cleanupTransientArtifacts;
   const thresholds = mergeThresholds(options.thresholds);
@@ -1945,6 +1948,30 @@ async function verifyAndExport(options = {}) {
         code: 'FIDELITY_EVIDENCE_DEFERRED',
         message: 'OCR and pixel-diff diagnostics were deferred for this PowerPoint preview.'
       });
+    }
+
+    // Position truth, independent of any renderer: re-open the candidate and
+    // assert every emitted shape sits where the browser measured it. Needs no
+    // PowerPoint, so it runs in every evidence mode — and a mismatch is always
+    // a real failure, because it means the renderer wrote wrong coordinates.
+    report.stage = report.failures.length ? report.failures[0].stage : 'geometry';
+    if (auditGeometry) {
+      try {
+        report.geometry = await auditGeometry({
+          pptxPath: candidatePptxPath,
+          sceneGraph: options.sceneGraph,
+          tolerancePx: thresholds.geometryTolerancePx
+        });
+        for (const mismatch of report.geometry?.mismatches || []) {
+          recordFailure(report, 'geometry', {
+            code: 'SHAPE_GEOMETRY_MISMATCH',
+            message: `Shape ${mismatch.id} is ${mismatch.worstPx}px from its measured bounds.`,
+            details: mismatch
+          });
+        }
+      } catch (error) {
+        recordFailure(report, 'geometry', asErrorInfo(error, 'GEOMETRY_AUDIT_FAILED'));
+      }
     }
 
     report.stage = report.failures.length ? report.failures[0].stage : 'structural';
