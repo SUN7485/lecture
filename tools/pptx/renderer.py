@@ -6,6 +6,7 @@ import tempfile
 import base64
 import shutil
 import subprocess
+from lxml import etree
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -1026,6 +1027,9 @@ def render_slide(slide, slide_data, enrich, base_dir, fonts, theme_colors=None):
 
 
 SCENE_SCHEMA_VERSION = 2
+# DrawingML main namespace, for the raw lxml edits python-pptx does not wrap
+# (gradient fills). python-pptx already depends on lxml.
+A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
 
 
 def scene_rgb(value, fallback='#000000'):
@@ -1042,6 +1046,45 @@ def scene_rgb(value, fallback='#000000'):
     if m:
         return RGBColor(int(float(m.group(1))), int(float(m.group(2))), int(float(m.group(3))))
     return hex_to_rgb(fallback)
+
+
+def scene_hex6(value, fallback='#000000'):
+    """RRGGBB string for the gradient stop colors the browser resolved."""
+    color = scene_rgb(value, fallback)
+    if color is None:
+        color = scene_rgb(fallback, fallback)
+    return str(color)
+
+
+def scene_set_gradient(shape, gradient):
+    """Replace a shape's solid fill with a native DrawingML gradient.
+
+    The solid fill is created first so DrawingML's strict child order puts the
+    fill element in a schema-valid position; the gradient then takes its place.
+    """
+    stops = gradient.get('stops') or []
+    if len(stops) < 2:
+        return
+    shape.fill.solid()
+    sp_pr = shape._element.spPr
+    solid = sp_pr.find('{%s}solidFill' % A_NS)
+    if solid is None:
+        return
+    grad = sp_pr.makeelement('{%s}gradFill' % A_NS, {})
+    gs_lst = etree.SubElement(grad, '{%s}gsLst' % A_NS)
+    for stop in stops:
+        gs = etree.SubElement(gs_lst, '{%s}gs' % A_NS)
+        gs.set('pos', str(int(round(float(stop.get('pos') or 0) * 100000))))
+        clr = etree.SubElement(gs, '{%s}srgbClr' % A_NS)
+        clr.set('val', scene_hex6(stop.get('color')))
+    lin = etree.SubElement(grad, '{%s}lin' % A_NS)
+    # CSS measures 0deg pointing up and turns clockwise; DrawingML measures
+    # 0 pointing right and turns clockwise, in 60000ths of a degree.
+    dml_deg = (float(gradient.get('cssAngle', 180)) - 90.0) % 360.0
+    lin.set('ang', str(int(round(dml_deg * 60000))))
+    lin.set('scaled', '1')
+    solid.addnext(grad)
+    sp_pr.remove(solid)
 
 
 def is_scene_transparent(value):
@@ -1280,7 +1323,11 @@ def scene_add_shape(slide, node, keep_text_body=False):
     radius = max(style.get('borderRadius') or [0])
     shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if radius > 0 else MSO_SHAPE.RECTANGLE
     shape = slide.shapes.add_shape(shape_type, px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
-    scene_set_fill(shape, style.get('fill'))
+    gradient = style.get('gradient')
+    if gradient:
+        scene_set_gradient(shape, gradient)
+    else:
+        scene_set_fill(shape, style.get('fill'))
     # PowerPoint's shape line is necessarily uniform. For unequal CSS edges,
     # leave the shape line off and emit native per-edge rectangles below;
     # otherwise a dominant right/left border would leak onto top/bottom.
@@ -1492,6 +1539,25 @@ def scene_local_image(source, base_dir, scratch):
     return source
 
 
+def scene_add_bake(slide, node, scene, scratch):
+    """Place a baked element as a picture at its exact measured bounds.
+
+    The image is captured by the same Chromium that renders the fidelity
+    reference. A missing capture is a hard error: shipping a placeholder would
+    make an unrenderable element indistinguishable from a real picture.
+    """
+    source = (scene.get('bakes') or {}).get(node.get('id'))
+    if not source:
+        raise ValueError(json.dumps({'stage': 'scene', 'errors': [{
+            'nodeId': node.get('id'),
+            'property': 'bake',
+            'reason': 'no captured image was supplied for this baked element'
+        }]}, ensure_ascii=False))
+    path = scene_local_image(source, '', scratch)
+    x, y, w, h = scene_box(node)
+    return slide.shapes.add_picture(path, px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
+
+
 def scene_add_image(slide, node, base_dir, scratch):
     image = node.get('image') or {}
     path = scene_local_image(image.get('src') or '', base_dir, scratch)
@@ -1624,12 +1690,10 @@ def validate_scene_graph(scene):
         return [{'property': 'format', 'reason': 'a versioned lve.scene-graph is required for editable export'}]
     if scene.get('schemaVersion') != SCENE_SCHEMA_VERSION:
         return [{'property': 'schemaVersion', 'reason': 'unsupported scene graph version'}]
-    errors = list(scene.get('errors') or [])
-    for slide in scene.get('slides') or []:
-        for node in slide.get('nodes') or []:
-            for issue in node.get('unsupported') or []:
-                errors.append({'slide': slide.get('index'), 'nodeId': node.get('id'), **issue})
-    return errors
+    # Scene v2 degrades every unmappable element to a bake picture, so
+    # `node.unsupported` is advisory. Only malformed geometry — something the
+    # renderer genuinely cannot place — may stop an export.
+    return list(scene.get('errors') or [])
 
 
 def render_scene_graph(scene, suggested_name, base_dir=''):
@@ -1681,6 +1745,8 @@ def render_scene_graph(scene, suggested_name, base_dir=''):
                         scene_write_runs(shape.text_frame, node.get('runs') or [], node.get('style') or {})
                 elif kind == 'text':
                     scene_add_text(slide, node)
+                elif kind == 'bake':
+                    scene_add_bake(slide, node, scene, scratch)
                 elif kind == 'image':
                     scene_add_image(slide, node, base_dir, scratch)
                 elif kind == 'table':
