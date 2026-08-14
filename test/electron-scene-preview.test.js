@@ -51,7 +51,7 @@ test('mandatory 26-slide fixture extracts a complete browser-measured scene grap
     });
 
     assert.equal(scene.format, 'lve.scene-graph');
-    assert.equal(scene.schemaVersion, 1);
+    assert.equal(scene.schemaVersion, 2);
     assert.deepEqual(scene.pageSize, { widthPx: 950, heightPx: 650 });
     assert.equal(scene.slideCount, 26);
     assert.deepEqual(scene.errors, []);
@@ -69,6 +69,50 @@ test('mandatory 26-slide fixture extracts a complete browser-measured scene grap
     assert.ok(scene.nativeKinds.table >= 2, 'expected both native tables');
     assert.ok(scene.nativeKinds.image >= 1, 'expected the fixture image');
     assert.ok(scene.nativeKinds.list >= 1, 'expected the fixture list');
+  } finally {
+    await app.close();
+  }
+});
+
+// Scene v2's central promise: no feature may refuse a deck. An element with no
+// native PowerPoint equivalent becomes a picture of itself at its exact bounds.
+test('scene v2 bakes an inline SVG instead of refusing the deck', { timeout: 90000 }, async () => {
+  const { app, page } = await launchFixture();
+  try {
+    const scene = await page.evaluate(() => {
+      const doc = window.__editor.doc;
+      const slide = doc.querySelector('.slide');
+      // tagName for a foreign-namespace element is the authored lowercase
+      // 'svg'; matching it uppercased is what makes this bake at all.
+      slide.insertAdjacentHTML('beforeend',
+        '<svg style="position:absolute;left:40px;top:40px;width:120px;height:80px" viewBox="0 0 120 80">' +
+        '<rect x="0" y="0" width="120" height="80" fill="#413258"></rect></svg>');
+      const graph = window.__editor.serializeForPptx();
+      const nodes = graph.slides.flatMap((item) => item.nodes);
+      const baked = nodes.filter((node) => node.renderAs === 'bake');
+      const requests = graph.slides.flatMap((item) => item.bakeRequests || []);
+      return {
+        errors: graph.errors,
+        bakeCount: graph.bakeCount,
+        bakedTags: baked.map((node) => node.tag),
+        bakeReasons: baked.flatMap((node) => (node.bake?.reasons || []).map((reason) => reason.property)),
+        bakeIds: baked.map((node) => node.id),
+        requestIds: requests.map((request) => request.bakeId),
+        requestBounds: requests.map((request) => request.bounds),
+        bakedHasNoText: baked.every((node) => !node.text && !node.runs.length && !node.textLines),
+        svgChildrenLeaked: nodes.filter((node) => node.tag === 'rect').length
+      };
+    });
+
+    assert.deepEqual(scene.errors, [], 'an unmappable element must never become a scene error');
+    assert.equal(scene.bakeCount, 1);
+    assert.deepEqual(scene.bakedTags, ['svg']);
+    assert.deepEqual(scene.bakeReasons, ['tagName']);
+    assert.deepEqual(scene.requestIds, scene.bakeIds, 'every baked node must emit a capture request');
+    assert.equal(scene.bakedHasNoText, true, 'a baked node carries no text — the picture already has it');
+    assert.equal(scene.svgChildrenLeaked, 0, 'the walk must stop at a baked node');
+    const [bounds] = scene.requestBounds;
+    assert.ok(bounds.w > 0 && bounds.h > 0, 'a capture request needs measurable bounds');
   } finally {
     await app.close();
   }

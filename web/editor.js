@@ -2911,7 +2911,11 @@
         const toBake = (property, value, reason) => bake.push({ property, value, reason });
         const note = (property, value, reason) => notes.push({ property, value, reason });
         let gradient = null;
-        if (forbiddenTags.has(el.tagName)) toBake('tagName', el.tagName, `${el.tagName} has no editable native PowerPoint representation`);
+        // Foreign-namespace elements (svg, math) report their tagName in the
+        // authored case, not upper-cased like HTML — matching the raw value
+        // silently missed every inline SVG diagram and dropped it from the deck.
+        const tagName = String(el.tagName || '').toUpperCase();
+        if (forbiddenTags.has(tagName)) toBake('tagName', tagName, `${tagName} has no editable native PowerPoint representation`);
         if (style.backgroundImage && style.backgroundImage !== 'none') {
           gradient = parseLinearGradient(style.backgroundImage);
           if (!gradient) toBake('backgroundImage', style.backgroundImage, 'only a single linear-gradient maps to a native gradient fill');

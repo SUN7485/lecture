@@ -1810,10 +1810,16 @@ async function verifyAndExport(options = {}) {
       for (const slide of sourceSlides) {
         const failedFont = (slide.fontChecks || []).find((check) => check.loaded === false);
         if (failedFont) {
-          recordFailure(report, 'font-render', {
-            code: 'SOURCE_FONT_NOT_RENDERED',
-            message: `Chromium could not render required font ${failedFont.font}.`
-          }, { slideIndex: slide.index });
+          // A face the browser cannot resolve is a fidelity note, not a veto:
+          // the scene's resolved family (e.g. "Lyon Arabic Text") only exists
+          // while a theme kit registers it, so a deck without the kit renders
+          // by fallback and must still export. Strict mode still refuses.
+          (fidelityPolicy === FIDELITY_POLICIES.EDITABLE_BEST_EFFORT ? recordWarning : recordFailure)(
+            report, 'font-render', {
+              code: 'SOURCE_FONT_NOT_RENDERED',
+              message: `Chromium could not render required font ${failedFont.font}; the reference render used a fallback face.`,
+              details: failedFont
+            }, { slideIndex: slide.index });
         }
       }
       if (report.failures.length) return await finalise();

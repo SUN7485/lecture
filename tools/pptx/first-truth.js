@@ -9,15 +9,9 @@
 // mission 034 recalibrates them from this data. A refusal or a missing report
 // is the only real failure.
 //
-// TEMPORARY: the two in-page mutations below exist only because scene v1
-// refuses any deck containing an <svg> (editor.js `unsupported()`) or any
-// non-none backgroundImage — and every real lecture has both (SVG figures +
-// gradient covers). Mission 033 fixes this properly (per-node bake + native
-// a:gradFill); both hacks die with it.
-//
-// They are safe for a baseline measurement because BOTH sides of the compare
-// read the same mutated DOM: the scene graph comes from `serializeForPptx()`
-// and the reference render from `getCleanHtml()`, each taken after mutation.
+// Mission 033 removed the throwaway in-page SVG/gradient mutations this driver
+// carried in mission 032: scene v2 bakes unmappable elements per node and maps
+// linear-gradients to native fills, so every corpus deck now exports unmodified.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -25,106 +19,18 @@ const { ROOT, launchLve } = require('../../test/support/launch-electron');
 
 const CORPUS = [
   { name: 'Chp5-Lec32-7-final', deck: 'C:\\Users\\mosun\\Downloads\\New folder\\Chp5-Lec32-7-final.html' },
-  { name: 'Chp5-Lec33-1', deck: 'C:\\Users\\mosun\\Downloads\\New folder\\Chp5-Lec33-1.html' }
+  { name: 'Chp5-Lec33-1', deck: 'C:\\Users\\mosun\\Downloads\\New folder\\Chp5-Lec33-1.html' },
+  { name: 'Chp1-Lec1-2', deck: path.join(ROOT, 'Chp1-Lec1-2.html') },
+  { name: 'source-bnb', deck: path.join(ROOT, 'test', 'fixtures', 'source-bnb.html') }
 ];
 const FIDELITY_ROOT = path.join(ROOT, '.fidelity');
 const EXPORT_TIMEOUT_MS = 10 * 60 * 1000;
-const SVG_RASTERIZE_TIMEOUT_MS = 10 * 1000;
 
 function runDirs() {
   if (!fs.existsSync(FIDELITY_ROOT)) return [];
   return fs.readdirSync(FIDELITY_ROOT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name);
-}
-
-/**
- * Replace every inline <svg> inside a slide with a PNG of itself, at the same
- * box. Runs in the page so it uses the same Chromium that measured the scene.
- */
-async function rasterizeInlineSvgs(page, timeoutMs) {
-  return page.evaluate(async (budgetMs) => {
-    const doc = window.__editor.doc;
-    const slides = Array.from(doc.querySelectorAll('.slide'));
-    const result = { converted: 0, dropped: 0, notes: [] };
-
-    const toPng = (svg, rect) => new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('timeout')), budgetMs);
-      try {
-        const clone = svg.cloneNode(true);
-        if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-        if (!clone.getAttribute('width')) clone.setAttribute('width', String(rect.width));
-        if (!clone.getAttribute('height')) clone.setAttribute('height', String(rect.height));
-        const markup = new XMLSerializer().serializeToString(clone);
-        const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(markup);
-        const image = new Image();
-        image.onload = () => {
-          try {
-            const canvas = doc.createElement('canvas');
-            canvas.width = Math.max(1, Math.round(rect.width * 2));
-            canvas.height = Math.max(1, Math.round(rect.height * 2));
-            const ctx = canvas.getContext('2d');
-            ctx.scale(2, 2);
-            ctx.drawImage(image, 0, 0, rect.width, rect.height);
-            clearTimeout(timer);
-            resolve(canvas.toDataURL('image/png'));
-          } catch (error) { clearTimeout(timer); reject(error); }
-        };
-        image.onerror = () => { clearTimeout(timer); reject(new Error('image decode failed')); };
-        image.src = url;
-      } catch (error) { clearTimeout(timer); reject(error); }
-    });
-
-    for (let index = 0; index < slides.length; index += 1) {
-      for (const svg of Array.from(slides[index].querySelectorAll('svg'))) {
-        const rect = svg.getBoundingClientRect();
-        const box = { width: rect.width || 100, height: rect.height || 100 };
-        try {
-          const dataUrl = await toPng(svg, box);
-          const img = doc.createElement('img');
-          img.src = dataUrl;
-          img.setAttribute('width', String(Math.round(box.width)));
-          img.setAttribute('height', String(Math.round(box.height)));
-          img.style.width = box.width + 'px';
-          img.style.height = box.height + 'px';
-          svg.replaceWith(img);
-          result.converted += 1;
-        } catch (error) {
-          svg.remove();
-          result.dropped += 1;
-          result.notes.push(`svg dropped: ${index}`);
-          console.warn(`svg dropped: ${index}`);
-        }
-      }
-    }
-    return result;
-  }, timeoutMs);
-}
-
-/**
- * Flatten every CSS background-image (gradient covers, mostly) to the average
- * of its colour stops, so scene v1 stops rejecting the node. Throwaway.
- */
-async function flattenBackgroundImages(page) {
-  return page.evaluate(() => {
-    const doc = window.__editor.doc;
-    const result = { flattened: 0, gradients: 0 };
-    for (const el of Array.from(doc.querySelectorAll('.slide, .slide *'))) {
-      const backgroundImage = getComputedStyle(el).backgroundImage;
-      if (!backgroundImage || backgroundImage === 'none') continue;
-      const stops = (backgroundImage.match(/rgba?\([^)]*\)/g) || [])
-        .map((token) => token.match(/[\d.]+/g).map(Number))
-        .filter((parts) => parts.length < 4 || parts[3] > 0);
-      if (stops.length) {
-        const mean = (channel) => Math.round(stops.reduce((sum, parts) => sum + parts[channel], 0) / stops.length);
-        el.style.backgroundColor = `rgb(${mean(0)}, ${mean(1)}, ${mean(2)})`;
-        result.gradients += 1;
-      }
-      el.style.backgroundImage = 'none';
-      result.flattened += 1;
-    }
-    return result;
-  });
 }
 
 async function exportDeck({ name, deck }) {
@@ -147,10 +53,22 @@ async function exportDeck({ name, deck }) {
     const slideCount = await page.evaluate(() => window.__editor.doc.querySelectorAll('.slide').length);
     console.log(`  slides: ${slideCount}`);
 
-    const svg = await rasterizeInlineSvgs(page, SVG_RASTERIZE_TIMEOUT_MS);
-    console.log(`  svg workaround: ${svg.converted} rasterized, ${svg.dropped} dropped`);
-    const backgrounds = await flattenBackgroundImages(page);
-    console.log(`  background workaround: ${backgrounds.flattened} flattened (${backgrounds.gradients} had colour stops)`);
+    // Scene v2 shape check, before the export: nothing may refuse any more.
+    const scene = await page.evaluate(() => {
+      const graph = window.__editor.serializeForPptx();
+      const nodes = graph.slides.flatMap((slide) => slide.nodes);
+      return {
+        schemaVersion: graph.schemaVersion,
+        errors: graph.errors.length,
+        bakeCount: graph.bakeCount,
+        bakeNodes: nodes.filter((node) => node.renderAs === 'bake').length,
+        gradientNodes: nodes.filter((node) => node.style && node.style.gradient).length,
+        noteNodes: nodes.filter((node) => (node.notes || []).length).length
+      };
+    });
+    console.log(`  scene v${scene.schemaVersion}: errors=${scene.errors} bakes=${scene.bakeCount} ` +
+      `gradients=${scene.gradientNodes} noted=${scene.noteNodes}`);
+
 
     // The renderer's own completion signal: exportPptxDirect() writes a
     // terminal message into #status either way (see src/renderer.js).
@@ -168,7 +86,7 @@ async function exportDeck({ name, deck }) {
 
     const created = runDirs().filter((dir) => !before.has(dir)).sort();
     const workDir = created.length ? path.join(FIDELITY_ROOT, created[created.length - 1]) : null;
-    return { name, deck, slideCount, svg, backgrounds, status, workDir };
+    return { name, deck, slideCount, scene, status, workDir };
   } finally {
     await app.close().catch(() => {});
   }
@@ -225,6 +143,7 @@ function summarise(workDir) {
     console.log(`\n## ${result.name}`);
     if (result.error) { console.log(`  run failed: ${result.error}`); continue; }
     console.log(`  run dir: ${result.workDir ? path.basename(result.workDir) : '(none created)'}`);
+    if (result.scene) console.log(`  scene: errors=${result.scene.errors} bakes=${result.scene.bakeCount} gradients=${result.scene.gradientNodes}`);
     if (!result.workDir) continue;
     const summary = summarise(result.workDir);
     if (!summary.ok) { console.log(`  no report at ${summary.reportPath}`); continue; }
