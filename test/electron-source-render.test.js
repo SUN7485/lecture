@@ -5,23 +5,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { _electron } = require('playwright-core');
+const { ROOT, launchLve } = require('./support/launch-electron');
 
-const ROOT = path.resolve(__dirname, '..');
 const FIXTURE = path.join(ROOT, 'Chp1-Lec1-2.html');
 
 test('source renderer preserves the cover flex layout and renders all 26 fixture slides at 1900x1300', { timeout: 120000 }, async () => {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lve-source-render-test-'));
-  const app = await _electron.launch({
-    executablePath: require('electron'),
-    args: ['.'],
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      LVE_OPEN: FIXTURE,
-      LVE_TEST_FIDELITY_HOOK: '1'
-    }
-  });
+  const { app } = await launchLve({ open: FIXTURE, extraEnv: { LVE_TEST_FIDELITY_HOOK: '1' } });
   try {
     const result = await app.evaluate(async (electron, input) => {
       if (typeof electron.app.__lveTestRenderHtmlSlides !== 'function') {

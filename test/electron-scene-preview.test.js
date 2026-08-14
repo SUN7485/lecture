@@ -7,19 +7,12 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { test } = require('node:test');
-const { _electron } = require('playwright-core');
+const { ROOT, launchLve } = require('./support/launch-electron');
 
-const ROOT = path.resolve(__dirname, '..');
 const FIXTURE = path.join(ROOT, 'Chp1-Lec1-2.html');
 
 async function launchFixture() {
-  const app = await _electron.launch({
-    executablePath: require('electron'),
-    args: ['.'],
-    cwd: ROOT,
-    env: { ...process.env, LVE_OPEN: FIXTURE }
-  });
-  const page = await app.firstWindow();
+  const { app, page } = await launchLve({ open: FIXTURE });
   await page.waitForFunction(() =>
     window.__editor && window.__editor.doc && window.__editor.doc.querySelectorAll('.slide').length === 26,
   null, { timeout: 60000 });
