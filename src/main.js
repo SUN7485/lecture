@@ -532,6 +532,63 @@ async function preflightVerifiedPptx(options = {}) {
   return { ...desktop, ocr, nativePptx, errors, ok: errors.length === 0 };
 }
 
+// ---- Fidelity evidence retention ----
+// Verification artifacts used to land in %TEMP% and were effectively lost, so
+// no export was ever inspectable after the fact.  They now live in a
+// gitignored `.fidelity/` beside the repo, newest 10 runs kept.
+const FIDELITY_ROOT = path.join(__dirname, '..', '.fidelity');
+const FIDELITY_RUNS_KEPT = 10;
+
+function ensureFidelityRoot() {
+  fs.mkdirSync(FIDELITY_ROOT, { recursive: true });
+  try {
+    const runs = fs.readdirSync(FIDELITY_ROOT, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort(); // ISO timestamps sort chronologically
+    for (const stale of runs.slice(0, Math.max(0, runs.length - (FIDELITY_RUNS_KEPT - 1)))) {
+      fs.rmSync(path.join(FIDELITY_ROOT, stale), { recursive: true, force: true });
+    }
+  } catch (error) {
+    console.warn('Could not prune .fidelity runs:', error.message);
+  }
+  return path.join(FIDELITY_ROOT, new Date().toISOString().replace(/[:.]/g, '-'));
+}
+
+// One scoreline per run, so a week of exports reads as a table instead of a
+// directory listing.  Numbers only — never the artifacts themselves.
+const FIDELITY_INDEX_HEADER = [
+  '# Fidelity runs — newest at the bottom',
+  '',
+  '| timestamp | deck | mode | slides | min ssim | max mismatch% | failures | warnings |',
+  '| --- | --- | --- | --- | --- | --- | --- | --- |',
+  ''
+].join('\n');
+
+function appendFidelityIndexRow({ workDir, deckName, evidenceMode, report }) {
+  try {
+    const indexPath = path.join(FIDELITY_ROOT, 'index.md');
+    if (!fs.existsSync(indexPath)) fs.writeFileSync(indexPath, FIDELITY_INDEX_HEADER, 'utf8');
+    const slides = report?.slides || [];
+    const ssims = slides.map((slide) => slide.visual?.ssim).filter((value) => Number.isFinite(value));
+    const mismatches = slides.map((slide) => slide.visual?.mismatchPercent).filter((value) => Number.isFinite(value));
+    const cell = (values, pick, digits) => (values.length ? pick(...values).toFixed(digits) : '—');
+    const row = [
+      path.basename(workDir),
+      deckName || '—',
+      evidenceMode,
+      slides.length || '—',
+      cell(ssims, Math.min, 6),
+      cell(mismatches, Math.max, 3),
+      report?.failures?.length ?? '—',
+      report?.warnings?.length ?? '—'
+    ];
+    fs.appendFileSync(indexPath, `| ${row.join(' | ')} |\n`, 'utf8');
+  } catch (error) {
+    console.warn('Could not append to .fidelity/index.md:', error.message);
+  }
+}
+
 async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinationPath, evidenceMode = 'native' }) {
   if (!sceneGraph || sceneGraph.format !== 'lve.scene-graph' || !Array.isArray(sceneGraph.slides)) {
     return {
@@ -540,7 +597,13 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
       error: 'A versioned full-slide scene graph is required for editable PPTX export.'
     };
   }
-  return verifyAndExport({
+  // Diagnostic override only.  The product default stays 'native'; the
+  // calibration/baseline runs set LVE_EVIDENCE_MODE=full to turn the
+  // source-render, PowerPoint-render, OCR and pixel-diff stages back on.
+  const requestedMode = process.env.LVE_EVIDENCE_MODE;
+  if (['full', 'preview', 'native'].includes(requestedMode)) evidenceMode = requestedMode;
+  const workDir = ensureFidelityRoot();
+  const result = await verifyAndExport({
     sceneGraph,
     html,
     themeCss: themeCss || sceneGraph.themeCss || '',
@@ -554,11 +617,19 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
     // differences do not veto an otherwise valid editable deck.
     fidelityPolicy: 'editable-best-effort',
     evidenceMode,
+    workDir,
     preflight: preflightVerifiedPptx,
     renderPptx: ({ sceneGraph: graph, outputPath, baseDir: sceneBaseDir }) =>
       renderNativePptx({ sceneGraph: graph, baseDir: sceneBaseDir, suggestedName: outputPath }),
     ocr: runBundledOcr
   });
+  appendFidelityIndexRow({
+    workDir,
+    deckName: destinationPath ? path.basename(destinationPath) : '(preview)',
+    evidenceMode,
+    report: result.report
+  });
+  return result;
 }
 
 function previewImagesFromReport(report) {
