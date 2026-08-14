@@ -18,6 +18,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { spawn } = require('child_process');
 
@@ -594,7 +595,7 @@ function sourceRenderScript(selector, index, target, requiredFonts, captureTextL
   })()`;
 }
 
-async function renderHtmlSlides(options = {}) {
+function sourceRenderGeometry(options) {
   const html = options.html;
   if (typeof html !== 'string' || !html.trim()) {
     throw fidelityError('SOURCE_HTML_REQUIRED', 'Source HTML is required for the fidelity render.');
@@ -610,27 +611,31 @@ async function renderHtmlSlides(options = {}) {
       { captureTarget, target }
     );
   }
-  const selector = options.slideSelector || '.slide';
-  const expectedSlideCount = Number.isInteger(options.expectedSlideCount) ? options.expectedSlideCount : undefined;
-  const requiredFonts = options.requiredFonts || [];
-  const outputDir = await ensureDirectory(options.outputDir);
-  const sourcePath = safeTransientPath(outputDir, '__source.html');
-  await fsp.writeFile(sourcePath, injectBaseHref(html, options.baseDir), 'utf8');
+  return { target, captureTarget };
+}
 
-  const { BrowserWindow, nativeImage } = getElectron();
-  let window = null;
+/**
+ * Open the hidden Chromium window every source-side capture shares: the
+ * per-slide reference renders and the element crops that back scene bakes.
+ * The caller owns the returned window and must destroy it.
+ */
+async function openSourceRenderWindow(options, target, captureTarget, outputDir) {
+  const sourcePath = safeTransientPath(outputDir, '__source.html');
+  await fsp.writeFile(sourcePath, injectBaseHref(options.html, options.baseDir), 'utf8');
+
+  const { BrowserWindow } = getElectron();
+  const window = new BrowserWindow({
+    // Keep the native host window at the slide's natural CSS canvas. The
+    // virtual DevTools viewport below supplies the fidelity bitmap canvas.
+    width: captureTarget.width,
+    height: captureTarget.height,
+    show: false,
+    useContentSize: true,
+    // The native host is deliberately small; the virtual viewport below is
+    // independent of the active Windows work area.
+    webPreferences: { offscreen: true, backgroundThrottling: false }
+  });
   try {
-    window = new BrowserWindow({
-      // Keep the native host window at the slide's natural CSS canvas. The
-      // virtual DevTools viewport below supplies the fidelity bitmap canvas.
-      width: captureTarget.width,
-      height: captureTarget.height,
-      show: false,
-      useContentSize: true,
-      // The native host is deliberately small; the virtual viewport below is
-      // independent of the active Windows work area.
-      webPreferences: { offscreen: true, backgroundThrottling: false }
-    });
     await withTimeout(window.loadFile(sourcePath), options.loadTimeoutMs || 30000, 'SOURCE_RENDER_TIMEOUT', 'Chromium timed out loading the source HTML.');
     try {
       window.webContents.debugger.attach('1.3');
@@ -660,6 +665,27 @@ async function renderHtmlSlides(options = {}) {
       await new Promise((resolve) => setTimeout(resolve, 150));
       return true;
     })()`, true), options.readyTimeoutMs || 30000, 'SOURCE_RENDER_TIMEOUT', 'Chromium timed out waiting for fonts or images.');
+    return { window, sourcePath };
+  } catch (error) {
+    if (window.webContents?.debugger?.isAttached()) {
+      try { window.webContents.debugger.detach(); } catch (_) {}
+    }
+    if (!window.isDestroyed()) window.destroy();
+    throw error;
+  }
+}
+
+async function renderHtmlSlides(options = {}) {
+  const { target, captureTarget } = sourceRenderGeometry(options);
+  const selector = options.slideSelector || '.slide';
+  const expectedSlideCount = Number.isInteger(options.expectedSlideCount) ? options.expectedSlideCount : undefined;
+  const requiredFonts = options.requiredFonts || [];
+  const outputDir = await ensureDirectory(options.outputDir);
+  const { nativeImage } = getElectron();
+  let window = null;
+  let sourcePath = null;
+  try {
+    ({ window, sourcePath } = await openSourceRenderWindow(options, target, captureTarget, outputDir));
 
     const count = await window.webContents.executeJavaScript(`document.querySelectorAll(${JSON.stringify(selector)}).length`, true);
     if (!count) throw fidelityError('SOURCE_SLIDES_MISSING', `No slides matched ${selector}.`);
@@ -712,6 +738,105 @@ async function renderHtmlSlides(options = {}) {
       });
     }
     return { ok: true, target, slides, sourceHtmlPath: sourcePath };
+  } finally {
+    if (window?.webContents?.debugger?.isAttached()) {
+      try { window.webContents.debugger.detach(); } catch (_) {}
+    }
+    if (window && !window.isDestroyed()) window.destroy();
+  }
+}
+
+// A bakeId is `s<slideIndex>:<childPath>`, where the path is the chain of
+// child indexes from the slide element down to the node (see serializeForPptx).
+function parseBakeId(bakeId) {
+  const match = /^s(\d+):(.*)$/.exec(String(bakeId || ''));
+  if (!match) return null;
+  return { slideIndex: Number(match[1]), path: match[2] };
+}
+
+function bakeCaptureScript(selector, slideIndex, path) {
+  return `(() => {
+    const slides = Array.from(document.querySelectorAll(${JSON.stringify(selector)}));
+    const slide = slides[${Number(slideIndex)}];
+    if (!slide) throw new Error('Slide ${Number(slideIndex) + 1} is not present.');
+    const node = ${JSON.stringify(String(path))}.split('.')
+      .reduce((element, index) => element && element.children[Number(index)], slide);
+    if (!node) throw new Error('Bake node path ${String(path)} did not resolve.');
+    const rect = node.getBoundingClientRect();
+    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+  })()`;
+}
+
+/**
+ * Capture one PNG per scene bake request by cropping the live, already
+ * slide-isolated page — the same Chromium that produces the reference render,
+ * so a bake can never disagree with the image it is measured against.
+ *
+ * The slide is transform-scaled to the fidelity target (1900x1300 = 2x the
+ * 950x650 canvas) before cropping, so a scale:1 clip already yields a 2x
+ * bitmap of the node's CSS bounds.
+ */
+async function captureBakes(options = {}) {
+  const requests = options.requests || [];
+  if (!requests.length) return { ok: true, bakes: {}, files: {}, captured: 0, deduplicated: 0 };
+  const { target, captureTarget } = sourceRenderGeometry(options);
+  const selector = options.slideSelector || '.slide';
+  const outputDir = await ensureDirectory(options.outputDir || path.join(options.workDir, 'bakes'));
+  const { nativeImage } = getElectron();
+
+  const bySlide = new Map();
+  for (const request of requests) {
+    const parsed = parseBakeId(request.bakeId);
+    if (!parsed) throw fidelityError('BAKE_ID_INVALID', `Bake id ${request.bakeId} is not addressable.`, { request });
+    if (!bySlide.has(parsed.slideIndex)) bySlide.set(parsed.slideIndex, []);
+    bySlide.get(parsed.slideIndex).push({ ...request, ...parsed });
+  }
+
+  let window = null;
+  const bakes = {};
+  const files = {};
+  const byHash = new Map();
+  let captured = 0, deduplicated = 0;
+  try {
+    ({ window } = await openSourceRenderWindow(options, target, captureTarget, outputDir));
+    for (const slideIndex of Array.from(bySlide.keys()).sort((a, b) => a - b)) {
+      // Reuse the reference renderer's isolation so the node sits in the same
+      // place, at the same scale, as it does in the image we compare against.
+      await window.webContents.executeJavaScript(sourceRenderScript(selector, slideIndex, target, [], false), true);
+      await delay(30);
+      for (const request of bySlide.get(slideIndex)) {
+        const rect = await window.webContents.executeJavaScript(
+          bakeCaptureScript(selector, slideIndex, request.path), true);
+        if (!(rect.width > 0) || !(rect.height > 0)) {
+          throw fidelityError('BAKE_BOUNDS_EMPTY', `Bake ${request.bakeId} has no measurable bounds.`, { rect, request });
+        }
+        const screenshot = await withTimeout(
+          window.webContents.debugger.sendCommand('Page.captureScreenshot', {
+            format: 'png',
+            clip: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, scale: 1 },
+            captureBeyondViewport: true,
+            fromSurface: true
+          }),
+          options.captureTimeoutMs || 30000,
+          'BAKE_CAPTURE_TIMEOUT',
+          `Chromium timed out capturing bake ${request.bakeId}.`
+        );
+        const buffer = nativeImage.createFromBuffer(Buffer.from(screenshot.data, 'base64')).toPNG();
+        const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+        if (byHash.has(hash)) {
+          deduplicated += 1;
+        } else {
+          const imagePath = path.join(outputDir, `bake-${hash.slice(0, 16)}.png`);
+          await fsp.writeFile(imagePath, buffer);
+          byHash.set(hash, { imagePath, dataUrl: `data:image/png;base64,${buffer.toString('base64')}` });
+          captured += 1;
+        }
+        const entry = byHash.get(hash);
+        bakes[request.bakeId] = entry.dataUrl;
+        files[request.bakeId] = entry.imagePath;
+      }
+    }
+    return { ok: true, bakes, files, captured, deduplicated, requested: requests.length };
   } finally {
     if (window?.webContents?.debugger?.isAttached()) {
       try { window.webContents.debugger.detach(); } catch (_) {}
@@ -1870,6 +1995,7 @@ module.exports = {
   collectRequiredFonts,
   preflightDesktopPowerPoint,
   renderHtmlSlides,
+  captureBakes,
   renderPptxWithPowerPoint,
   compareSlideVisual,
   auditPptxStructure,

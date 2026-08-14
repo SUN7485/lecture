@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
 const ai = require('./enrich/ai');
-const { verifyAndExport, preflightDesktopPowerPoint, renderHtmlSlides } = require('./pptxFidelity');
+const { verifyAndExport, preflightDesktopPowerPoint, renderHtmlSlides, captureBakes } = require('./pptxFidelity');
 const { preflightBundledTesseractOcr, runBundledTesseractOcr } = require('./pptxTesseractOcr');
 
 let mainWindow;
@@ -514,14 +514,23 @@ function preflightNativePptxRuntime(timeoutMs = 15000) {
   });
 }
 
+// Requirements belong to the stage that actually uses them: a native export
+// needs Python and the deck's fonts, not Office. A machine without PowerPoint
+// must still produce an editable deck — with verification deferred, not refused.
+const POWERPOINT_ONLY_ERRORS = new Set(['POWERPOINT_MISSING', 'WINDOWS_POWERPOINT_REQUIRED']);
+
 async function preflightVerifiedPptx(options = {}) {
+  const evidenceMode = options.evidenceMode || 'native';
+  const needsPowerPoint = evidenceMode !== 'native';
+  const needsOcr = evidenceMode === 'full';
   const [desktop, ocr, nativePptx] = await Promise.all([
     preflightDesktopPowerPoint(options),
-    preflightBundledOcr(),
+    needsOcr ? preflightBundledOcr() : Promise.resolve({ ok: true, skipped: 'OCR is only required for full evidence.' }),
     preflightNativePptxRuntime()
   ]);
-  const errors = [...(desktop.errors || [])];
-  if (!ocr.ok) {
+  const errors = (desktop.errors || [])
+    .filter((error) => needsPowerPoint || !POWERPOINT_ONLY_ERRORS.has(error.code));
+  if (needsOcr && !ocr.ok) {
     errors.push({
       code: ocr.error?.code || 'BUNDLED_OCR_PREFLIGHT_FAILED',
       message: ocr.error?.message || 'Bundled Arabic + English OCR is unavailable.',
@@ -529,7 +538,7 @@ async function preflightVerifiedPptx(options = {}) {
     });
   }
   if (!nativePptx.ok) errors.push(nativePptx.error);
-  return { ...desktop, ocr, nativePptx, errors, ok: errors.length === 0 };
+  return { ...desktop, evidenceMode, ocr, nativePptx, errors, ok: errors.length === 0 };
 }
 
 // ---- Fidelity evidence retention ----
@@ -603,6 +612,28 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
   const requestedMode = process.env.LVE_EVIDENCE_MODE;
   if (['full', 'preview', 'native'].includes(requestedMode)) evidenceMode = requestedMode;
   const workDir = ensureFidelityRoot();
+
+  // Scene v2 degrades unmappable elements to `renderAs:'bake'` instead of
+  // refusing the deck. Their pictures are cropped from the same Chromium that
+  // produces the reference render, before Python builds the deck.
+  const bakeRequests = sceneGraph.slides.flatMap((slide) => slide.bakeRequests || []);
+  if (bakeRequests.length) {
+    if (typeof html !== 'string' || !html.trim()) {
+      return { ok: false, stage: 'bake-capture', error: 'Deck HTML is required to capture baked elements.' };
+    }
+    const captured = await captureBakes({
+      html,
+      baseDir: baseDir || '',
+      sourceSize: sceneGraph.pageSize,
+      target: { width: 1900, height: 1300 },
+      requests: bakeRequests,
+      workDir,
+      outputDir: path.join(workDir, 'bakes')
+    });
+    sceneGraph = { ...sceneGraph, bakes: captured.bakes };
+    console.log(`PPTX bakes: ${captured.captured} captured, ${captured.deduplicated} deduplicated, ${captured.requested} requested.`);
+  }
+
   const result = await verifyAndExport({
     sceneGraph,
     html,
@@ -618,7 +649,7 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
     fidelityPolicy: 'editable-best-effort',
     evidenceMode,
     workDir,
-    preflight: preflightVerifiedPptx,
+    preflight: (input) => preflightVerifiedPptx({ ...input, evidenceMode }),
     renderPptx: ({ sceneGraph: graph, outputPath, baseDir: sceneBaseDir }) =>
       renderNativePptx({ sceneGraph: graph, baseDir: sceneBaseDir, suggestedName: outputPath }),
     ocr: runBundledOcr
