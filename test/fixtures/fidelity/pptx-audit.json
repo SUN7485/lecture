@@ -1,0 +1,6 @@
+{
+  "expectedSlideCount": 26,
+  "expectedNativeObjectKinds": ["text", "table", "shape", "picture"],
+  "forbidFullSlidePictures": true,
+  "notes": "The Chp1-Lec1-2 regression deck must have one real PPTX slide part per HTML slide."
+}

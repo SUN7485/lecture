@@ -5,6 +5,7 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test --test-concurrency=1 test/fidelity-contract.test.js test/pptx-fidelity-service.test.js test/pptx-audit.test.js test/pptx-tesseract-ocr.test.js test/electron-scene-preview.test.js test/electron-source-render.test.js test/electron-visual-compare.test.js",
     "dist": "electron-builder",
     "pack": "electron-builder --dir"
   },
@@ -15,7 +16,11 @@
     "productName": "Lecture Visual Editor",
     "files": [
       "src/**/*",
+      "tools/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "tools/**/*"
     ],
     "directories": {
       "output": "dist"
@@ -34,11 +39,12 @@
     }
   },
   "devDependencies": {
-    "electron": "^31.0.0",
+    "electron": "^31.7.7",
     "electron-builder": "^24.13.3",
     "playwright-core": "^1.61.1"
   },
   "dependencies": {
-    "mathjax": "^3.2.2"
+    "mathjax": "^3.2.2",
+    "pptxgenjs": "^4.0.1"
   }
 }
