@@ -1025,7 +1025,7 @@ def render_slide(slide, slide_data, enrich, base_dir, fonts, theme_colors=None):
             pass
 
 
-SCENE_SCHEMA_VERSION = 1
+SCENE_SCHEMA_VERSION = 2
 
 
 def scene_rgb(value, fallback='#000000'):

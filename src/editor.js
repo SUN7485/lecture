@@ -2689,7 +2689,7 @@
       // Versioned, browser-measured scene graph. Layout is resolved here, not
       // guessed by the Python renderer: flex, absolute positioning and nested
       // cover content become ordinary native PowerPoint objects at these bounds.
-      const SCHEMA_VERSION = 1;
+      const SCHEMA_VERSION = 2;
       const slides = this.slides();
       const win = this.win || this.doc.defaultView;
       const TEXT_NODE = 3;
@@ -2849,19 +2849,81 @@
         }
         return style;
       };
-      const unsupported = (el, style) => {
-        const out = [];
-        const reject = (property, value, reason) => out.push({ property, value, reason });
-        if (forbiddenTags.has(el.tagName)) reject('tagName', el.tagName, `${el.tagName} has no editable native PowerPoint representation`);
-        if (style.backgroundImage && style.backgroundImage !== 'none') reject('backgroundImage', style.backgroundImage, 'CSS backgrounds/gradients cannot be native editable fills');
-        if (style.filter && style.filter !== 'none') reject('filter', style.filter, 'CSS filters are unsupported');
-        if (style.clipPath && style.clipPath !== 'none') reject('clipPath', style.clipPath, 'CSS clipping is unsupported');
-        if (style.mixBlendMode && style.mixBlendMode !== 'normal') reject('mixBlendMode', style.mixBlendMode, 'blend modes are unsupported');
-        if (style.transform && style.transform !== 'none' && !/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/i.test(style.transform)) reject('transform', style.transform, 'CSS transforms are unsupported');
-        if ((style.shadow || []).length > 1 || (style.shadow || []).some(shadow => shadow.inset || shadow.spread)) reject('boxShadow', style.shadow, 'only one non-inset zero-spread shadow is supported');
-        if ((style.textShadow || []).length > 1 || (style.textShadow || []).some(shadow => shadow.inset || shadow.spread)) reject('textShadow', style.textShadow, 'only one non-inset zero-spread text shadow is supported');
-        if (!['normal', 'nowrap', 'pre-wrap', 'pre-line'].includes(style.whiteSpace)) reject('whiteSpace', style.whiteSpace, 'this text wrapping mode is unsupported');
-        return out;
+      // Split on commas that are not inside parentheses, so `rgb(1, 2, 3)`
+      // survives as one token.
+      const splitTopLevel = (value) => {
+        const parts = [];
+        let depth = 0, current = '';
+        for (const character of String(value)) {
+          if (character === '(') depth += 1;
+          if (character === ')') depth -= 1;
+          if (character === ',' && depth === 0) { parts.push(current); current = ''; continue; }
+          current += character;
+        }
+        parts.push(current);
+        return parts.map(part => part.trim()).filter(Boolean);
+      };
+      const SIDE_ANGLES = { top: 0, right: 90, bottom: 180, left: 270 };
+      // A computed background-image that is exactly one linear-gradient maps to
+      // a native PowerPoint gradient fill. Anything else (radial, conic, url,
+      // several layers, corner keywords) returns null and the node bakes.
+      const parseLinearGradient = (value) => {
+        const match = /^linear-gradient\((.*)\)$/i.exec(String(value || '').trim());
+        if (!match) return null;
+        const parts = splitTopLevel(match[1]);
+        if (parts.length < 2) return null;
+        let cssAngle = 180;
+        if (/^-?[\d.]+deg$/i.test(parts[0])) cssAngle = parseFloat(parts.shift());
+        else if (/^to\s+/i.test(parts[0])) {
+          const words = parts[0].replace(/^to\s+/i, '').trim().split(/\s+/);
+          if (words.length !== 1 || !(words[0].toLowerCase() in SIDE_ANGLES)) return null;
+          cssAngle = SIDE_ANGLES[words[0].toLowerCase()];
+          parts.shift();
+        }
+        if (parts.length < 2) return null;
+        const stops = parts.map((part) => {
+          const withPosition = /^(.*?)\s+(-?[\d.]+)%$/.exec(part);
+          return withPosition
+            ? { color: withPosition[1].trim(), pos: parseFloat(withPosition[2]) / 100 }
+            : { color: part.trim(), pos: null };
+        });
+        if (stops.some(stop => !/^(#|rgba?\()/i.test(stop.color))) return null;
+        // CSS distributes unpositioned stops evenly between their neighbours;
+        // for the shapes decks actually use, even spacing is exact.
+        stops.forEach((stop, index) => {
+          if (stop.pos === null) stop.pos = stops.length === 1 ? 0 : index / (stops.length - 1);
+        });
+        return { cssAngle, stops };
+      };
+      // getBoundingClientRect already accounts for translation, so a pure
+      // translate matrix needs no special handling downstream.
+      const identityOrTranslate = (transform) =>
+        /^matrix\(1,\s*0,\s*0,\s*1,\s*-?[\d.]+,\s*-?[\d.]+\)$/i.test(String(transform || ''));
+      const malformedBounds = (box) => !box ||
+        ![box.x, box.y, box.w, box.h].every(value => Number.isFinite(value)) || box.w < 0 || box.h < 0;
+      /**
+       * Scene v2 classification. Nothing here is fatal: a node either renders
+       * natively, or it becomes a picture of itself ("bake") at its exact
+       * bounds. `notes` are advisory losses that are not worth a picture.
+       */
+      const classify = (el, style) => {
+        const bake = [], notes = [];
+        const toBake = (property, value, reason) => bake.push({ property, value, reason });
+        const note = (property, value, reason) => notes.push({ property, value, reason });
+        let gradient = null;
+        if (forbiddenTags.has(el.tagName)) toBake('tagName', el.tagName, `${el.tagName} has no editable native PowerPoint representation`);
+        if (style.backgroundImage && style.backgroundImage !== 'none') {
+          gradient = parseLinearGradient(style.backgroundImage);
+          if (!gradient) toBake('backgroundImage', style.backgroundImage, 'only a single linear-gradient maps to a native gradient fill');
+        }
+        if (style.filter && style.filter !== 'none') toBake('filter', style.filter, 'CSS filters have no native equivalent');
+        if (style.clipPath && style.clipPath !== 'none') toBake('clipPath', style.clipPath, 'CSS clipping has no native equivalent');
+        if (style.mixBlendMode && style.mixBlendMode !== 'normal') toBake('mixBlendMode', style.mixBlendMode, 'blend modes have no native equivalent');
+        if (style.transform && style.transform !== 'none' && !identityOrTranslate(style.transform)) toBake('transform', style.transform, 'CSS transforms beyond translation have no native equivalent');
+        if ((style.shadow || []).length > 1 || (style.shadow || []).some(shadow => shadow.inset || shadow.spread)) note('boxShadow', style.shadow, 'extra and inset shadows dropped; the first shadow renders natively');
+        if ((style.textShadow || []).length > 1 || (style.textShadow || []).some(shadow => shadow.inset || shadow.spread)) note('textShadow', style.textShadow, 'extra and inset text shadows dropped');
+        if (!['normal', 'nowrap', 'pre-wrap', 'pre-line'].includes(style.whiteSpace)) note('whiteSpace', style.whiteSpace, 'wrapping mode approximated by the native renderer');
+        return { bake, notes, gradient };
       };
       const boundsOf = (el, slideBounds) => {
         const r = el.getBoundingClientRect();
@@ -3112,20 +3174,46 @@
       const sceneSlides = slides.map((slide, slideIndex) => {
         const slideBounds = slide.getBoundingClientRect();
         const nodes = [];
+        const bakeRequests = [];
         let paintOrder = 0;
         const rootStyle = styleOf(slide);
-        const rootIssues = unsupported(slide, rootStyle);
-        rootIssues.forEach(issue => allErrors.push({ slide: slideIndex + 1, nodeId: `s${slideIndex}:root`, tag: 'slide', ...issue }));
+        // The slide root is the one node that never bakes: a full-slide picture
+        // would flatten every text element on it. A gradient cover still maps
+        // natively; any other background degrades to the solid `fill` already
+        // captured in the style, recorded as an advisory note.
+        const rootClass = classify(slide, rootStyle);
+        if (rootClass.gradient) rootStyle.gradient = rootClass.gradient;
+        const rootNotes = rootClass.notes.concat(rootClass.bake.map(reason =>
+          ({ ...reason, reason: `${reason.reason}; slide backgrounds never bake` })));
         nodes.push({
           id: `s${slideIndex}:root`, parentId: null, path: 'root', tag: 'slide', order: paintOrder++, zIndex: rootStyle.zIndex,
           bounds: { x: 0, y: 0, w: slideBounds.width, h: slideBounds.height }, style: rootStyle,
-          renderAs: 'slide', text: '', runs: [], unsupported: rootIssues
+          renderAs: 'slide', text: '', runs: [], unsupported: [], notes: rootNotes
         });
         const visit = (el, parentId, path) => {
           const computed = css(el), box = boundsOf(el, slideBounds);
           if (!visual(computed, box)) return;
           const style = styleOf(el), tag = el.tagName.toLowerCase();
           const id = `s${slideIndex}:${path}`;
+          if (malformedBounds(box)) {
+            allErrors.push({
+              slide: slideIndex + 1, nodeId: id, tag, property: 'bounds', value: box,
+              reason: 'element bounds are not finite, non-negative numbers'
+            });
+            return;
+          }
+          const { bake, notes, gradient } = classify(el, style);
+          if (gradient) style.gradient = gradient;
+          if (bake.length) {
+            // A baked node is a picture of itself; its children are inside the
+            // capture, so the walk stops here and emits no text.
+            nodes.push({
+              id, parentId, path, tag, order: paintOrder++, zIndex: style.zIndex, bounds: box, style,
+              renderAs: 'bake', text: '', runs: [], unsupported: bake, notes, bake: { bakeId: id, reasons: bake }
+            });
+            bakeRequests.push({ bakeId: id, bounds: box });
+            return;
+          }
           const isImage = el.tagName === 'IMG', isTable = el.tagName === 'TABLE', isList = el.tagName === 'UL' || el.tagName === 'OL', isLine = el.tagName === 'HR';
           const tableDescendant = !!el.closest('table'), listDescendant = !!el.closest('ul,ol');
           const shape = !transparent(style.fill) || Object.values(style.border).some(edge => edge.width > 0 && edge.style !== 'none') || style.borderRadius.some(Boolean) || style.shadow.length > 0;
@@ -3134,9 +3222,7 @@
           if (isImage) renderAs = 'image'; else if (isTable) renderAs = 'table'; else if (isList) renderAs = 'list'; else if (isLine) renderAs = 'line';
           else if (tableDescendant) renderAs = 'table-cell'; else if (listDescendant) renderAs = 'list-item';
           else if (text) renderAs = shape ? 'shape-text' : 'text'; else if (shape) renderAs = 'shape';
-          const issues = unsupported(el, style);
-          issues.forEach(issue => allErrors.push({ slide: slideIndex + 1, nodeId: id, tag, ...issue }));
-          const node = { id, parentId, path, tag, order: paintOrder++, zIndex: style.zIndex, bounds: box, style, renderAs, text, runs: text ? richRuns(el) : [], unsupported: issues };
+          const node = { id, parentId, path, tag, order: paintOrder++, zIndex: style.zIndex, bounds: box, style, renderAs, text, runs: text ? richRuns(el) : [], unsupported: [], notes };
           if (text) {
             node.textLineCoordinateSpace = 'slide';
             node.textLines = textLinesFor(el, slideBounds);
@@ -3164,6 +3250,7 @@
           // cause inline rich-text descendants to be counted twice by OCR.
           expectedDomText: tidy(slide.innerText || slide.textContent),
           nodes,
+          bakeRequests,
           expectedText
         };
       });
@@ -3171,6 +3258,7 @@
         format: 'lve.scene-graph', schemaVersion: SCHEMA_VERSION, source: { renderer: 'chromium', dpi: 96 },
         pageSize: { widthPx: slides[0] ? slides[0].getBoundingClientRect().width : 950, heightPx: slides[0] ? slides[0].getBoundingClientRect().height : 650 },
         requiredFonts: Array.from(fonts.values()), errors: allErrors, slides: sceneSlides,
+        bakeCount: sceneSlides.reduce((total, slide) => total + slide.bakeRequests.length, 0),
         themeCss: themeStyle ? themeStyle.textContent : ''
       };
     }
