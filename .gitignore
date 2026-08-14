@@ -9,8 +9,21 @@ config.json
 # Per-lecture enrichment cache (generated visuals) sits next to the source file.
 *.enrich.json
 
+# Python PPTX export
+tools/pptx/__pycache__/
+*.pptx
+
 # Claude Code tooling (handoffs, local settings) — not part of the project.
 .claude/
 # External-agent rules copies (distributed from Downloads master) — not project code.
 .clinerules/
 .kilocode/
+.kilo/
+
+# PPTX fidelity evidence + local caches — generated artifacts, never source.
+# .fidelity/ holds the last 10 verification runs (renders, heatmaps, reports).
+.cache/
+.fidelity/
+.tmp-fidelity-fonts/
+# Scratch experiment deps (the scaffold itself is pruned in mission 033).
+bnb_html_match/node_modules/

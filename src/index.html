@@ -25,6 +25,7 @@
     <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M22 12h-2.5a2 2 0 0 0-1.9 1.4l-1.8 5.6a.5.5 0 0 1-1 0L11.2 5a.5.5 0 0 0-1 0L8.4 10.6A2 2 0 0 1 6.5 12H2"/></symbol>
     <symbol id="i-present" viewBox="0 0 24 24"><path d="M2 3h20M4 3v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3"/><path d="m9 21 3-3 3 3"/><path d="m10.5 8.5 3.5 2-3.5 2Z" fill="currentColor"/></symbol>
     <symbol id="i-pdf" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v5a1 1 0 0 0 1 1h5M12 11v6M9.5 14.5 12 17l2.5-2.5"/></symbol>
+    <symbol id="i-pptx" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><text x="9" y="17" font-size="10" font-weight="bold" fill="currentColor">P</text></symbol>
     <symbol id="i-text" viewBox="0 0 24 24"><path d="M17 6.1H3M21 12.1H3M15.1 18H3"/></symbol>
     <symbol id="i-line" viewBox="0 0 24 24"><path d="M4 12h16"/><path d="M4 5h16M4 19h16" opacity=".35"/></symbol>
     <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M12 3v18"/></symbol>
@@ -57,7 +58,8 @@
       <button id="btn-save" title="Save HTML (Ctrl+S)"><svg class="ic"><use href="#i-save"/></svg><span class="lbl">Save</span></button>
       <button id="btn-preview" title="Quick PDF preview — check everything before exporting"><svg class="ic"><use href="#i-eye"/></svg><span class="lbl">Preview</span></button>
       <button id="btn-doctor" title="فحص الشرائح — نص كثيف، تباين، خطوط، صور مشوّهة، تسمية الأشكال"><svg class="ic"><use href="#i-pulse"/></svg><span class="lbl">الفحص</span><span class="ct" hidden></span></button>
-      <button id="btn-present" title="عرض الشرائح ملء الشاشة + نافذة الملقّن"><svg class="ic"><use href="#i-present"/></svg><span class="lbl">عرض</span></button>
+      <button id="btn-export-pptx" class="primary" title="Export verified editable PPTX"><svg class="ic"><use href="#i-pptx"/></svg><span class="lbl">PPTX</span></button>
+      <button id="btn-preview-pptx" title="Verify editable PPTX before export"><svg class="ic"><use href="#i-pptx"/></svg><span class="lbl">PPTX Preview</span></button>
       <button id="btn-export" class="primary" title="Export to PDF"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">PDF</span></button>
     </div>
 
@@ -80,6 +82,10 @@
       <button id="btn-numerals" title="تبديل نظام الأرقام في الشرائح: عربي ⇄ لاتيني"><span class="lbl">١٢٣ ⇄ 123</span></button>
       <button id="btn-date-hijri" title="إدراج التاريخ الهجري" aria-label="التاريخ الهجري"><svg class="ic"><use href="#i-moon"/></svg></button>
       <button id="btn-date-greg" title="إدراج التاريخ الميلادي" aria-label="التاريخ الميلادي"><svg class="ic"><use href="#i-cal"/></svg></button>
+    </div>
+
+    <div class="group">
+      <button id="btn-present" title="Fullscreen present + speaker view"><svg class="ic"><use href="#i-present"/></svg><span class="lbl">Present</span></button>
     </div>
 
     <div class="group">
@@ -140,32 +146,59 @@
     </main>
   </div>
 
+  <!-- Status bar: renderer.js's status() reads #status, and #slide-info shows
+       the current slide counter. Both were missing, so every status() call
+       threw "Cannot set properties of null" and broke every button handler. -->
   <div id="statusbar">
-    <span id="status">Ready.</span>
+    <span id="status">Open a lecture to begin.</span>
     <span class="spacer"></span>
     <span id="slide-info"></span>
   </div>
 
-  <script>
-    // MathJax renders equations to self-contained SVG, offline and free.
-    window.MathJax = { startup: { typeset: false }, svg: { fontCache: 'none' } };
-  </script>
-  <script src="../node_modules/mathjax/es5/tex-svg.js"></script>
+  <div id="preview-modal" class="pptx-modal" hidden role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
+    <div class="modal-content preview-content">
+      <div class="modal-header">
+        <h2 id="preview-modal-title">PPTX Preview</h2>
+        <span class="pptx-mode-label">Editable PPTX · best-effort fidelity</span>
+        <button class="modal-close" data-close="preview-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="preview-slides"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-preview-close" class="secondary">Close</button>
+        <button id="btn-preview-export" class="primary">Export this PPTX</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="doctor-modal" class="pptx-modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-content doctor-content">
+      <div class="modal-header">
+        <h2>PPTX Doctor Check</h2>
+        <button class="modal-close" data-close="doctor-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="doctor-results"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-doctor-close" class="secondary">Close</button>
+        <button id="btn-doctor-fix" class="primary">Export verified PPTX</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden><span id="toast-msg"></span></div>
   <script src="editor.js"></script>
   <script src="doctor.js"></script>
-  <script src="enrich/charts.js"></script>
-  <script src="enrich/diagrams.js"></script>
-  <script src="enrich/pipeline.js"></script>
-  <script src="studio/panel.js"></script>
-  <script src="studio/diagramEditor.js"></script>
-  <script src="studio/imageCard.js"></script>
-  <script src="studio/wand.js"></script>
-  <script src="settings.js"></script>
   <script src="theme.js"></script>
   <script src="present.js"></script>
   <script src="vendor/mammoth.browser.min.js"></script>
   <script src="importer.js"></script>
   <script src="brandkit.js"></script>
+  <script src="studio/panel.js"></script>
+  <script src="studio/wand.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

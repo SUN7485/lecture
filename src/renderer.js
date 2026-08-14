@@ -713,6 +713,35 @@
     status(res.ok ? 'Preview opened — check it, then export.' : 'Preview failed: ' + (res.error || ''));
   }
 
+  async function exportPptxDirect() {
+    if (!editor) { status('Open a lecture first.'); return; }
+    const sceneGraph = editor.serializeForPptx();
+    const slideCount = sceneGraph?.slides?.length || 0;
+    if (slideCount) status(`Building editable PPTX — ${slideCount} slides…`);
+    const suggested = baseName(currentFile?.filePath, '.pptx');
+    const res = await window.api.exportPptx({
+      sceneGraph,
+      themeCss: sceneGraph?.themeCss,
+      suggestedName: suggested,
+      baseDir: currentFile?.dir || '',
+      html: editor.getCleanHtml()
+    });
+    if (res.ok) {
+      const warningCount = res.report?.warnings?.length || 0;
+      status(warningCount
+        ? `Exported editable PPTX with ${warningCount} fidelity notes: ${res.filePath}`
+        : 'Exported editable PPTX: ' + res.filePath);
+    } else {
+      if (res.report) showFidelityReport(res.report);
+      status('PPTX export ' + (res.error ? 'failed: ' + res.error : 'cancelled.'));
+    }
+  }
+
+  async function exportPptx() {
+    if (!editor) { status('Open a lecture first.'); return; }
+    await exportPptxDirect();
+  }
+
   function baseName(filePath, ext) {
     if (!filePath) return 'lecture' + ext;
     const name = filePath.split(/[\\/]/).pop().replace(/\.html?$/i, '');
@@ -738,7 +767,12 @@
     beginPlace('table', 'Click where the table should go… (Esc cancels)'));
   $('#btn-save').addEventListener('click', saveHtml);
   $('#btn-export').addEventListener('click', exportPdf);
+  $('#btn-export-pptx').addEventListener('click', exportPptx);
   $('#btn-preview').addEventListener('click', previewPdf);
+  $('#btn-preview-pptx')?.addEventListener('click', async () => {
+    if (!editor) { status('Open a lecture first.'); return; }
+    await previewPptx();
+  });
 
   // ---------- MiM brand identity (one-click fonts + palette) ----------
   // Single toggle: click = apply the Screen palette (brand book v1.1), click
@@ -813,6 +847,8 @@
     { id: 'import-docx', ar: 'استيراد Word', en: 'Import Word document', run: importDocx },
     { id: 'save', ar: 'حفظ', en: 'Save', run: saveHtml },
     { id: 'export-pdf', ar: 'تصدير PDF', en: 'Export PDF', run: exportPdf },
+    { id: 'export-pptx', ar: 'تصدير PPTX', en: 'Export PPTX', run: exportPptx },
+    { id: 'preview-pptx', ar: 'معاينة PPTX', en: 'Preview PPTX', run: () => { $('#btn-preview-pptx')?.click(); } },
     { id: 'insert-text', ar: 'إدراج نص', en: 'Insert text', run: () => beginPlace('text', 'Click on the page where the text should go… (Esc cancels)') },
     { id: 'insert-image', ar: 'إدراج صورة', en: 'Insert image', run: addImages },
     { id: 'add-slide', ar: 'إضافة شريحة', en: 'Add slide', run: () => { if (!editor) return status('Open a lecture first.'); editor.addSlide(currentSlideEl()); status('New slide added. Edit its title and content.'); } },
@@ -1372,4 +1408,230 @@
       if (holder) holder.appendChild(btn);
     }
   })();
+
+  // ---------- PPTX Preview & Doctor ----------
+  function openModal(id) { const el = document.getElementById(id); if (el) el.hidden = false; }
+  function closeModal(id) { const el = document.getElementById(id); if (el) el.hidden = true; }
+  function toast(msg) {
+    const el = document.getElementById('toast');
+    const msgEl = document.getElementById('toast-msg');
+    if (!el || !msgEl) return;
+    msgEl.textContent = msg;
+    el.hidden = false;
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => { el.hidden = true; }, 3000);
+  }
+
+  // Each report names the exact stage and slide. Reuse the preview surface so
+  // users can inspect hard export blockers and best-effort fidelity notes
+  // without opening developer tools.
+  function showFidelityReport(report) {
+    const container = document.getElementById('preview-slides');
+    if (!container || !report) return;
+    container.innerHTML = '';
+    const failures = report.failures || [];
+    const warnings = report.warnings || [];
+    const heading = document.createElement('div');
+    heading.className = 'fidelity-report-summary';
+    heading.textContent = failures.length
+      ? `Editable PPTX export failed at ${report.stage}. No PPTX was written.`
+      : warnings.length
+        ? `Editable PPTX completed with ${warnings.length} OCR/visual fidelity notes.`
+        : 'Editable PPTX completed with no reported fidelity differences.';
+    container.appendChild(heading);
+    (report.slides || []).forEach((slide, index) => {
+      const card = document.createElement('section');
+      card.className = 'preview-slide fidelity-report-slide';
+      const title = document.createElement('h3');
+      title.textContent = `Slide ${slide.slideNumber || index + 1}`;
+      card.appendChild(title);
+      const info = document.createElement('p');
+      const issuesForSlide = [
+        ...(slide.failures || []).map(failure => ({ ...failure, kind: 'error' })),
+        ...(slide.warnings || []).map(warning => ({ ...warning, kind: 'note' }))
+      ];
+      info.textContent = issuesForSlide.length
+        ? issuesForSlide.map(issue => `${issue.kind}: ${issue.stage}: ${issue.message || issue.reason || issue.code}`).join('\n')
+        : 'No slide-specific issue recorded.';
+      card.appendChild(info);
+      const evidence = document.createElement('dl');
+      [
+        ['Source', slide.sourceRender], ['PowerPoint', slide.powerPointRender],
+        ['Heatmap', slide.heatmap], ['OCR', slide.ocr?.ok === true ? 'passed' : slide.ocr?.errors?.map(e => e.code).join(', ')],
+        ['Structure', slide.structural?.ok === true ? 'passed' : slide.structural?.errors?.map(e => e.code).join(', ')]
+      ].forEach(([label, value]) => {
+        if (!value) return;
+        const term = document.createElement('dt'); term.textContent = label;
+        const detail = document.createElement('dd'); detail.textContent = typeof value === 'string' ? value : JSON.stringify(value);
+        evidence.append(term, detail);
+      });
+      card.appendChild(evidence);
+      container.appendChild(card);
+    });
+    openModal('preview-modal');
+  }
+
+  // Preview the actual generated PPTX through PowerPoint, not the source HTML.
+  async function previewPptx() {
+    try {
+      if (!editor) { status('Open a lecture first.'); return; }
+      status('Building editable PowerPoint preview…');
+      const container = document.getElementById('preview-slides');
+      if (!container) { status('Preview not available.'); return; }
+      container.innerHTML = '';
+      const sceneGraph = editor.serializeForPptx();
+      const result = await window.api.previewPptx({
+        sceneGraph,
+        themeCss: sceneGraph?.themeCss,
+        baseDir: currentFile?.dir || '',
+        html: editor.getCleanHtml()
+      });
+      if (!result.ok) {
+        if (result.report) showFidelityReport(result.report);
+        throw new Error(result.error || 'Could not build PPTX preview.');
+      }
+
+      const warningCount = result.report?.warnings?.length || 0;
+      if (warningCount) {
+        const note = document.createElement('div');
+        note.className = 'fidelity-report-summary';
+        note.textContent = `Editable best-effort preview: ${warningCount} OCR/visual fidelity notes are recorded in the report.`;
+        container.appendChild(note);
+      }
+      result.images.forEach((src, i) => {
+        const card = document.createElement('div');
+        card.className = 'preview-slide';
+        const image = document.createElement('img');
+        image.src = src;
+        image.alt = `Rendered PowerPoint slide ${i + 1}`;
+        card.appendChild(image);
+
+        const num = document.createElement('div');
+        num.className = 'slide-num';
+        num.textContent = `Slide ${i + 1} of ${result.images.length} — PowerPoint render`;
+        card.appendChild(num);
+        container.appendChild(card);
+      });
+
+      openModal('preview-modal');
+      status(`Editable PowerPoint preview ready — ${result.images.length} slides${warningCount ? ` (${warningCount} fidelity notes)` : ''}.`);
+    } catch (error) {
+      console.error('PPTX preview failed', error);
+      status('Preview failed. See console for details.');
+    }
+  }
+
+  // Doctor: validate the PPTX export plan
+  function runPptxDoctor({ showModal = true } = {}) {
+    if (!editor) { status('Open a lecture first.'); return []; }
+    const plan = editor.serializeForPptx();
+    const issues = [];
+    const slides = plan.slides || [];
+    if (!slides.length) issues.push({ level: 'err', text: 'No slides found in the lecture.' });
+    // The exporter consumes the scene graph directly. Surface its exact
+    // slide/node/property diagnostics here; never pre-rasterise unsupported
+    // content as a way around a fidelity failure.
+    (plan.errors || []).forEach((error) => {
+      const index = Number.isInteger(error.slideIndex)
+        ? error.slideIndex
+        : (Number.isInteger(error.slide) ? Math.max(0, error.slide - 1) : null);
+      const where = index == null ? '' : `Slide ${index + 1}: `;
+      const property = error.property ? ` (${error.property})` : '';
+      issues.push({
+        level: 'err',
+        text: `${where}${error.message || error.code || 'Unsupported editable-PPTX feature'}${property}`,
+        slide: index
+      });
+    });
+    const container = document.getElementById('doctor-results');
+    if (container) {
+      if (!issues.length) {
+          container.innerHTML = `<div class="doctor-issue ok"><div class="doctor-icon">✅</div><div class="doctor-text"><b>Scene graph supported.</b> ${slides.length} slides are ready for the required PowerPoint, OCR, visual, and structure checks.</div></div>`;
+      } else {
+        container.innerHTML = issues.map(issue => `
+          <div class="doctor-issue ${issue.level}">
+            <div class="doctor-icon">${issue.level === 'err' ? '❌' : '⚠️'}</div>
+            <div class="doctor-text">
+              <b>${issue.text}</b>
+              ${issue.slide != null ? `<div class="doctor-actions"><button class="doctor-btn" data-goto="${issue.slide}">Go to slide ${issue.slide + 1}</button></div>` : ''}
+            </div>
+          </div>
+        `).join('');
+        container.querySelectorAll('.doctor-btn[data-goto]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const idx = parseInt(btn.getAttribute('data-goto'));
+            closeModal('doctor-modal');
+            if (editor && editor.slides()[idx]) editor.select(editor.slides()[idx]);
+          });
+        });
+      }
+      if (showModal) openModal('doctor-modal');
+    }
+    return issues;
+  }
+
+  // ---- Doctor "Auto-Fix & Export": bake inline SVGs (and any loaded local
+  // content images) to self-contained PNG data URLs in the LIVE editor before
+  // exporting, so the result does not depend on cairosvg being present on the
+  // export machine. This is a real fix — it mutates the deck, not just the plan.
+  // ---- Export-time SVG baking: rasterise every inline SVG figure in the plan
+  // to a self-contained PNG data URL using Chromium's rendering engine, so the
+  // .pptx never depends on cairosvg / native cairo being present at export time.
+  // The Python renderer just embeds the produced PNG. Failures (e.g. a canvas
+  // that cannot read the SVG) leave the raw SVG in place — python's cairosvg /
+  // inkscape / placeholder chain then takes over.
+  async function rasterizeInlineSvgs() {
+    if (!editor) return { done: 0, failed: 0 };
+    const svgs = Array.from(editor.doc.querySelectorAll('.slide svg'));
+    let done = 0;
+    for (const svg of svgs) {
+      if (svg.closest('.ve-ghost, .ve-toolbar, .ve-overlay, .ve-guide')) continue;
+      try {
+        const png = await svgToPngDataUrl(svg, 2);
+        const img = editor.doc.createElement('img');
+        img.src = png;
+        img.alt = 'rasterised SVG diagram';
+        img.style.cssText = 'max-width:100%; max-height:100%; object-fit:contain; display:block; margin:0 auto;';
+        svg.replaceWith(img);
+        done++;
+      } catch (_) {
+        // Leave the raw SVG in place — the Python renderer (cairosvg) rasterises
+        // it at export time, so this is never a data-losing failure.
+      }
+    }
+    return { done };
+  }
+
+  async function doctorFixAndExport() {
+    const issues = runPptxDoctor({ showModal: false });
+    if (issues && issues.some(i => i.level === 'err')) {
+      status('Fix the reported unsupported feature before exporting.');
+      runPptxDoctor({ showModal: true });
+      return;
+    }
+    await exportPptxDirect();
+  }
+
+  // Wire preview and doctor modals once. Both export routes invoke the same
+  // strict editable-PPTX fidelity gate.
+  const wireModal = (id, onExport) => {
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    const closeAll = () => closeModal(id);
+    modal.querySelector('[data-close="' + id + '"]')?.addEventListener('click', closeAll);
+    // Close only for a genuine outside click. The preview modal uses its root
+    // as the dimmed overlay; the doctor modal retains its backdrop child.
+    modal.addEventListener('click', (event) => {
+      const content = modal.querySelector('.modal-content');
+      if (content && !content.contains(event.target)) closeAll();
+    });
+    const closeBtn = modal.querySelector('.modal-close') || document.getElementById(id.replace('modal', 'close'));
+    if (closeBtn) closeBtn.addEventListener('click', closeAll);
+    const secondaryClose = modal.querySelector('.modal-footer .secondary');
+    if (secondaryClose) secondaryClose.addEventListener('click', closeAll);
+    const exportBtn = modal.querySelector('.modal-footer .primary') || document.getElementById(id.replace('modal', 'export'));
+    if (exportBtn) exportBtn.addEventListener('click', () => { closeModal(id); onExport(); });
+  };
+  wireModal('preview-modal', exportPptxDirect);
+  wireModal('doctor-modal', doctorFixAndExport);
 })();

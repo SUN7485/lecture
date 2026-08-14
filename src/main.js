@@ -2,9 +2,16 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { spawn } = require('child_process');
 const ai = require('./enrich/ai');
+const { verifyAndExport, preflightDesktopPowerPoint, renderHtmlSlides } = require('./pptxFidelity');
+const { preflightBundledTesseractOcr, runBundledTesseractOcr } = require('./pptxTesseractOcr');
 
 let mainWindow;
+
+if (process.env.LVE_TEST_FIDELITY_HOOK === '1') {
+  app.__lveTestRenderHtmlSlides = renderHtmlSlides;
+}
 
 // Remember the last lecture opened so we can offer to reopen it next launch.
 function lastFilePath() { return path.join(app.getPath('userData'), 'last-file.json'); }
@@ -323,6 +330,276 @@ ipcMain.handle('export-pdf', async (_e, { html, suggestedName, pageSize }) => {
     return { ok: true, filePath };
   } catch (err) {
     return { ok: false, error: String(err) };
+  }
+});
+
+// ---- Export PPTX ----
+// The Python renderer creates PowerPoint objects (text boxes, tables, lines,
+// and pictures) from the editor's structured slide plan.  Do not replace this
+// with a BrowserWindow screenshot: a screenshot in a .pptx is not editable.
+function nativePptxRendererPath() {
+  const appRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked')
+    : path.join(__dirname, '..');
+  return path.join(appRoot, 'tools', 'pptx', 'renderer.py');
+}
+
+function pptxToolPath(name) {
+  const appRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked')
+    : path.join(__dirname, '..');
+  return path.join(appRoot, 'tools', 'pptx', name);
+}
+
+function renderNativePptx(payload, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    const rendererPath = nativePptxRendererPath();
+    if (!fs.existsSync(rendererPath)) {
+      reject(new Error('Native PPTX renderer is missing: ' + rendererPath));
+      return;
+    }
+    const python = process.platform === 'win32' ? 'py' : 'python3';
+    let child;
+    try {
+      child = spawn(python, ['-X', 'utf8', rendererPath], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch (error) {
+      reject(new Error('Could not start Python for PPTX export: ' + error.message));
+      return;
+    }
+    let stdout = '';
+    let stderr = '';
+    let finished = false;
+    const settle = (fn) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      fn();
+    };
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch (_) {}
+      settle(() => reject(new Error(`Native PPTX renderer timed out after ${timeoutMs}ms.`)));
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', (err) => settle(() => reject(new Error('Could not start Python for PPTX export: ' + err.message))));
+    child.on('close', (code) => settle(() => {
+      try {
+        const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+        const result = JSON.parse(lines[lines.length - 1] || '{}');
+        if (code !== 0 || !result.ok) {
+          const error = new Error(result.error || stderr || `Native PPTX renderer exited with code ${code}`);
+          error.stage = result.stage || 'scene-render';
+          error.details = result.errors || result;
+          throw error;
+        }
+        resolve({ ok: true, filePath: result.path, count: (payload.sceneGraph?.slides || []).length });
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    }));
+    child.stdin.end(JSON.stringify(payload));
+  });
+}
+
+// Preview the exact temporary PPTX through PowerPoint — never the source HTML.
+function runBundledOcr({ sourcePath, powerPointPath, languages }) {
+  return runBundledTesseractOcr({
+    bundleRoot: pptxToolPath('ocr'),
+    sourcePath,
+    powerPointPath,
+    languages
+  });
+}
+
+async function preflightBundledOcr() {
+  try {
+    const result = await preflightBundledTesseractOcr({
+      bundleRoot: pptxToolPath('ocr'),
+      timeoutMs: 30000
+    });
+    return { ...result, stage: 'preflight' };
+  } catch (error) {
+    return {
+      ok: false,
+      stage: 'preflight',
+      provider: 'Bundled Tesseract',
+      error: {
+        code: error.code || 'BUNDLED_OCR_PREFLIGHT_FAILED',
+        message: error.message || String(error),
+        details: error.details
+      }
+    };
+  }
+}
+
+function preflightNativePptxRuntime(timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    const rendererPath = nativePptxRendererPath();
+    if (!fs.existsSync(rendererPath)) {
+      resolve({
+        ok: false,
+        error: {
+          code: 'NATIVE_PPTX_RENDERER_MISSING',
+          message: 'The bundled native editable-PPTX renderer is missing.',
+          details: { rendererPath }
+        }
+      });
+      return;
+    }
+    const python = process.platform === 'win32' ? 'py' : 'python3';
+    let child;
+    try {
+      child = spawn(python, ['-X', 'utf8', '-c', 'import pptx, lxml; print("lve-pptx-runtime-ok")'], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+    } catch (cause) {
+      resolve({
+        ok: false,
+        error: {
+          code: 'PYTHON_RUNTIME_MISSING',
+          message: 'Python with the editable-PPTX renderer dependencies is required.',
+          details: { command: python, cause: cause.message }
+        }
+      });
+      return;
+    }
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timedOut = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill(); } catch (_) {}
+      settle({
+        ok: false,
+        error: {
+          code: 'PPTX_RUNTIME_PREFLIGHT_TIMEOUT',
+          message: `The editable-PPTX runtime did not respond within ${timeoutMs}ms.`,
+          details: { command: python, timeoutMs, stdout, stderr }
+        }
+      });
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', (cause) => settle({
+      ok: false,
+      error: {
+        code: 'PYTHON_RUNTIME_MISSING',
+        message: 'Python with the editable-PPTX renderer dependencies is required.',
+        details: { command: python, cause: cause.message }
+      }
+    }));
+    child.on('close', (code, signal) => {
+      if (timedOut) return;
+      if (code !== 0 || !/lve-pptx-runtime-ok/.test(stdout)) {
+        settle({
+          ok: false,
+          error: {
+            code: 'PPTX_RENDERER_DEPENDENCIES_MISSING',
+            message: 'Python cannot load the editable-PPTX renderer dependencies.',
+            details: { command: python, code, signal, stdout, stderr }
+          }
+        });
+        return;
+      }
+      settle({ ok: true, command: python, rendererPath });
+    });
+  });
+}
+
+async function preflightVerifiedPptx(options = {}) {
+  const [desktop, ocr, nativePptx] = await Promise.all([
+    preflightDesktopPowerPoint(options),
+    preflightBundledOcr(),
+    preflightNativePptxRuntime()
+  ]);
+  const errors = [...(desktop.errors || [])];
+  if (!ocr.ok) {
+    errors.push({
+      code: ocr.error?.code || 'BUNDLED_OCR_PREFLIGHT_FAILED',
+      message: ocr.error?.message || 'Bundled Arabic + English OCR is unavailable.',
+      details: ocr.error?.details
+    });
+  }
+  if (!nativePptx.ok) errors.push(nativePptx.error);
+  return { ...desktop, ocr, nativePptx, errors, ok: errors.length === 0 };
+}
+
+async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinationPath, evidenceMode = 'native' }) {
+  if (!sceneGraph || sceneGraph.format !== 'lve.scene-graph' || !Array.isArray(sceneGraph.slides)) {
+    return {
+      ok: false,
+      stage: 'scene-validation',
+      error: 'A versioned full-slide scene graph is required for editable PPTX export.'
+    };
+  }
+  return verifyAndExport({
+    sceneGraph,
+    html,
+    themeCss: themeCss || sceneGraph.themeCss || '',
+    baseDir: baseDir || '',
+    destinationPath,
+    expectedSlideCount: sceneGraph.slides.length,
+    sourceWidth: 1900,
+    sourceHeight: 1300,
+    // The app exports native, editable PowerPoint objects. OCR and visual
+    // comparisons remain in the report, but browser-vs-Office raster
+    // differences do not veto an otherwise valid editable deck.
+    fidelityPolicy: 'editable-best-effort',
+    evidenceMode,
+    preflight: preflightVerifiedPptx,
+    renderPptx: ({ sceneGraph: graph, outputPath, baseDir: sceneBaseDir }) =>
+      renderNativePptx({ sceneGraph: graph, baseDir: sceneBaseDir, suggestedName: outputPath }),
+    ocr: runBundledOcr
+  });
+}
+
+function previewImagesFromReport(report) {
+  const paths = (report?.powerPoint?.slides || []).map((slide) => slide.path).filter(Boolean);
+  return paths.map((imagePath) => `data:image/png;base64,${fs.readFileSync(imagePath).toString('base64')}`);
+}
+
+// The export path publishes after preflight + native-object XML audit so it
+// remains responsive. Preview additionally renders the candidate through
+// desktop PowerPoint; full OCR/pixel diagnostics are an explicit, slow audit.
+// Unsupported content, missing fonts, renderer failures, and native-object
+// audit failures remain hard stops.
+ipcMain.handle('export-pptx', async (_e, payload) => {
+  const { sceneGraph, themeCss, baseDir, suggestedName, html } = payload || {};
+  let destinationPath = process.env.LVE_EXPORT_PATH;
+  if (!destinationPath) {
+    const choice = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export editable PPTX (best-effort fidelity)',
+      defaultPath: suggestedName || 'lecture.pptx',
+      filters: [{ name: 'PowerPoint', extensions: ['pptx'] }]
+    });
+    if (choice.canceled || !choice.filePath) return { ok: false };
+    destinationPath = choice.filePath;
+  }
+  try {
+    return await runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinationPath });
+  } catch (error) {
+    console.error('Verified PPTX export error:', error);
+    return { ok: false, stage: error.stage || 'export', error: String(error.message || error) };
+  }
+});
+
+ipcMain.handle('preview-pptx', async (_e, payload) => {
+  const { sceneGraph, themeCss, baseDir, html } = payload || {};
+  try {
+    const result = await runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinationPath: null, evidenceMode: 'preview' });
+    if (!result.ok) return result;
+    return { ...result, images: previewImagesFromReport(result.report) };
+  } catch (error) {
+    console.error('Verified PPTX preview error:', error);
+    return { ok: false, stage: error.stage || 'preview', error: String(error.message || error) };
   }
 });
 

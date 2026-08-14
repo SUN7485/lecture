@@ -2527,6 +2527,162 @@
     }
 
     // ---------- export ----------
+    serializeForPptx() {
+      const slides = this.slides();
+      const win = this.win || this.doc.defaultView;
+      const csOf = (el) => { try { return win.getComputedStyle(el); } catch (_) { return null; } };
+      // Capture browser-resolved visual data. Positions are relative to the
+      // slide, so the native exporter does not have to guess a flow layout.
+      const styleInfo = (el) => {
+        const cs = csOf(el);
+        if (!cs) return {};
+        const out = {};
+        const fs = parseFloat(cs.fontSize);
+        if (fs && fs > 0) out.fs = fs;
+        const fam = (cs.fontFamily || '').split(',')[0].trim().replace(/^['"]|['"]$/g, '');
+        if (fam) out.ff = fam;
+        out.color = cs.color;
+        out.bg = cs.backgroundColor;
+        out.align = cs.textAlign;
+        out.direction = cs.direction;
+        out.bold = parseInt(cs.fontWeight, 10) >= 600 || cs.fontWeight === 'bold';
+        out.lineHeight = parseFloat(cs.lineHeight) || 0;
+        return out;
+      };
+      // CSS class rules are not present in innerHTML. Inline the computed
+      // color on rich-text descendants so highlighted/bold words keep their
+      // actual browser color in the native text runs.
+      const htmlOf = (el) => {
+        const clone = el.cloneNode(true);
+        const source = el.querySelectorAll('strong, b, em, i, span, a, mark');
+        const target = clone.querySelectorAll('strong, b, em, i, span, a, mark');
+        source.forEach((node, index) => {
+          const copy = target[index];
+          const cs = csOf(node);
+          if (copy && cs) copy.style.color = cs.color;
+        });
+        return clone.innerHTML;
+      };
+      // The ve-align-left / ve-align-right classes (set by the align toolbar
+      // button on a .ve-slot) mean literal left / right within the content box.
+      const alignOf = (el) =>
+        el.classList.contains('ve-align-left') ? 'left'
+          : el.classList.contains('ve-align-right') ? 'right' : 'center';
+      const themeStyle = this.doc.getElementById('ve-theme');
+      const themeCss = themeStyle ? themeStyle.textContent : '';
+      const firstSlideRect = slides[0] ? slides[0].getBoundingClientRect() : { width: 950, height: 650 };
+      const slideData = slides.map((s, i) => {
+        const slideRect = s.getBoundingClientRect();
+        const boxOf = (el) => {
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { x: r.left - slideRect.left, y: r.top - slideRect.top, w: r.width, h: r.height };
+        };
+        const withBox = (el, item) => ({ ...item, ...styleInfo(el), box: boxOf(el) });
+        const h1 = s.querySelector('h1');
+        const h2 = s.querySelector('h2');
+        const content = s.querySelector('.content');
+        const footerLeft = s.querySelector('.footer-left');
+        const footerRight = s.querySelector('.footer-right');
+        const footerSite = s.querySelector('.footer-site');
+        const logo = s.querySelector('img.mim-logo');
+        const notes = s.getAttribute('data-ve-notes') || '';
+        const h1st = h1 ? styleInfo(h1) : {};
+        const h2st = h2 ? styleInfo(h2) : {};
+
+        const items = [];
+        if (content) {
+          Array.from(content.children).forEach(child => {
+            if (child.tagName === 'P') {
+              items.push(withBox(child, { type: 'paragraph', html: htmlOf(child) }));
+            } else if (child.tagName === 'UL' || child.tagName === 'OL') {
+              const listItems = Array.from(child.querySelectorAll('li')).map(htmlOf);
+              items.push(withBox(child, { type: 'list', ordered: child.tagName === 'OL', items: listItems }));
+            } else if (child.tagName === 'TABLE') {
+              const headers = Array.from(child.querySelectorAll('thead th')).map(htmlOf);
+              const rows = Array.from(child.querySelectorAll('tbody tr')).map(tr =>
+                Array.from(tr.querySelectorAll('td')).map(htmlOf)
+              );
+              items.push(withBox(child, { type: 'table', data: { headers, rows } }));
+            } else if (child.tagName === 'HR') {
+              const style = child.getAttribute('style') || '';
+              const colorMatch = style.match(/border-top:\s*\d+px\s+solid\s+([^;]+)/i);
+              const color = colorMatch ? colorMatch[1].trim() : '#444444';
+              const widthMatch = style.match(/width:\s*(\d+%|[\d.]+px)/i);
+              const width = widthMatch ? widthMatch[1] : '100%';
+              items.push(withBox(child, { type: 'line', color, width }));
+            } else if (child.tagName === 'FIGURE' && child.classList.contains('ve-slot')) {
+              const fig = {
+                type: 'figure',
+                propId: child.getAttribute('data-ve-prop'),
+                kind: child.getAttribute('data-ve-generated') || 'figure',
+                html: child.innerHTML,
+                align: alignOf(child),
+                ...styleInfo(child)
+              };
+              const figcaption = child.querySelector('figcaption');
+              if (figcaption) fig.caption = figcaption.innerHTML;
+              const captionAttr = child.getAttribute('data-ve-caption');
+              if (captionAttr) fig.caption = captionAttr;
+              items.push(withBox(child, fig));
+            } else if (child.tagName === 'IMG' && !child.classList.contains('mim-logo')) {
+              const src = child.getAttribute('src');
+              if (src && !src.startsWith('data:')) {
+                items.push(withBox(child, { type: 'image', src, alt: child.getAttribute('alt') || '', align: alignOf(child) }));
+              } else if (src && src.startsWith('data:')) {
+                items.push(withBox(child, { type: 'figure', kind: 'image', align: alignOf(child), html: `<img src="${src}" alt="">` }));
+              }
+            } else if (child.tagName === 'DIV') {
+              // An SVG anywhere inside a wrapper div (image-placeholder,
+              // diagram, chart…) must reach the renderer as a figure so it is
+              // rasterised — serialising the wrapper as an HTML text block used
+              // to strip the tags and silently drop the whole diagram.
+              const innerSvg = child.querySelector('svg');
+              const innerImg = child.querySelector('img:not(.mim-logo)');
+              const cls = child.className || '';
+              if (innerSvg) {
+                items.push(withBox(child, { type: 'figure', kind: 'diagram', align: alignOf(child), html: innerSvg.outerHTML }));
+              } else if (innerImg) {
+                items.push(withBox(child, { type: 'figure', kind: 'image', align: alignOf(child), html: innerImg.outerHTML }));
+              } else if (/image-placeholder|math-step|ref-ar|ref-en|quiz|equation|diagram|chart/i.test(cls)) {
+                const kind = cls.split(/\s+/)[0];
+                items.push(withBox(child, { type: 'html', kind, html: child.innerHTML }));
+              } else {
+                items.push(withBox(child, { type: 'html', kind: 'div', html: child.innerHTML }));
+              }
+            } else if (child.tagName === 'SVG') {
+              items.push(withBox(child, { type: 'figure', kind: 'diagram', align: alignOf(child), html: child.outerHTML }));
+            } else if (child.tagName === 'BLOCKQUOTE' || child.tagName === 'PRE') {
+              items.push(withBox(child, { type: 'html', kind: child.tagName.toLowerCase(), html: child.innerHTML }));
+            }
+          });
+        }
+
+        return {
+          h1: h1 ? htmlOf(h1) : '',
+          h1Fs: h1st.fs,
+          h1Ff: h1st.ff,
+          h1Style: { ...h1st, box: boxOf(h1) },
+          h2: h2 ? htmlOf(h2) : '',
+          h2Fs: h2st.fs,
+          h2Ff: h2st.ff,
+          h2Style: { ...h2st, box: boxOf(h2) },
+          content: items,
+          footerLeft: footerLeft ? htmlOf(footerLeft) : '',
+          footerLeftStyle: footerLeft ? { ...styleInfo(footerLeft), box: boxOf(footerLeft) } : null,
+          footerRight: footerRight ? htmlOf(footerRight) : '',
+          footerRightStyle: footerRight ? { ...styleInfo(footerRight), box: boxOf(footerRight) } : null,
+          footerSite: footerSite ? htmlOf(footerSite) : '',
+          footerSiteStyle: footerSite ? { ...styleInfo(footerSite), box: boxOf(footerSite) } : null,
+          logo: logo ? { src: logo.getAttribute('src'), alt: logo.getAttribute('alt'), box: boxOf(logo) } : null,
+          slideStyle: { bg: csOf(s)?.backgroundColor, borderLeft: csOf(s)?.borderLeft, borderRight: csOf(s)?.borderRight },
+          notes
+        };
+      });
+
+      return { slides: slideData, themeCss, pageSize: { widthPx: firstSlideRect.width, heightPx: firstSlideRect.height } };
+    }
+
     getCleanHtml() {
       const clone = this.doc.documentElement.cloneNode(true);
       // Strip editor artifacts.

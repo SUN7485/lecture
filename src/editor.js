@@ -2527,6 +2527,654 @@
     }
 
     // ---------- export ----------
+    // Retained only for reading old in-memory plans while an editor instance is
+    // being upgraded. New export calls the versioned scene graph below.
+    serializeLegacyPptxPlan() {
+      const slides = this.slides();
+      const win = this.win || this.doc.defaultView;
+      const csOf = (el) => { try { return win.getComputedStyle(el); } catch (_) { return null; } };
+      // Capture browser-resolved visual data. Positions are relative to the
+      // slide, so the native exporter does not have to guess a flow layout.
+      const styleInfo = (el) => {
+        const cs = csOf(el);
+        if (!cs) return {};
+        const out = {};
+        const fs = parseFloat(cs.fontSize);
+        if (fs && fs > 0) out.fs = fs;
+        const fam = (cs.fontFamily || '').split(',')[0].trim().replace(/^['"]|['"]$/g, '');
+        if (fam) out.ff = fam;
+        out.color = cs.color;
+        out.bg = cs.backgroundColor;
+        out.align = cs.textAlign;
+        out.direction = cs.direction;
+        out.bold = parseInt(cs.fontWeight, 10) >= 600 || cs.fontWeight === 'bold';
+        out.lineHeight = parseFloat(cs.lineHeight) || 0;
+        return out;
+      };
+      // CSS class rules are not present in innerHTML. Inline the computed
+      // color on rich-text descendants so highlighted/bold words keep their
+      // actual browser color in the native text runs.
+      const htmlOf = (el) => {
+        const clone = el.cloneNode(true);
+        const source = el.querySelectorAll('strong, b, em, i, span, a, mark');
+        const target = clone.querySelectorAll('strong, b, em, i, span, a, mark');
+        source.forEach((node, index) => {
+          const copy = target[index];
+          const cs = csOf(node);
+          if (copy && cs) copy.style.color = cs.color;
+        });
+        return clone.innerHTML;
+      };
+      // The ve-align-left / ve-align-right classes (set by the align toolbar
+      // button on a .ve-slot) mean literal left / right within the content box.
+      const alignOf = (el) =>
+        el.classList.contains('ve-align-left') ? 'left'
+          : el.classList.contains('ve-align-right') ? 'right' : 'center';
+      const themeStyle = this.doc.getElementById('ve-theme');
+      const themeCss = themeStyle ? themeStyle.textContent : '';
+      const firstSlideRect = slides[0] ? slides[0].getBoundingClientRect() : { width: 950, height: 650 };
+      const slideData = slides.map((s, i) => {
+        const slideRect = s.getBoundingClientRect();
+        const boxOf = (el) => {
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { x: r.left - slideRect.left, y: r.top - slideRect.top, w: r.width, h: r.height };
+        };
+        const withBox = (el, item) => ({ ...item, ...styleInfo(el), box: boxOf(el) });
+        const h1 = s.querySelector('h1');
+        const h2 = s.querySelector('h2');
+        const content = s.querySelector('.content');
+        const footerLeft = s.querySelector('.footer-left');
+        const footerRight = s.querySelector('.footer-right');
+        const footerSite = s.querySelector('.footer-site');
+        const logo = s.querySelector('img.mim-logo');
+        const notes = s.getAttribute('data-ve-notes') || '';
+        const h1st = h1 ? styleInfo(h1) : {};
+        const h2st = h2 ? styleInfo(h2) : {};
+
+        const items = [];
+        if (content) {
+          Array.from(content.children).forEach(child => {
+            if (child.tagName === 'P') {
+              items.push(withBox(child, { type: 'paragraph', html: htmlOf(child) }));
+            } else if (child.tagName === 'UL' || child.tagName === 'OL') {
+              const listItems = Array.from(child.querySelectorAll('li')).map(htmlOf);
+              items.push(withBox(child, { type: 'list', ordered: child.tagName === 'OL', items: listItems }));
+            } else if (child.tagName === 'TABLE') {
+              const headers = Array.from(child.querySelectorAll('thead th')).map(htmlOf);
+              const rows = Array.from(child.querySelectorAll('tbody tr')).map(tr =>
+                Array.from(tr.querySelectorAll('td')).map(htmlOf)
+              );
+              items.push(withBox(child, { type: 'table', data: { headers, rows } }));
+            } else if (child.tagName === 'HR') {
+              const style = child.getAttribute('style') || '';
+              const colorMatch = style.match(/border-top:\s*\d+px\s+solid\s+([^;]+)/i);
+              const color = colorMatch ? colorMatch[1].trim() : '#444444';
+              const widthMatch = style.match(/width:\s*(\d+%|[\d.]+px)/i);
+              const width = widthMatch ? widthMatch[1] : '100%';
+              items.push(withBox(child, { type: 'line', color, width }));
+            } else if (child.tagName === 'FIGURE' && child.classList.contains('ve-slot')) {
+              const fig = {
+                type: 'figure',
+                propId: child.getAttribute('data-ve-prop'),
+                kind: child.getAttribute('data-ve-generated') || 'figure',
+                html: child.innerHTML,
+                align: alignOf(child),
+                ...styleInfo(child)
+              };
+              const figcaption = child.querySelector('figcaption');
+              if (figcaption) fig.caption = figcaption.innerHTML;
+              const captionAttr = child.getAttribute('data-ve-caption');
+              if (captionAttr) fig.caption = captionAttr;
+              items.push(withBox(child, fig));
+            } else if (child.tagName === 'IMG' && !child.classList.contains('mim-logo')) {
+              const src = child.getAttribute('src');
+              if (src && !src.startsWith('data:')) {
+                items.push(withBox(child, { type: 'image', src, alt: child.getAttribute('alt') || '', align: alignOf(child) }));
+              } else if (src && src.startsWith('data:')) {
+                items.push(withBox(child, { type: 'figure', kind: 'image', align: alignOf(child), html: `<img src="${src}" alt="">` }));
+              }
+            } else if (child.tagName === 'DIV') {
+              // An SVG anywhere inside a wrapper div (image-placeholder,
+              // diagram, chart…) must reach the renderer as a figure so it is
+              // rasterised — serialising the wrapper as an HTML text block used
+              // to strip the tags and silently drop the whole diagram.
+              const innerSvg = child.querySelector('svg');
+              const innerImg = child.querySelector('img:not(.mim-logo)');
+              const cls = child.className || '';
+              if (innerSvg) {
+                items.push(withBox(child, { type: 'figure', kind: 'diagram', align: alignOf(child), html: innerSvg.outerHTML }));
+              } else if (innerImg) {
+                items.push(withBox(child, { type: 'figure', kind: 'image', align: alignOf(child), html: innerImg.outerHTML }));
+              } else if (/image-placeholder|math-step|ref-ar|ref-en|quiz|equation|diagram|chart/i.test(cls)) {
+                const kind = cls.split(/\s+/)[0];
+                items.push(withBox(child, { type: 'html', kind, html: child.innerHTML }));
+              } else {
+                items.push(withBox(child, { type: 'html', kind: 'div', html: child.innerHTML }));
+              }
+            } else if (child.tagName === 'SVG') {
+              items.push(withBox(child, { type: 'figure', kind: 'diagram', align: alignOf(child), html: child.outerHTML }));
+            } else if (child.tagName === 'BLOCKQUOTE' || child.tagName === 'PRE') {
+              items.push(withBox(child, { type: 'html', kind: child.tagName.toLowerCase(), html: child.innerHTML }));
+            }
+          });
+        }
+
+        return {
+          h1: h1 ? htmlOf(h1) : '',
+          h1Fs: h1st.fs,
+          h1Ff: h1st.ff,
+          h1Style: { ...h1st, box: boxOf(h1) },
+          h2: h2 ? htmlOf(h2) : '',
+          h2Fs: h2st.fs,
+          h2Ff: h2st.ff,
+          h2Style: { ...h2st, box: boxOf(h2) },
+          content: items,
+          footerLeft: footerLeft ? htmlOf(footerLeft) : '',
+          footerLeftStyle: footerLeft ? { ...styleInfo(footerLeft), box: boxOf(footerLeft) } : null,
+          footerRight: footerRight ? htmlOf(footerRight) : '',
+          footerRightStyle: footerRight ? { ...styleInfo(footerRight), box: boxOf(footerRight) } : null,
+          footerSite: footerSite ? htmlOf(footerSite) : '',
+          footerSiteStyle: footerSite ? { ...styleInfo(footerSite), box: boxOf(footerSite) } : null,
+          logo: logo ? { src: logo.getAttribute('src'), alt: logo.getAttribute('alt'), box: boxOf(logo) } : null,
+          slideStyle: { bg: csOf(s)?.backgroundColor, borderLeft: csOf(s)?.borderLeft, borderRight: csOf(s)?.borderRight },
+          notes
+        };
+      });
+
+      return { slides: slideData, themeCss, pageSize: { widthPx: firstSlideRect.width, heightPx: firstSlideRect.height } };
+    }
+
+    serializeForPptx() {
+      // Versioned, browser-measured scene graph. Layout is resolved here, not
+      // guessed by the Python renderer: flex, absolute positioning and nested
+      // cover content become ordinary native PowerPoint objects at these bounds.
+      const SCHEMA_VERSION = 1;
+      const slides = this.slides();
+      const win = this.win || this.doc.defaultView;
+      const TEXT_NODE = 3;
+      const ELEMENT_NODE = 1;
+      const blockTags = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'CAPTION', 'DD', 'DIV', 'DL', 'DT', 'FIGCAPTION', 'FOOTER', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'TD', 'TH', 'TR', 'UL']);
+      const textTags = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'FIGCAPTION', 'BUTTON', 'LABEL']);
+      const forbiddenTags = new Set(['CANVAS', 'SVG', 'VIDEO', 'AUDIO', 'IFRAME', 'OBJECT', 'EMBED', 'MATH']);
+      const genericFonts = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-sans-serif', 'ui-serif']);
+      const allErrors = [];
+      const fonts = new Map();
+      // The browser can render a bundled OTF under a legacy CSS alias (for
+      // example "Lyon Arabic Regular"). The theme kit tells us that alias;
+      // PowerPoint must instead receive the real family/face carried by the
+      // OTF metadata. Keep both values in the scene rather than pretending the
+      // browser alias is an installed desktop face.
+      const themeStyle = this.doc.getElementById('ve-theme');
+      const normaliseFamilyKey = (value) => String(value || '')
+        .trim().replace(/^['\"]|['\"]$/g, '').replace(/\s+/g, ' ').toLowerCase();
+      const cleanFamilyName = (value) => String(value || '')
+        .trim().replace(/^['\"]|['\"]$/g, '').replace(/\s+/g, ' ');
+      const themeFontAliases = new Map();
+      try {
+        const rawFontMap = JSON.parse((themeStyle && themeStyle.dataset && themeStyle.dataset.veFonts) || '{}');
+        if (rawFontMap && typeof rawFontMap === 'object' && !Array.isArray(rawFontMap)) {
+          Object.entries(rawFontMap).forEach(([alias, canonical]) => {
+            if (typeof canonical !== 'string') return;
+            const from = normaliseFamilyKey(alias);
+            const to = cleanFamilyName(canonical);
+            if (from && to) themeFontAliases.set(from, to);
+          });
+        }
+      } catch (_) {}
+      const fontWeightNumber = (value) => {
+        if (String(value || '').toLowerCase() === 'bold') return 700;
+        const parsed = Number.parseInt(value, 10);
+        return Number.isFinite(parsed) ? parsed : 400;
+      };
+      const nativeLyonFaces = new Set([
+        'Lyon Arabic Text LF RgNo2',
+        'Lyon Arabic Text LF Semibold',
+        'Lyon Arabic Text LF Bold',
+        'Lyon Arabic Text LF Black'
+      ].map(normaliseFamilyKey));
+      // Legacy HTML sources frequently name the browser-only aliases below
+      // directly. They are not Windows/Office family names, so resolve them
+      // even when no active theme injected a `data-ve-fonts` map.
+      const legacyFontAliases = new Map();
+      Object.entries(FONT_ALIASES).forEach(([canonical, aliases]) => {
+        (aliases || []).forEach((alias) => legacyFontAliases.set(normaliseFamilyKey(alias), canonical));
+      });
+      const resolveFontFace = (browserFamily, fontWeight) => {
+        const browser = cleanFamilyName(browserFamily);
+        let resolved = browser;
+        const seen = new Set();
+        // Follow only explicit kit mappings. Unknown customer families remain
+        // unchanged and therefore still fail the desktop preflight if absent.
+        while (!seen.has(normaliseFamilyKey(resolved))) {
+          const key = normaliseFamilyKey(resolved);
+          const mapped = themeFontAliases.get(key) || legacyFontAliases.get(key);
+          if (!mapped) break;
+          seen.add(key);
+          resolved = mapped;
+        }
+        const key = normaliseFamilyKey(resolved);
+        const weight = fontWeightNumber(fontWeight);
+        let powerPoint = null;
+        // Lyon ships individual physical face families (for example
+        // "... LF Bold"), rather than one variable Office family. Applying
+        // a second PowerPoint bold flag to such a face synthesizes weight and
+        // changes the browser-measured glyph widths. Diodrum is a normal
+        // family, so PowerPoint should still select its bold style normally.
+        let powerPointFaceHasIntrinsicWeight = false;
+        if (key === 'diodrum arabic') {
+          powerPoint = 'Diodrum Arabic';
+        } else if (key === 'lyon arabic text') {
+          powerPoint = weight >= 800 ? 'Lyon Arabic Text LF Black'
+            : weight >= 700 ? 'Lyon Arabic Text LF Bold'
+              : weight >= 600 ? 'Lyon Arabic Text LF Semibold'
+                : 'Lyon Arabic Text LF RgNo2';
+          powerPointFaceHasIntrinsicWeight = true;
+        } else if (nativeLyonFaces.has(key)) {
+          powerPoint = resolved;
+          powerPointFaceHasIntrinsicWeight = true;
+        }
+        return {
+          fontFamily: browser,
+          resolvedFontFamily: resolved,
+          powerPointFontFamily: powerPoint || resolved || browser,
+          powerPointFaceHasIntrinsicWeight
+        };
+      };
+      const css = (el) => { try { return win.getComputedStyle(el); } catch (_) { return null; } };
+      const asPx = (value, fallback = 0) => {
+        const parsed = parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+      };
+      const tidy = (value) => String(value || '').replace(/[\t\r\n ]+/g, ' ').trim();
+      const firstFont = (value) => cleanFamilyName((value || '').split(',')[0]);
+      const transparent = (value) => !value || value === 'transparent' || /^rgba\([^,]+,[^,]+,[^,]+,\s*0\)$/i.test(value);
+      const parseShadow = (raw) => {
+        if (!raw || raw === 'none') return [];
+        return raw.split(/,(?![^()]*\))/).map(part => {
+          const nums = part.match(/-?[\d.]+px/g) || [];
+          const rgba = part.match(/(rgba?\([^)]*\)|#[0-9a-f]{3,8})/i);
+          return {
+            x: asPx(nums[0]), y: asPx(nums[1]), blur: asPx(nums[2]), spread: asPx(nums[3]),
+            color: rgba ? rgba[1] : 'rgba(0, 0, 0, 0.25)', inset: /\binset\b/i.test(part)
+          };
+        });
+      };
+      const border = (computed, name) => ({
+        width: asPx(computed[`border${name}Width`]),
+        style: computed[`border${name}Style`] || 'none',
+        color: computed[`border${name}Color`] || 'rgba(0, 0, 0, 0)'
+      });
+      const styleOf = (el) => {
+        const computed = css(el);
+        if (!computed) return {};
+        const browserFontFamily = firstFont(computed.fontFamily);
+        const fontFace = resolveFontFace(browserFontFamily, computed.fontWeight);
+        const style = {
+          display: computed.display, position: computed.position,
+          zIndex: computed.zIndex === 'auto' ? null : Number(computed.zIndex),
+          opacity: asPx(computed.opacity, 1), direction: computed.direction || 'ltr',
+          textAlign: computed.textAlign || 'start', verticalAlign: computed.verticalAlign || 'baseline',
+          // `fontFamily` remains the browser-computed alias. The two resolved
+          // fields are additive v1 data for a native Office renderer.
+          fontFamily: fontFace.fontFamily,
+          resolvedFontFamily: fontFace.resolvedFontFamily,
+          powerPointFontFamily: fontFace.powerPointFontFamily,
+          powerPointFaceHasIntrinsicWeight: fontFace.powerPointFaceHasIntrinsicWeight,
+          fontSize: asPx(computed.fontSize),
+          fontWeight: computed.fontWeight || '400', fontStyle: computed.fontStyle || 'normal',
+          letterSpacing: asPx(computed.letterSpacing), lineHeight: computed.lineHeight === 'normal' ? 0 : asPx(computed.lineHeight),
+          textDecoration: computed.textDecorationLine || 'none', color: computed.color || 'rgb(0, 0, 0)',
+          fill: computed.backgroundColor || 'rgba(0, 0, 0, 0)', backgroundImage: computed.backgroundImage || 'none',
+          border: { top: border(computed, 'Top'), right: border(computed, 'Right'), bottom: border(computed, 'Bottom'), left: border(computed, 'Left') },
+          borderRadius: [asPx(computed.borderTopLeftRadius), asPx(computed.borderTopRightRadius), asPx(computed.borderBottomRightRadius), asPx(computed.borderBottomLeftRadius)],
+          padding: { top: asPx(computed.paddingTop), right: asPx(computed.paddingRight), bottom: asPx(computed.paddingBottom), left: asPx(computed.paddingLeft) },
+          margin: { top: asPx(computed.marginTop), right: asPx(computed.marginRight), bottom: asPx(computed.marginBottom), left: asPx(computed.marginLeft) },
+          shadow: parseShadow(computed.boxShadow), textShadow: parseShadow(computed.textShadow),
+          transform: computed.transform || 'none', filter: computed.filter || 'none', clipPath: computed.clipPath || 'none',
+          mixBlendMode: computed.mixBlendMode || 'normal', overflow: computed.overflow || 'visible',
+          whiteSpace: computed.whiteSpace || 'normal', wordBreak: computed.wordBreak || 'normal',
+          objectFit: computed.objectFit || 'fill', objectPosition: computed.objectPosition || '50% 50%'
+        };
+        if (style.fontFamily && !genericFonts.has(style.fontFamily.toLowerCase())) {
+          const family = style.powerPointFontFamily || style.resolvedFontFamily || style.fontFamily;
+          fonts.set(`${family}|${style.fontWeight}|${style.fontStyle}`, {
+            // These are the authoritative native faces consumed by preflight.
+            family, weight: style.fontWeight, style: style.fontStyle,
+            browserFamily: style.fontFamily,
+            resolvedFontFamily: style.resolvedFontFamily,
+            powerPointFontFamily: style.powerPointFontFamily,
+            powerPointFaceHasIntrinsicWeight: style.powerPointFaceHasIntrinsicWeight
+          });
+        }
+        return style;
+      };
+      const unsupported = (el, style) => {
+        const out = [];
+        const reject = (property, value, reason) => out.push({ property, value, reason });
+        if (forbiddenTags.has(el.tagName)) reject('tagName', el.tagName, `${el.tagName} has no editable native PowerPoint representation`);
+        if (style.backgroundImage && style.backgroundImage !== 'none') reject('backgroundImage', style.backgroundImage, 'CSS backgrounds/gradients cannot be native editable fills');
+        if (style.filter && style.filter !== 'none') reject('filter', style.filter, 'CSS filters are unsupported');
+        if (style.clipPath && style.clipPath !== 'none') reject('clipPath', style.clipPath, 'CSS clipping is unsupported');
+        if (style.mixBlendMode && style.mixBlendMode !== 'normal') reject('mixBlendMode', style.mixBlendMode, 'blend modes are unsupported');
+        if (style.transform && style.transform !== 'none' && !/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/i.test(style.transform)) reject('transform', style.transform, 'CSS transforms are unsupported');
+        if ((style.shadow || []).length > 1 || (style.shadow || []).some(shadow => shadow.inset || shadow.spread)) reject('boxShadow', style.shadow, 'only one non-inset zero-spread shadow is supported');
+        if ((style.textShadow || []).length > 1 || (style.textShadow || []).some(shadow => shadow.inset || shadow.spread)) reject('textShadow', style.textShadow, 'only one non-inset zero-spread text shadow is supported');
+        if (!['normal', 'nowrap', 'pre-wrap', 'pre-line'].includes(style.whiteSpace)) reject('whiteSpace', style.whiteSpace, 'this text wrapping mode is unsupported');
+        return out;
+      };
+      const boundsOf = (el, slideBounds) => {
+        const r = el.getBoundingClientRect();
+        const round = value => Math.round(value * 1000) / 1000;
+        return { x: round(r.left - slideBounds.left), y: round(r.top - slideBounds.top), w: round(r.width), h: round(r.height) };
+      };
+      const visual = (computed, box) => !!computed && computed.display !== 'none' && computed.visibility !== 'hidden' && asPx(computed.opacity, 1) > 0 && box.w > 0 && box.h > 0;
+      const textCarrier = (el) => {
+        if (textTags.has(el.tagName) || el.tagName === 'LI' || el.tagName === 'TD' || el.tagName === 'TH') return !!tidy(el.textContent);
+        if (el.tagName !== 'DIV' && el.tagName !== 'SPAN') return false;
+        if (Array.from(el.childNodes).some(node => node.nodeType === TEXT_NODE && tidy(node.nodeValue))) return true;
+        return !Array.from(el.children).some(child => blockTags.has(child.tagName)) && !!tidy(el.textContent);
+      };
+      const inlineRunStyle = (style) => ({
+        // Browser alias + native Office face are both required. The first is
+        // useful for browser diagnostics; the second is what the PPTX renderer
+        // must request from desktop PowerPoint.
+        fontFamily: style.fontFamily,
+        resolvedFontFamily: style.resolvedFontFamily,
+        powerPointFontFamily: style.powerPointFontFamily,
+        powerPointFaceHasIntrinsicWeight: style.powerPointFaceHasIntrinsicWeight,
+        fontSize: style.fontSize,
+        fontWeight: style.fontWeight,
+        fontStyle: style.fontStyle,
+        color: style.color,
+        direction: style.direction,
+        textAlign: style.textAlign,
+        verticalAlign: style.verticalAlign,
+        lineHeight: style.lineHeight,
+        letterSpacing: style.letterSpacing,
+        textDecoration: style.textDecoration
+      });
+      const walkInlineText = (el, onText, onBreak) => {
+        const visit = (node) => {
+          if (node.nodeType === TEXT_NODE) {
+            if (node.nodeValue) onText(node);
+            return;
+          }
+          if (node.nodeType !== ELEMENT_NODE) return;
+          if (node !== el && blockTags.has(node.tagName)) return;
+          if (node.tagName === 'BR') {
+            if (onBreak) onBreak();
+            return;
+          }
+          Array.from(node.childNodes).forEach(visit);
+        };
+        Array.from(el.childNodes).forEach(visit);
+      };
+      const sameInlineStyle = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+      const geometryRound = (value) => Math.round(Number(value || 0) * 1000) / 1000;
+      const rectToSlideBounds = (rect, slideBounds) => {
+        if (!rect || !Number.isFinite(rect.left) || !Number.isFinite(rect.top) ||
+          !Number.isFinite(rect.width) || !Number.isFinite(rect.height) ||
+          rect.width <= 0 || rect.height <= 0) return null;
+        return {
+          x: geometryRound(rect.left - slideBounds.left),
+          y: geometryRound(rect.top - slideBounds.top),
+          w: geometryRound(rect.width),
+          h: geometryRound(rect.height)
+        };
+      };
+      const unionBounds = (left, right) => {
+        if (!left) return right || null;
+        if (!right) return left;
+        const x = Math.min(left.x, right.x);
+        const y = Math.min(left.y, right.y);
+        const rightEdge = Math.max(left.x + left.w, right.x + right.w);
+        const bottom = Math.max(left.y + left.h, right.y + right.h);
+        return { x: geometryRound(x), y: geometryRound(y), w: geometryRound(rightEdge - x), h: geometryRound(bottom - y) };
+      };
+      const rangeBounds = (textNode, start, end, slideBounds) => {
+        try {
+          const range = textNode.ownerDocument.createRange();
+          range.setStart(textNode, start);
+          range.setEnd(textNode, end);
+          return Array.from(range.getClientRects())
+            .map(rect => rectToSlideBounds(rect, slideBounds))
+            .filter(Boolean);
+        } catch (_) {
+          return [];
+        }
+      };
+      const unionManyBounds = (bounds) => bounds.reduce((merged, box) => unionBounds(merged, box), null);
+      const visualPartsForTextNode = (textNode, slideBounds, style) => {
+        const value = String(textNode.nodeValue || '');
+        if (!value) return [];
+        const wholeBounds = rangeBounds(textNode, 0, value.length, slideBounds);
+        if (wholeBounds.length === 1) return [{ text: value, bounds: wholeBounds[0], style }];
+        if (!wholeBounds.length) return [];
+
+        // A whole text-node range exposes one rectangle per wrapped visual
+        // fragment but not the corresponding character offsets. Measure
+        // character ranges only for wrapped/bidi nodes and coalesce adjacent
+        // characters on the same visual line. This keeps the normal one-line
+        // case cheap while retaining Chromium's actual line geometry.
+        const parts = [];
+        for (let offset = 0; offset < value.length; offset += 1) {
+          const bounds = unionManyBounds(rangeBounds(textNode, offset, offset + 1, slideBounds));
+          const fallback = bounds || (/[^\t\r\n ]/.test(value[offset]) ? wholeBounds[0] : null);
+          if (!fallback) {
+            if (parts.length) parts[parts.length - 1].text += value[offset];
+            continue;
+          }
+          const marker = `${Math.round(fallback.y * 4)}:${Math.round((fallback.y + fallback.h) * 4)}`;
+          const previous = parts[parts.length - 1];
+          if (previous && previous.marker === marker) {
+            previous.text += value[offset];
+            previous.bounds = unionBounds(previous.bounds, fallback);
+          } else {
+            parts.push({ text: value[offset], bounds: fallback, style, marker });
+          }
+        }
+        return parts.map(({ marker, ...part }) => part);
+      };
+      const textLinesFor = (el, slideBounds) => {
+        const fragments = [];
+        let sequence = 0;
+        let sawText = false;
+        let pendingSpace = false;
+        const append = (part) => {
+          const raw = String(part.text || '').replace(/[\t\r\n ]+/g, ' ');
+          const body = raw.trim();
+          if (!body) {
+            if (sawText) pendingSpace = true;
+            return;
+          }
+          const leadingSpace = /^\s/.test(raw);
+          const trailingSpace = /\s$/.test(raw);
+          const text = `${sawText && (pendingSpace || leadingSpace) ? ' ' : ''}${body}`;
+          pendingSpace = trailingSpace;
+          sawText = true;
+          fragments.push({ text, bounds: part.bounds, style: part.style, direction: part.style.direction || 'ltr', sequence: sequence++ });
+        };
+        walkInlineText(el, (textNode) => {
+          const style = inlineRunStyle(styleOf(textNode.parentElement || el));
+          visualPartsForTextNode(textNode, slideBounds, style).forEach(append);
+        }, () => { pendingSpace = false; });
+
+        const lines = [];
+        for (const fragment of fragments) {
+          const centre = fragment.bounds.y + fragment.bounds.h / 2;
+          let line = lines.find((candidate) => {
+            const candidateCentre = candidate.bounds.y + candidate.bounds.h / 2;
+            const tolerance = Math.max(1.5, Math.min(candidate.bounds.h, fragment.bounds.h) * 0.35);
+            return Math.abs(candidateCentre - centre) <= tolerance;
+          });
+          if (!line) {
+            line = { bounds: fragment.bounds, fragments: [] };
+            lines.push(line);
+          } else {
+            line.bounds = unionBounds(line.bounds, fragment.bounds);
+          }
+          line.fragments.push(fragment);
+        }
+
+        const normaliseLineRuns = (items) => {
+          const merged = [];
+          for (const item of items.sort((left, right) => left.sequence - right.sequence)) {
+            const previous = merged[merged.length - 1];
+            if (previous && sameInlineStyle(previous.style, item.style)) {
+              previous.text += item.text;
+              previous.bounds = unionBounds(previous.bounds, item.bounds);
+            } else {
+              merged.push({ text: item.text, bounds: item.bounds, style: item.style, direction: item.direction });
+            }
+          }
+          while (merged.length && !merged[0].text.trim()) merged.shift();
+          while (merged.length && !merged[merged.length - 1].text.trim()) merged.pop();
+          if (merged.length) merged[0].text = merged[0].text.replace(/^\s+/, '');
+          if (merged.length) merged[merged.length - 1].text = merged[merged.length - 1].text.replace(/\s+$/, '');
+          return merged.filter(run => run.text.trim());
+        };
+        const baseDirection = styleOf(el).direction || 'ltr';
+        // Additive to lve.scene-graph v1. `textLines` is deliberately a plain
+        // array on a text carrier so a native PPTX renderer can emit one
+        // editable, non-wrapping textbox per Chromium-measured line.
+        const baseStyle = inlineRunStyle(styleOf(el));
+        return lines
+          .sort((left, right) => left.bounds.y - right.bounds.y || left.bounds.x - right.bounds.x)
+          .map((line, index) => {
+            const runs = normaliseLineRuns(line.fragments);
+            const directions = new Set(runs.map(run => run.direction));
+            const direction = directions.size === 1 ? runs[0].direction : baseDirection;
+            return {
+              index,
+              coordinateSpace: 'slide',
+              bounds: line.bounds,
+              text: tidy(runs.map(run => run.text).join('')),
+              direction,
+              style: { ...baseStyle, direction },
+              runs
+            };
+          })
+          .filter(line => line.text && line.runs.length);
+      };
+      const richRuns = (el) => {
+        const runs = [];
+        walkInlineText(el, (node) => {
+          const style = styleOf(node.parentElement || el);
+          runs.push({ text: node.nodeValue, style: inlineRunStyle(style) });
+        });
+        // DOM text nodes retain source indentation and line breaks. Those are
+        // layout whitespace in HTML, not paragraph breaks; sending them raw to
+        // PowerPoint created leading/trailing empty paragraphs and shifted
+        // every native text box. Keep a single space for real inline separation
+        // (e.g. <strong>a</strong> <em>b</em>), then trim only the stream ends.
+        const merged = runs.map((run) => ({
+          ...run,
+          text: String(run.text || '').replace(/[\t\r\n ]+/g, ' ')
+        })).reduce((items, run) => {
+          const previous = items[items.length - 1];
+          if (previous && JSON.stringify(previous.style) === JSON.stringify(run.style)) previous.text += run.text;
+          else items.push(run);
+          return items;
+        }, []);
+        while (merged.length && !merged[0].text.trim()) merged.shift();
+        while (merged.length && !merged[merged.length - 1].text.trim()) merged.pop();
+        if (merged.length) merged[0].text = merged[0].text.replace(/^\s+/, '');
+        if (merged.length) merged[merged.length - 1].text = merged[merged.length - 1].text.replace(/\s+$/, '');
+        return merged.filter((run) => run.text);
+      };
+      const cropFor = (el, box, style) => {
+        const naturalW = Number(el.naturalWidth || 0), naturalH = Number(el.naturalHeight || 0);
+        const crop = { fit: style.objectFit, position: style.objectPosition, naturalW, naturalH, left: 0, right: 0, top: 0, bottom: 0 };
+        if (style.objectFit !== 'cover' || !naturalW || !naturalH || !box.w || !box.h) return crop;
+        const sourceRatio = naturalW / naturalH, targetRatio = box.w / box.h;
+        if (sourceRatio > targetRatio) crop.left = crop.right = Math.max(0, (1 - targetRatio / sourceRatio) / 2);
+        else crop.top = crop.bottom = Math.max(0, (1 - sourceRatio / targetRatio) / 2);
+        return crop;
+      };
+      const tableFor = (table, slideBounds) => ({
+        rows: Array.from(table.rows || []).map((row, rowIndex) => ({
+          index: rowIndex, bounds: boundsOf(row, slideBounds),
+          cells: Array.from(row.cells || []).map((cell, columnIndex) => ({
+            row: rowIndex, column: columnIndex, rowSpan: cell.rowSpan || 1, colSpan: cell.colSpan || 1,
+            bounds: boundsOf(cell, slideBounds), style: styleOf(cell), text: tidy(cell.textContent),
+            runs: richRuns(cell), textLines: textLinesFor(cell, slideBounds)
+          }))
+        }))
+      });
+      const listFor = (list, slideBounds) => ({
+        ordered: list.tagName === 'OL',
+        items: Array.from(list.children).filter(item => item.tagName === 'LI').map((item, index) => ({
+          index, bounds: boundsOf(item, slideBounds), style: styleOf(item), text: tidy(item.textContent),
+          runs: richRuns(item), textLines: textLinesFor(item, slideBounds)
+        }))
+      });
+      const sceneSlides = slides.map((slide, slideIndex) => {
+        const slideBounds = slide.getBoundingClientRect();
+        const nodes = [];
+        let paintOrder = 0;
+        const rootStyle = styleOf(slide);
+        const rootIssues = unsupported(slide, rootStyle);
+        rootIssues.forEach(issue => allErrors.push({ slide: slideIndex + 1, nodeId: `s${slideIndex}:root`, tag: 'slide', ...issue }));
+        nodes.push({
+          id: `s${slideIndex}:root`, parentId: null, path: 'root', tag: 'slide', order: paintOrder++, zIndex: rootStyle.zIndex,
+          bounds: { x: 0, y: 0, w: slideBounds.width, h: slideBounds.height }, style: rootStyle,
+          renderAs: 'slide', text: '', runs: [], unsupported: rootIssues
+        });
+        const visit = (el, parentId, path) => {
+          const computed = css(el), box = boundsOf(el, slideBounds);
+          if (!visual(computed, box)) return;
+          const style = styleOf(el), tag = el.tagName.toLowerCase();
+          const id = `s${slideIndex}:${path}`;
+          const isImage = el.tagName === 'IMG', isTable = el.tagName === 'TABLE', isList = el.tagName === 'UL' || el.tagName === 'OL', isLine = el.tagName === 'HR';
+          const tableDescendant = !!el.closest('table'), listDescendant = !!el.closest('ul,ol');
+          const shape = !transparent(style.fill) || Object.values(style.border).some(edge => edge.width > 0 && edge.style !== 'none') || style.borderRadius.some(Boolean) || style.shadow.length > 0;
+          const text = textCarrier(el) ? tidy(el.textContent) : '';
+          let renderAs = 'layout';
+          if (isImage) renderAs = 'image'; else if (isTable) renderAs = 'table'; else if (isList) renderAs = 'list'; else if (isLine) renderAs = 'line';
+          else if (tableDescendant) renderAs = 'table-cell'; else if (listDescendant) renderAs = 'list-item';
+          else if (text) renderAs = shape ? 'shape-text' : 'text'; else if (shape) renderAs = 'shape';
+          const issues = unsupported(el, style);
+          issues.forEach(issue => allErrors.push({ slide: slideIndex + 1, nodeId: id, tag, ...issue }));
+          const node = { id, parentId, path, tag, order: paintOrder++, zIndex: style.zIndex, bounds: box, style, renderAs, text, runs: text ? richRuns(el) : [], unsupported: issues };
+          if (text) {
+            node.textLineCoordinateSpace = 'slide';
+            node.textLines = textLinesFor(el, slideBounds);
+          }
+          if (isImage) node.image = { src: el.currentSrc || el.src || el.getAttribute('src') || '', alt: el.alt || '', crop: cropFor(el, box, style) };
+          if (isTable) node.table = tableFor(el, slideBounds);
+          if (isList) node.list = listFor(el, slideBounds);
+          nodes.push(node);
+          Array.from(el.children).forEach((child, index) => visit(child, id, `${path}.${index}`));
+        };
+        Array.from(slide.children).forEach((child, index) => visit(child, `s${slideIndex}:root`, String(index)));
+        const expectedText = [];
+        nodes.forEach(node => {
+          if (node.text) expectedText.push({ nodeId: node.id, text: node.text, direction: node.style.direction, bounds: node.bounds });
+          (node.list?.items || []).forEach(item => expectedText.push({ nodeId: node.id, text: item.text, direction: item.style.direction, bounds: item.bounds }));
+          (node.table?.rows || []).forEach(row => row.cells.forEach(cell => expectedText.push({ nodeId: node.id, text: cell.text, direction: cell.style.direction, bounds: cell.bounds })));
+        });
+        return {
+          index: slideIndex + 1,
+          widthPx: slideBounds.width,
+          heightPx: slideBounds.height,
+          notes: slide.getAttribute('data-ve-notes') || '',
+          // This canonical stream is deliberately captured once from the DOM.
+          // Per-node expectedText retains geometry for diagnostics, but must not
+          // cause inline rich-text descendants to be counted twice by OCR.
+          expectedDomText: tidy(slide.innerText || slide.textContent),
+          nodes,
+          expectedText
+        };
+      });
+      return {
+        format: 'lve.scene-graph', schemaVersion: SCHEMA_VERSION, source: { renderer: 'chromium', dpi: 96 },
+        pageSize: { widthPx: slides[0] ? slides[0].getBoundingClientRect().width : 950, heightPx: slides[0] ? slides[0].getBoundingClientRect().height : 650 },
+        requiredFonts: Array.from(fonts.values()), errors: allErrors, slides: sceneSlides,
+        themeCss: themeStyle ? themeStyle.textContent : ''
+      };
+    }
+
     getCleanHtml() {
       const clone = this.doc.documentElement.cloneNode(true);
       // Strip editor artifacts.
