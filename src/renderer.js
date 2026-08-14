@@ -713,6 +713,22 @@
     status(res.ok ? 'Preview opened — check it, then export.' : 'Preview failed: ' + (res.error || ''));
   }
 
+  // "Didn't check" and "checked and found problems" must never share a number.
+  // Reads the report's verdict fields, not warnings.length (mission 034).
+  function pptxExportStatus(res) {
+    const report = res.report || {};
+    const verified = report.verifiedSlideCount || 0;
+    const failed = report.failedSlideCount || 0;
+    switch (report.verificationState) {
+      case 'verified':
+        return `تم التصدير — تم التحقق من ${verified} شريحة مطابقة: ${res.filePath}`;
+      case 'partial':
+        return `تم التصدير — ${failed} شريحة غير مطابقة، راجع المعاينة: ${res.filePath}`;
+      default:
+        return `تم التصدير بدون تحقق (PowerPoint غير متوفر): ${res.filePath}`;
+    }
+  }
+
   async function exportPptxDirect() {
     if (!editor) { status('Open a lecture first.'); return; }
     const sceneGraph = editor.serializeForPptx();
@@ -727,10 +743,7 @@
       html: editor.getCleanHtml()
     });
     if (res.ok) {
-      const warningCount = res.report?.warnings?.length || 0;
-      status(warningCount
-        ? `Exported editable PPTX with ${warningCount} fidelity notes: ${res.filePath}`
-        : 'Exported editable PPTX: ' + res.filePath);
+      status(pptxExportStatus(res));
     } else {
       if (res.report) showFidelityReport(res.report);
       status('PPTX export ' + (res.error ? 'failed: ' + res.error : 'cancelled.'));

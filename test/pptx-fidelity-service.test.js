@@ -196,7 +196,8 @@ async function run(scenario, slideCount = 1, fidelityPolicy, evidenceMode) {
 for (const [scenario, expected] of [
   ['missing-font', { stage: 'preflight', code: 'REQUIRED_FONT_MISSING', property: 'fontFamily' }],
   ['unsupported-css', { stage: 'preflight', code: 'UNSUPPORTED_CSS_PROPERTY', property: 'filter' }],
-  ['ocr-mismatch', { stage: 'ocr', code: 'OCR_RTL_TOKEN_ORDER_MISMATCH', property: null }],
+  // 'ocr-mismatch' removed with the OCR gate (mission 034): the pixel diff
+  // catches misplaced text deterministically, without OCR's token-order flakiness.
   ['visual-mismatch', { stage: 'visual', code: 'SSIM_BELOW_THRESHOLD', property: null }],
   ['renderer-timeout', { stage: 'powerpoint-render', code: 'POWERPOINT_RENDER_TIMEOUT', property: null }]
 ]) {
@@ -221,7 +222,7 @@ for (const [scenario, expected] of [
   });
 }
 
-test('production fidelity service performs 26-slide OCR, visual, and native-object checks before atomic replacement', async (t) => {
+test('production fidelity service performs 26-slide visual and native-object checks before atomic replacement', async (t) => {
   const { root, destinationPath, calls, result } = await run('pass', 26);
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
@@ -233,13 +234,13 @@ test('production fidelity service performs 26-slide OCR, visual, and native-obje
   assert.equal(result.report.target.height, 1300);
   assert.equal(result.report.slides.length, 26);
   assert.equal(result.report.structural.actualSlideCount, 26);
-  assert.equal(calls.ocr, 26);
+  assert.equal(calls.ocr, 0, 'OCR was retired from the gate in mission 034');
   assert.equal(calls.compare, 26);
   assert.equal(calls.audit, 1);
   assert.equal(calls.cleanup, 1);
 });
 
-for (const scenario of ['ocr-mismatch', 'visual-mismatch']) {
+for (const scenario of ['visual-mismatch']) {
   test(`editable best-effort export retains ${scenario} evidence but commits the native PPTX`, async (t) => {
     const { root, destinationPath, calls, result } = await run(scenario, 1, 'editable-best-effort');
     t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -271,5 +272,8 @@ test('native best-effort export commits after preflight and native-object audit 
   assert.equal(calls.ocr, 0);
   assert.equal(calls.compare, 0);
   assert.equal(calls.audit, 1, 'native-object audit remains a hard requirement');
-  assert.ok(result.report.warnings.some((warning) => warning.code === 'FIDELITY_EVIDENCE_DEFERRED'));
+  // "Didn't check" is a state now, never a warning that reads like a defect.
+  assert.equal(result.report.verificationState, 'unverified');
+  assert.equal(result.report.verifiedSlideCount, 0);
+  assert.equal(result.report.warnings.some((warning) => warning.code === 'FIDELITY_EVIDENCE_DEFERRED'), false);
 });

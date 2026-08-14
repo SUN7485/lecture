@@ -79,7 +79,7 @@ async function exportDeck({ name, deck }) {
     const started = Date.now();
     await page.waitForFunction(() => {
       const text = document.getElementById('status').textContent || '';
-      return /^Exported editable PPTX|^PPTX export /.test(text);
+      return /^تم التصدير|^PPTX export /.test(text);
     }, null, { timeout: EXPORT_TIMEOUT_MS });
     const status = await page.evaluate(() => document.getElementById('status').textContent);
     console.log(`  status after ${Math.round((Date.now() - started) / 1000)}s: ${status}`);

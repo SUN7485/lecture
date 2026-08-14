@@ -48,7 +48,7 @@ function runAudit(payload) {
 
     await page.evaluate(() => { document.getElementById('status').textContent = 'probe: waiting'; });
     await page.click('#btn-export-pptx');
-    await page.waitForFunction(() => /^Exported editable PPTX|^PPTX export /
+    await page.waitForFunction(() => /^تم التصدير|^PPTX export /
       .test(document.getElementById('status').textContent || ''), null, { timeout: 600000 });
     const status = await page.evaluate(() => document.getElementById('status').textContent);
     console.log('status:', status);

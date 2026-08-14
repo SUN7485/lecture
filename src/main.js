@@ -634,9 +634,13 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
       error: 'A versioned full-slide scene graph is required for editable PPTX export.'
     };
   }
-  // Diagnostic override only.  The product default stays 'native'; the
-  // calibration/baseline runs set LVE_EVIDENCE_MODE=full to turn the
-  // source-render, PowerPoint-render, OCR and pixel-diff stages back on.
+  // ARMED in mission 034: a machine with desktop PowerPoint verifies every
+  // export against PowerPoint's own render at the frozen thresholds. A machine
+  // without it still exports — as 'unverified', an honest state, never a
+  // refusal. LVE_EVIDENCE_MODE remains an explicit diagnostic override.
+  const decided = await preflightVerifiedPptx({ sceneGraph, evidenceMode: 'full' });
+  const powerPointReady = Boolean(decided.powerpoint?.ok);
+  evidenceMode = powerPointReady ? 'full' : 'native';
   const requestedMode = process.env.LVE_EVIDENCE_MODE;
   if (['full', 'preview', 'native'].includes(requestedMode)) evidenceMode = requestedMode;
   const workDir = ensureFidelityRoot();
@@ -677,7 +681,8 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
     fidelityPolicy: 'editable-best-effort',
     evidenceMode,
     workDir,
-    preflight: (input) => preflightVerifiedPptx({ ...input, evidenceMode }),
+    // Reuse the font enumeration the mode decision already paid for.
+    preflight: (input) => preflightVerifiedPptx({ ...input, evidenceMode, installedFonts: decided.installedFonts }),
     auditGeometry: auditPptxGeometry,
     renderPptx: ({ sceneGraph: graph, outputPath, baseDir: sceneBaseDir }) =>
       renderNativePptx({ sceneGraph: graph, baseDir: sceneBaseDir, suggestedName: outputPath }),

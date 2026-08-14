@@ -45,7 +45,7 @@ async function exportOnce({ name, deck }, run) {
       && window.__editor.doc.querySelectorAll('.slide').length > 0, null, { timeout: 120000 });
     await page.evaluate(() => { document.getElementById('status').textContent = 'calibrate: waiting'; });
     await page.click('#btn-export-pptx');
-    await page.waitForFunction(() => /^Exported editable PPTX|^PPTX export /
+    await page.waitForFunction(() => /^تم التصدير|^PPTX export /
       .test(document.getElementById('status').textContent || ''), null, { timeout: EXPORT_TIMEOUT_MS });
     const status = await page.evaluate(() => document.getElementById('status').textContent);
     const created = runDirs().filter((dir) => !before.has(dir)).sort();

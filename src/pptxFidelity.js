@@ -1765,9 +1765,41 @@ async function verifyAndExport(options = {}) {
   const candidatePptxPath = path.resolve(options.tempPptxPath || report.artifacts.candidatePptxPath);
   report.artifacts.candidatePptxPath = candidatePptxPath;
 
+  /**
+   * Per-slide verdict, so a reader can tell the three states apart:
+   *   verified   — compared against PowerPoint's own render and within budget
+   *   failed     — compared, and outside budget
+   *   unverified — not compared (no PowerPoint, or a native-only export)
+   */
+  const assignVerdicts = () => {
+    const issuesFor = (index) => [...report.failures, ...report.warnings]
+      .filter((issue) => issue.slideIndex === index &&
+        ['visual', 'geometry', 'structural', 'font-render'].includes(issue.stage));
+    report.slideVerdicts = report.slides.map((slide) => {
+      const metrics = slide.visual;
+      const compared = Number.isFinite(metrics?.ssim) && Number.isFinite(metrics?.mismatchPercent);
+      const reasons = issuesFor(slide.index).map((issue) => issue.code);
+      const verdict = !compared ? 'unverified' : (metrics.ok === false || reasons.length ? 'failed' : 'verified');
+      return {
+        slide: slide.slideNumber ?? slide.index + 1,
+        verdict,
+        ssim: compared ? metrics.ssim : null,
+        mismatchPercent: compared ? metrics.mismatchPercent : null,
+        reasons
+      };
+    });
+    const verdicts = report.slideVerdicts.map((entry) => entry.verdict);
+    report.verificationState = verdicts.some((verdict) => verdict === 'failed') ? 'partial'
+      : (verdicts.length && verdicts.every((verdict) => verdict === 'verified') ? 'verified' : 'unverified');
+    report.verifiedSlideCount = verdicts.filter((verdict) => verdict === 'verified').length;
+    report.failedSlideCount = verdicts.filter((verdict) => verdict === 'failed').length;
+    report.unverifiedSlideCount = verdicts.filter((verdict) => verdict === 'unverified').length;
+  };
+
   const finalise = async () => {
     report.ok = report.failures.length === 0;
-    report.verified = report.ok && report.warnings.length === 0;
+    assignVerdicts();
+    report.verified = report.ok && report.verificationState === 'verified';
     report.stage = report.ok
       ? (report.verified ? 'passed' : 'passed-with-warnings')
       : report.stage;
@@ -1933,23 +1965,10 @@ async function verifyAndExport(options = {}) {
     // preview needs PowerPoint images, but does not need the slow OCR/diff
     // pass merely to let the user inspect the editable deck.
     if (evidenceMode === EVIDENCE_MODES.FULL) {
-    report.stage = 'ocr';
-    for (const slideReport of report.slides) {
-      const result = await runOcrForSlide(ocr, {
-        slideIndex: slideReport.index,
-        sourcePath: slideReport.sourceRender,
-        powerPointPath: slideReport.powerPointRender,
-        expectedDomText: slideReport.expectedDomText,
-        target
-      });
-      const checked = compareOcrResult(result, { expectedDomText: slideReport.expectedDomText, positionTolerancePx: thresholds.ocrPositionTolerancePx });
-      slideReport.ocr = checked;
-      for (const error of checked.errors || []) {
-        (fidelityPolicy === FIDELITY_POLICIES.EDITABLE_BEST_EFFORT ? recordWarning : recordFailure)(
-          report, 'ocr', error, { slideIndex: slideReport.index });
-      }
-    }
-
+    // OCR was RETIRED from the gate in mission 034: it required exact token
+    // order, so one misread killed a correct slide, while the pixel diff
+    // already catches misplaced or missing text deterministically. The bundled
+    // engine survives as a diagnostic CLI (tools/pptx/diagnose-ocr.js).
     report.stage = report.failures.length ? report.failures[0].stage : 'visual';
     for (const slideReport of report.slides) {
       try {
@@ -1976,17 +1995,11 @@ async function verifyAndExport(options = {}) {
     }
     }
     }
-    if (evidenceMode === EVIDENCE_MODES.NATIVE) {
-      recordWarning(report, 'evidence', {
-        code: 'FIDELITY_EVIDENCE_DEFERRED',
-        message: 'OCR and pixel-diff diagnostics were deferred for this editable export. Use PPTX Preview to inspect the PowerPoint render.'
-      });
-    } else if (evidenceMode === EVIDENCE_MODES.PREVIEW) {
-      recordWarning(report, 'evidence', {
-        code: 'FIDELITY_EVIDENCE_DEFERRED',
-        message: 'OCR and pixel-diff diagnostics were deferred for this PowerPoint preview.'
-      });
-    }
+    // "We did not check" is a STATE, not a warning. Before mission 034 every
+    // native export shipped a FIDELITY_EVIDENCE_DEFERRED warning that the UI
+    // counted like a defect, so "unverified" and "checked and found problems"
+    // shared one number. They are now separate: warnings[] only ever holds
+    // things that were actually checked and found wanting.
 
     // Position truth, independent of any renderer: re-open the candidate and
     // assert every emitted shape sits where the browser measured it. Needs no
