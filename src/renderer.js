@@ -1570,47 +1570,6 @@
     return issues;
   }
 
-  // ---- Doctor "Auto-Fix & Export": bake inline SVGs (and any loaded local
-  // content images) to self-contained PNG data URLs in the LIVE editor before
-  // exporting, so the result does not depend on cairosvg being present on the
-  // export machine. This is a real fix — it mutates the deck, not just the plan.
-  // ---- Export-time SVG baking: rasterise every inline SVG figure in the plan
-  // to a self-contained PNG data URL using Chromium's rendering engine, so the
-  // .pptx never depends on cairosvg / native cairo being present at export time.
-  // The Python renderer just embeds the produced PNG. Failures (e.g. a canvas
-  // that cannot read the SVG) leave the raw SVG in place — python's cairosvg /
-  // inkscape / placeholder chain then takes over.
-  async function rasterizeInlineSvgs() {
-    if (!editor) return { done: 0, failed: 0 };
-    const svgs = Array.from(editor.doc.querySelectorAll('.slide svg'));
-    let done = 0;
-    for (const svg of svgs) {
-      if (svg.closest('.ve-ghost, .ve-toolbar, .ve-overlay, .ve-guide')) continue;
-      try {
-        const png = await svgToPngDataUrl(svg, 2);
-        const img = editor.doc.createElement('img');
-        img.src = png;
-        img.alt = 'rasterised SVG diagram';
-        img.style.cssText = 'max-width:100%; max-height:100%; object-fit:contain; display:block; margin:0 auto;';
-        svg.replaceWith(img);
-        done++;
-      } catch (_) {
-        // Leave the raw SVG in place — the Python renderer (cairosvg) rasterises
-        // it at export time, so this is never a data-losing failure.
-      }
-    }
-    return { done };
-  }
-
-  async function doctorFixAndExport() {
-    const issues = runPptxDoctor({ showModal: false });
-    if (issues && issues.some(i => i.level === 'err')) {
-      status('Fix the reported unsupported feature before exporting.');
-      runPptxDoctor({ showModal: true });
-      return;
-    }
-    await exportPptxDirect();
-  }
 
   // Wire preview and doctor modals once. Both export routes invoke the same
   // strict editable-PPTX fidelity gate.

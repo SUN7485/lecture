@@ -114,7 +114,7 @@ This is a wiring-and-calibration problem, not a rewrite.
 > (exact algorithms, XML shapes, derivation formulas) so the executor computes
 > instead of inventing.
 
-### Phase 0 — First truth (Mission 032, Claude-led)
+### Phase 0 — First truth (Mission 032) — ✅ DONE 2026-08-14
 The cheapest possible end-to-end run, before building anything.
 1. Commit the entire WIP as a `wip/pptx-v2` baseline branch (20+ uncommitted
    files = one crash from gone).
@@ -132,7 +132,7 @@ The cheapest possible end-to-end run, before building anything.
   real lectures, artifacts in `.fidelity/`, numbers recorded in SESSION_LOG.
   We finally know how far off we actually are.
 
-### Phase 1 — Every deck exports (Mission 033, 🟢 handoff after Claude specs scene v2)
+### Phase 1 — Every deck exports (Mission 033) — ✅ DONE 2026-08-14
 - Scene v2 (`schemaVersion:2`): `unsupported[]` becomes advisory; each
   affected node gets `renderAs:'bake'` + capture id. `validate_scene_graph`
   rejects only malformed geometry, never features.

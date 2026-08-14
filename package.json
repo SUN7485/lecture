@@ -41,10 +41,10 @@
   "devDependencies": {
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3",
-    "playwright-core": "^1.61.1"
+    "playwright-core": "^1.61.1",
+    "pptxgenjs": "^4.0.1"
   },
   "dependencies": {
-    "mathjax": "^3.2.2",
-    "pptxgenjs": "^4.0.1"
+    "mathjax": "^3.2.2"
   }
 }
