@@ -151,10 +151,12 @@ function makeAdapters({ scenario, slideCount, calls }) {
     },
     async compare({ thresholds }) {
       calls.compare += 1;
-      assert.equal(thresholds.ssim, 0.9995);
-      assert.equal(thresholds.pixelMismatchPercent, 0.02);
+      // Frozen by mission 034 from the calibration deck distribution.
+      assert.equal(thresholds.ssim, 0.8487);
+      assert.equal(thresholds.pixelMismatchPercent, 8.45);
+      assert.equal(thresholds.pixelDelta, 24);
       if (scenario === 'visual-mismatch') {
-        return { ok: false, errors: [{ code: 'SSIM_BELOW_THRESHOLD', message: 'SSIM 0.9950000 is below 0.9995.' }], heatmapPath: 'heatmap.png' };
+        return { ok: false, errors: [{ code: 'SSIM_BELOW_THRESHOLD', message: 'SSIM 0.8000000 is below 0.8487.' }], heatmapPath: 'heatmap.png' };
       }
       return { ok: true, ssim: 1, mismatchPercent: 0, heatmapPath: 'heatmap.png' };
     },

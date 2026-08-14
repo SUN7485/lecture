@@ -2758,6 +2758,15 @@
         // silently missed every inline SVG diagram and dropped it from the deck.
         const tagName = String(el.tagName || '').toUpperCase();
         if (forbiddenTags.has(tagName)) toBake('tagName', tagName, `${tagName} has no editable native PowerPoint representation`);
+        // An <img> pointing at SVG is still vector: PowerPoint's picture part
+        // cannot decode it, so it bakes like an inline <svg> rather than
+        // crashing the renderer on an unidentifiable image.
+        if (tagName === 'IMG') {
+          const source = el.currentSrc || el.src || el.getAttribute('src') || '';
+          if (/^data:image\/svg\+xml/i.test(source) || /\.svgz?(\?|#|$)/i.test(source)) {
+            toBake('image', source.slice(0, 60), 'SVG image sources have no native PowerPoint picture format');
+          }
+        }
         if (style.backgroundImage && style.backgroundImage !== 'none') {
           gradient = parseLinearGradient(style.backgroundImage);
           if (!gradient) toBake('backgroundImage', style.backgroundImage, 'only a single linear-gradient maps to a native gradient fill');
@@ -3062,7 +3071,10 @@
           }
           const isImage = el.tagName === 'IMG', isTable = el.tagName === 'TABLE', isList = el.tagName === 'UL' || el.tagName === 'OL', isLine = el.tagName === 'HR';
           const tableDescendant = !!el.closest('table'), listDescendant = !!el.closest('ul,ol');
-          const shape = !transparent(style.fill) || Object.values(style.border).some(edge => edge.width > 0 && edge.style !== 'none') || style.borderRadius.some(Boolean) || style.shadow.length > 0;
+          // A gradient IS a background, but it lives in background-image while
+          // background-color stays transparent — without this a gradient-only
+          // box classifies as `layout` and is silently dropped from the deck.
+          const shape = !transparent(style.fill) || !!style.gradient || Object.values(style.border).some(edge => edge.width > 0 && edge.style !== 'none') || style.borderRadius.some(Boolean) || style.shadow.length > 0;
           const text = textCarrier(el) ? tidy(el.textContent) : '';
           let renderAs = 'layout';
           if (isImage) renderAs = 'image'; else if (isTable) renderAs = 'table'; else if (isList) renderAs = 'list'; else if (isLine) renderAs = 'line';

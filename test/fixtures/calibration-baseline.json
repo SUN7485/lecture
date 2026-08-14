@@ -1,0 +1,386 @@
+{
+  "runs": 3,
+  "decks": [
+    "calibration-deck"
+  ],
+  "rows": [
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 1,
+      "ssim": 0.9669454567180461,
+      "mismatchPercent": 1.316234817813765,
+      "largestRegionArea": 1906,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 2,
+      "ssim": 0.9572182012515484,
+      "mismatchPercent": 1.8175303643724696,
+      "largestRegionArea": 1387,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 3,
+      "ssim": 0.9154150967856157,
+      "mismatchPercent": 3.3087044534412953,
+      "largestRegionArea": 2383,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 4,
+      "ssim": 0.9713307183946903,
+      "mismatchPercent": 1.17582995951417,
+      "largestRegionArea": 1225,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 5,
+      "ssim": 0.9604601185180683,
+      "mismatchPercent": 1.3865991902834007,
+      "largestRegionArea": 1075,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 6,
+      "ssim": 0.9225735836966102,
+      "mismatchPercent": 2.6326720647773283,
+      "largestRegionArea": 30500,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 7,
+      "ssim": 0.9657437534468463,
+      "mismatchPercent": 1.7112145748987853,
+      "largestRegionArea": 16107,
+      "regionCount": 42
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 8,
+      "ssim": 0.9945619849328449,
+      "mismatchPercent": 0.18777327935222674,
+      "largestRegionArea": 800,
+      "regionCount": 20
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 9,
+      "ssim": 0.986490494392041,
+      "mismatchPercent": 3.4235627530364376,
+      "largestRegionArea": 61616,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 10,
+      "ssim": 0.9910791867001457,
+      "mismatchPercent": 0.2993117408906883,
+      "largestRegionArea": 2141,
+      "regionCount": 30
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 11,
+      "ssim": 0.9865265122988921,
+      "mismatchPercent": 0.5253441295546559,
+      "largestRegionArea": 1910,
+      "regionCount": 43
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 12,
+      "ssim": 0.9898415504244685,
+      "mismatchPercent": 0.522753036437247,
+      "largestRegionArea": 6477,
+      "regionCount": 27
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 13,
+      "ssim": 0.8537756445087002,
+      "mismatchPercent": 5.630080971659919,
+      "largestRegionArea": 2813,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 0,
+      "slide": 14,
+      "ssim": 0.9904259942842176,
+      "mismatchPercent": 0.41384615384615386,
+      "largestRegionArea": 2573,
+      "regionCount": 24
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 1,
+      "ssim": 0.9669454567180461,
+      "mismatchPercent": 1.316234817813765,
+      "largestRegionArea": 1906,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 2,
+      "ssim": 0.9572182012515484,
+      "mismatchPercent": 1.8175303643724696,
+      "largestRegionArea": 1387,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 3,
+      "ssim": 0.9154150967856157,
+      "mismatchPercent": 3.3087044534412953,
+      "largestRegionArea": 2383,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 4,
+      "ssim": 0.9713307183946903,
+      "mismatchPercent": 1.17582995951417,
+      "largestRegionArea": 1225,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 5,
+      "ssim": 0.9604601185180683,
+      "mismatchPercent": 1.3865991902834007,
+      "largestRegionArea": 1075,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 6,
+      "ssim": 0.9225735836966102,
+      "mismatchPercent": 2.6326720647773283,
+      "largestRegionArea": 30500,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 7,
+      "ssim": 0.9657437534468463,
+      "mismatchPercent": 1.7112145748987853,
+      "largestRegionArea": 16107,
+      "regionCount": 42
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 8,
+      "ssim": 0.9945619849328449,
+      "mismatchPercent": 0.18777327935222674,
+      "largestRegionArea": 800,
+      "regionCount": 20
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 9,
+      "ssim": 0.986490494392041,
+      "mismatchPercent": 3.4235627530364376,
+      "largestRegionArea": 61616,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 10,
+      "ssim": 0.9910791867001457,
+      "mismatchPercent": 0.2993117408906883,
+      "largestRegionArea": 2141,
+      "regionCount": 30
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 11,
+      "ssim": 0.9865265122988921,
+      "mismatchPercent": 0.5253441295546559,
+      "largestRegionArea": 1910,
+      "regionCount": 43
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 12,
+      "ssim": 0.9898415504244685,
+      "mismatchPercent": 0.522753036437247,
+      "largestRegionArea": 6477,
+      "regionCount": 27
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 13,
+      "ssim": 0.8537756445087002,
+      "mismatchPercent": 5.630080971659919,
+      "largestRegionArea": 2813,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 1,
+      "slide": 14,
+      "ssim": 0.9904259942842176,
+      "mismatchPercent": 0.41384615384615386,
+      "largestRegionArea": 2573,
+      "regionCount": 24
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 1,
+      "ssim": 0.9669454567180461,
+      "mismatchPercent": 1.316234817813765,
+      "largestRegionArea": 1906,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 2,
+      "ssim": 0.9572182012515484,
+      "mismatchPercent": 1.8175303643724696,
+      "largestRegionArea": 1387,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 3,
+      "ssim": 0.9154150967856157,
+      "mismatchPercent": 3.3087044534412953,
+      "largestRegionArea": 2383,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 4,
+      "ssim": 0.9713307183946903,
+      "mismatchPercent": 1.17582995951417,
+      "largestRegionArea": 1225,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 5,
+      "ssim": 0.9604601185180683,
+      "mismatchPercent": 1.3865991902834007,
+      "largestRegionArea": 1075,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 6,
+      "ssim": 0.9225735836966102,
+      "mismatchPercent": 2.6326720647773283,
+      "largestRegionArea": 30500,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 7,
+      "ssim": 0.9657437534468463,
+      "mismatchPercent": 1.7112145748987853,
+      "largestRegionArea": 16107,
+      "regionCount": 42
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 8,
+      "ssim": 0.9945619849328449,
+      "mismatchPercent": 0.18777327935222674,
+      "largestRegionArea": 800,
+      "regionCount": 20
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 9,
+      "ssim": 0.986490494392041,
+      "mismatchPercent": 3.4235627530364376,
+      "largestRegionArea": 61616,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 10,
+      "ssim": 0.9910791867001457,
+      "mismatchPercent": 0.2993117408906883,
+      "largestRegionArea": 2141,
+      "regionCount": 30
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 11,
+      "ssim": 0.9865265122988921,
+      "mismatchPercent": 0.5253441295546559,
+      "largestRegionArea": 1910,
+      "regionCount": 43
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 12,
+      "ssim": 0.9898415504244685,
+      "mismatchPercent": 0.522753036437247,
+      "largestRegionArea": 6477,
+      "regionCount": 27
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 13,
+      "ssim": 0.8537756445087002,
+      "mismatchPercent": 5.630080971659919,
+      "largestRegionArea": 2813,
+      "regionCount": 50
+    },
+    {
+      "deck": "calibration-deck",
+      "run": 2,
+      "slide": 14,
+      "ssim": 0.9904259942842176,
+      "mismatchPercent": 0.41384615384615386,
+      "largestRegionArea": 2573,
+      "regionCount": 24
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>LVE font control deck</title>
+<!--
+  Controlled experiment for mission 034's defect hunt.
+
+  Geometry read-back proved every shape lands within 0.75px of its measured
+  bounds, so the ~8% pixel mismatch on real lectures must come from text
+  rendering, not placement. This deck isolates the one variable that differs
+  between the two renderers: which font file each of them actually uses.
+
+  Slide 1 uses Arial — the same physical face is available to Chromium and to
+  PowerPoint, so it is the noise floor.
+  Slide 2 uses the same text in the deck's own Arabic stack, which resolves to
+  a kit/system face whose PowerPoint mapping is what mission 032 flagged.
+  Slide 3 is Arial again but numerals + Latin inside Arabic, to separate the
+  bidi-ordering defect from the font defect.
+-->
+<style>
+  html, body { margin: 0; padding: 0; background: #fff; }
+  .slide {
+    position: relative; width: 950px; height: 650px; box-sizing: border-box;
+    padding: 60px; background: #fff; color: #413258; overflow: hidden;
+  }
+  .slide h1 { margin: 0 0 28px; font-size: 40px; line-height: 1.3; }
+  .slide p  { margin: 0 0 18px; font-size: 24px; line-height: 1.6; }
+  .control      { font-family: Arial, sans-serif; }
+  .deck-stack   { font-family: 'Diodrum Arabic', 'Lyon Arabic Text', 'Cairo', sans-serif; }
+</style>
+</head>
+<body>
+
+<div class="slide control">
+  <h1>الشريحة الأولى — خط التحكم</h1>
+  <p>هذه فقرة عربية مكتوبة بخط أريال المتوفر في المتصفح وفي باوربوينت معًا.</p>
+  <p>نفس الملف الخطي على الجانبين، فأي فرق هنا هو ضجيج التنعيم فقط.</p>
+  <p>سطر رابع لزيادة عدد وحدات البكسل النصية في القياس.</p>
+</div>
+
+<div class="slide deck-stack">
+  <h1>الشريحة الثانية — خط الحقيبة</h1>
+  <p>هذه فقرة عربية مكتوبة بخط الحقيبة نفسه الذي تستعمله المحاضرات الحقيقية.</p>
+  <p>نفس النص تمامًا كالشريحة الأولى في الطول وحجم الخط والتخطيط.</p>
+  <p>سطر رابع لزيادة عدد وحدات البكسل النصية في القياس.</p>
+</div>
+
+<div class="slide control">
+  <h1>الشريحة الثالثة — أرقام وحروف لاتينية</h1>
+  <p>القيمة MTBF = 1,240 ساعة تشغيل.</p>
+  <p>الوحدة الخامسة: بحوث العمليات (Operations Research).</p>
+  <p>عام 1448 هـ — النسبة 45% تقريبًا.</p>
+</div>
+
+</body>
+</html>

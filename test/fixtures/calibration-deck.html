@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>LVE calibration deck</title>
+<!--
+  MISSION 034 — the deck the fidelity thresholds are derived from.
+
+  One feature per slide, in isolation, so a threshold can be fitted to renderer
+  NOISE (Chromium vs PowerPoint antialiasing and glyph rasterisation) instead of
+  to a rendering defect. Every slide deliberately uses fonts that resolve to the
+  SAME physical face in both renderers — the kit-alias font-mapping gap is a
+  separate, real defect that mission 036 fixes by embedding, and calibrating
+  over it would make the gate meaningless.
+
+  Established before this deck was written (mission 034):
+    * geometry read-back: every shape lands within 0.75px of measured bounds,
+      so nothing here is testing placement;
+    * the font-control experiment: with identical fonts, a 4-line Arabic slide
+      scores ~0.943 SSIM / ~2.5% pixels — that is the floor this deck maps.
+-->
+<style>
+  html, body { margin: 0; padding: 0; background: #fff; }
+  .slide {
+    position: relative; width: 950px; height: 650px; box-sizing: border-box;
+    padding: 50px 60px; background: #fff; color: #413258; overflow: hidden;
+    font-family: Arial, sans-serif;
+  }
+  .slide h1 { margin: 0 0 24px; font-size: 32px; line-height: 1.3; }
+  .slide p, .slide li { font-size: 20px; line-height: 1.6; margin: 0 0 12px; }
+  .s16 { font-size: 16px; } .s19 { font-size: 19px; } .s24 { font-size: 24px; }
+  .s32 { font-size: 32px; } .s40 { font-size: 40px; }
+  .just { text-align: justify; }
+  .track-lat { letter-spacing: 3px; font-family: Arial, sans-serif; }
+  .track-ar  { letter-spacing: 2px; }
+  table { border-collapse: collapse; width: 100%; font-size: 18px; }
+  th, td { border: 1px solid #413258; padding: 8px 10px; text-align: center; }
+  th { background: #413258; color: #fff; }
+  .box { position: absolute; width: 240px; height: 120px; }
+  .r-uniform { border-radius: 16px; border: 1px solid #BFA19F; }
+  .r-corner  { border-radius: 30px 0 30px 0; border: 3px solid #413258; }
+  .card { position: absolute; width: 300px; height: 140px; background: #fff;
+          box-shadow: 4px 4px 12px rgba(65,50,88,0.35); border: 1px solid #eee; }
+  .grad-a { position: absolute; width: 340px; height: 160px;
+            background: linear-gradient(180deg, #413258 0%, #BFA19F 100%); }
+  .grad-b { position: absolute; width: 340px; height: 160px;
+            background: linear-gradient(135deg, #413258 0%, #1AD9C7 50%, #BFA19F 100%); }
+  .stack { position: absolute; width: 200px; height: 120px; }
+</style>
+</head>
+<body>
+
+<!-- 1 — type scale -->
+<div class="slide">
+  <h1>١ — سلّم أحجام الخط</h1>
+  <p class="s16">حجم ستة عشر بكسل — نص عربي للقياس.</p>
+  <p class="s19">حجم تسعة عشر بكسل — نص عربي للقياس.</p>
+  <p class="s24">حجم أربعة وعشرين بكسل — نص عربي.</p>
+  <p class="s32">حجم اثنين وثلاثين بكسل.</p>
+  <p class="s40">حجم أربعين بكسل.</p>
+</div>
+
+<!-- 2 — mixed RTL + LTR -->
+<div class="slide">
+  <h1>٢ — نص مختلط الاتجاه</h1>
+  <p>القيمة MTBF = 1,240 ساعة تشغيل فعلية.</p>
+  <p>الوحدة الخامسة: بحوث العمليات (Operations Research).</p>
+  <p>المعدل 45% خلال عام 1448 هـ حسب التقرير.</p>
+  <p>الرمز ISO 9001 معتمد من الجهة المختصة.</p>
+</div>
+
+<!-- 3 — justified Arabic -->
+<div class="slide">
+  <h1>٣ — فقرة عربية مضبوطة الطرفين</h1>
+  <p class="just">بحوث العمليات فرع من فروع الرياضيات التطبيقية يهتم بإيجاد الحلول المثلى
+  للمسائل التي تتضمن قيودًا متعددة على الموارد المتاحة. يستعمل هذا الفرع نماذج رياضية
+  ومناهج إحصائية وخوارزميات محدّدة للوصول إلى قرار يزيد العائد أو يقلّل التكلفة قدر
+  المستطاع. وتعدّ البرمجة الخطية من أشهر أدوات هذا المجال، إذ تصف الهدف والقيود بدوالّ
+  خطية يمكن حلها بيانيًا أو بطريقة السمبلكس المعروفة في الكتب المنهجية المقررة.</p>
+</div>
+
+<!-- 4 — letter spacing -->
+<div class="slide">
+  <h1>٤ — تباعد الأحرف</h1>
+  <p class="track-lat">OPERATIONS RESEARCH TRACKING</p>
+  <p class="track-ar">بحوث العمليات بتباعد أحرف</p>
+  <p>سطر عادي بدون تباعد للمقارنة المباشرة.</p>
+</div>
+
+<!-- 5 — lists -->
+<div class="slide">
+  <h1>٥ — القوائم</h1>
+  <ul>
+    <li>العنصر الأول في القائمة غير المرتبة
+      <ul><li>عنصر متداخل داخل الأول</li></ul>
+    </li>
+    <li>العنصر الثاني في القائمة</li>
+  </ul>
+  <ol>
+    <li>الخطوة الأولى في القائمة المرتبة</li>
+    <li>الخطوة الثانية في القائمة المرتبة</li>
+  </ol>
+</div>
+
+<!-- 6 — table -->
+<div class="slide">
+  <h1>٦ — جدول بحدود ورأس</h1>
+  <table>
+    <tr><th>البند</th><th>الكمية</th><th>التكلفة</th><th>الإجمالي</th></tr>
+    <tr><td>المنتج الأول</td><td>120</td><td>15</td><td>1,800</td></tr>
+    <tr><td>المنتج الثاني</td><td>240</td><td>22</td><td>5,280</td></tr>
+    <tr><td>المنتج الثالث</td><td>90</td><td>34</td><td>3,060</td></tr>
+    <tr><td>المجموع</td><td>450</td><td>—</td><td>10,140</td></tr>
+  </table>
+</div>
+
+<!-- 7 — radii and borders -->
+<div class="slide">
+  <h1>٧ — الحواف والزوايا</h1>
+  <div class="box r-uniform" style="left:60px; top:180px;"></div>
+  <div class="box r-corner"  style="left:360px; top:180px;"></div>
+  <div class="box" style="left:660px; top:180px; border:3px solid #1AD9C7;"></div>
+</div>
+
+<!-- 8 — shadow -->
+<div class="slide">
+  <h1>٨ — الظل</h1>
+  <div class="card" style="left:80px; top:200px;"></div>
+  <div class="card" style="left:460px; top:200px;"></div>
+</div>
+
+<!-- 9 — gradients -->
+<div class="slide">
+  <h1>٩ — التدرّجات اللونية</h1>
+  <div class="grad-a" style="left:60px; top:200px;"></div>
+  <div class="grad-b" style="left:470px; top:200px;"></div>
+</div>
+
+<!-- 10 — image -->
+<div class="slide">
+  <h1>١٠ — صورة</h1>
+  <img alt="مربع اختبار" style="position:absolute;left:80px;top:190px;width:280px;height:170px;object-fit:cover"
+       src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADgAAAAiCAIAAACFqY20AAAAeElEQVR4nO3WQRGAMAxE0epABg7qAsdowA0WststJenO/HveJZO047lT1JYLDDXUUENnQft5RVoGDfpUYhJKK2krDB0k0lwMKlSiVgAqV0LWctBJyrjVUEOrQNNsfSZomsskt0Jz635P41Zu3AYf/scZaujfM1TdC8sUFvfge0h8AAAAAElFTkSuQmCC">
+  <p style="position:absolute;left:420px;top:190px;">صورة نقطية بحدود ثابتة.</p>
+</div>
+
+<!-- 11 — inline SVG (becomes a bake) -->
+<div class="slide">
+  <h1>١١ — رسم متجهي مضمّن</h1>
+  <svg style="position:absolute;left:80px;top:190px;width:300px;height:180px" viewBox="0 0 300 180">
+    <rect x="0" y="0" width="300" height="180" fill="#fff" stroke="#413258"></rect>
+    <polyline points="10,170 80,110 150,130 220,50 290,20" fill="none" stroke="#1AD9C7" stroke-width="4"></polyline>
+    <circle cx="150" cy="130" r="7" fill="#BFA19F"></circle>
+  </svg>
+  <p style="position:absolute;left:440px;top:190px;">الرسم يتحوّل إلى صورة عند التصدير.</p>
+</div>
+
+<!-- 12 — z-order stack -->
+<div class="slide">
+  <h1>١٢ — تراكب الطبقات</h1>
+  <div class="stack" style="left:100px; top:200px; background:#413258; z-index:1;"></div>
+  <div class="stack" style="left:180px; top:250px; background:#1AD9C7; z-index:2;"></div>
+  <div class="stack" style="left:260px; top:300px; background:#BFA19F; z-index:3;"></div>
+</div>
+
+<!-- 13 — dense text -->
+<div class="slide">
+  <h1>١٣ — شريحة مكتظة</h1>
+  <p class="s16 just">تهدف البرمجة الخطية إلى تعظيم أو تصغير دالة هدف خطية في ظل مجموعة من
+  القيود الخطية على المتغيرات. تُصاغ المسألة بتحديد المتغيرات القرارية أولًا، ثم كتابة دالة
+  الهدف، ثم حصر القيود المتاحة على الموارد. تُحل المسألة بيانيًا عندما يكون عدد المتغيرات
+  اثنين فقط، وتُستعمل طريقة السمبلكس عندما يزيد العدد عن ذلك. تُعرَّف منطقة الحلول الممكنة
+  بأنها تقاطع أنصاف المستويات الناتجة عن القيود، والحل الأمثل يقع دائمًا عند إحدى نقاط
+  الرؤوس لتلك المنطقة إن وُجد. ومن المهم التحقق من أن المسألة ليست غير محدودة وليست
+  متناقضة القيود قبل الشروع في الحل، لأن ذلك يوفّر وقتًا كبيرًا في الحساب اليدوي. كما
+  تُستعمل تحليلات الحساسية بعد الوصول إلى الحل لمعرفة أثر تغيّر معاملات دالة الهدف أو
+  الطرف الأيمن للقيود على الحل الأمثل ومقدار العائد المتوقع من كل مورد إضافي متاح.</p>
+</div>
+
+<!-- 14 — near-empty (the antialiasing noise floor) -->
+<div class="slide">
+  <h1>١٤ — شريحة شبه فارغة</h1>
+  <p>سطر واحد قصير.</p>
+</div>
+
+</body>
+</html>

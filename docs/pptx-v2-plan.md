@@ -152,7 +152,34 @@ The cheapest possible end-to-end run, before building anything.
   `source-bnb.html` stress deck, the LECTURE_PROMPT spec deck) exports with
   zero refusals, zero placeholders; report lists every baked node per slide.
 
-### Phase 2 — Calibrate & arm the gate (Mission 034, Claude-led judgment + 🟢 mechanics)
+### Phase 2 — Calibrate & arm the gate (Mission 034)
+
+**FROZEN THRESHOLDS (2026-08-14), derived from `test/fixtures/calibration-baseline.json`:**
+
+| threshold | value | derivation |
+|---|---|---|
+| `pixelDelta` | **24** | fixed by design — 8 counts every antialiased glyph edge |
+| `ssim` | **0.8487** | `min(observed) − 0.005` = 0.853776 − 0.005 |
+| `pixelMismatchPercent` | **8.45** | `max(observed) × 1.5` = 5.6301 × 1.5 |
+| region size | **advisory** | one Arabic line rasterised twice is always one big region |
+| geometry | **0.75 px, hard fail** | position is renderer-controlled; table height exempt (PowerPoint owns row heights) |
+
+Distribution over 14 calibration slides × 3 runs (42 observations, **exactly
+deterministic** — largest SSIM spread across runs `0.000e+0`):
+`ssim` min 0.853776 / median 0.966945 / p95 0.991079 / max 0.994562 ·
+`mismatch%` min 0.1878 / median 1.3162 / p95 3.4236 / max 5.6301.
+
+The plan originally guessed a 0.96–0.985 floor and proposed clamping to 0.95 /
+3.0 %. Measurement disagreed: dense Arabic text scores 0.8538 / 5.63 % with
+identical fonts and geometry proven exact to 0.75 px, and a plain 4-line slide
+(`font-control-deck.html`) scores ~0.943 / 2.5 %. Clamping would fail known-good
+content on every export. Two defects found while calibrating were **fixed, not
+absorbed**: gradient boxes were silently dropped (17.89 % → 3.42 % on slide 9)
+and an `<img>` with an SVG source crashed the renderer. Tightening these is
+Phase 4's payoff — embedding the deck's real fonts removes the dominant
+remaining per-glyph difference.
+
+<details><summary>original Phase 2 plan</summary>
 - Calibration deck: every feature in isolation (sizes/weights, mixed RTL+LTR
   lines, justified Arabic, letter-spacing, bullets, tables, borders/radius,
   shadows, gradients, images, one SVG bake).
@@ -165,6 +192,7 @@ The cheapest possible end-to-end run, before building anything.
   distinct states in UI and report.
 - **Exit:** every corpus slide passes at frozen thresholds or is explained;
   thresholds documented in this file.
+</details>
 
 ### Phase 3 — Self-healing export (Mission 035, 🟢 handoff after Claude specs the demote algorithm)
 - Diff-region → scene-node mapping (bounds intersection, non-text nodes first,

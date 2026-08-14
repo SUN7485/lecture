@@ -21,7 +21,13 @@ async function main() {
     const heatmapPath = path.join(root, 'heatmap.png');
     fs.writeFileSync(sourcePath, nativeImage.createFromBitmap(sourceBitmap, { width, height, scaleFactor: 1 }).toPNG());
     fs.writeFileSync(powerPointPath, nativeImage.createFromBitmap(powerPointBitmap, { width, height, scaleFactor: 1 }).toPNG());
-    const result = await compareSlideVisual({ sourcePath, powerPointPath, heatmapPath });
+    // Explicit thresholds: this harness tests the comparison mechanism and its
+    // nativeImage heatmap encoder, not the production numbers — 1 changed pixel
+    // in a 4x4 image is 6.25%, which the frozen 8.45% budget tolerates.
+    const result = await compareSlideVisual({
+      sourcePath, powerPointPath, heatmapPath,
+      thresholds: { ssim: 0.9995, pixelMismatchPercent: 0.02, pixelDelta: 8 }
+    });
     process.stdout.write(JSON.stringify({
       heatmapExists: fs.existsSync(heatmapPath),
       mismatchPixels: result.mismatchPixels,
