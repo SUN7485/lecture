@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>LVE mini e2e deck</title>
+<!--
+  The smallest deck that still exercises every native path plus one bake:
+  slide 1 text, slide 2 table + list, slide 3 gradient cover + inline SVG.
+  Kept to 3 slides so the real end-to-end chain (Chromium render + PowerPoint
+  COM render + compare + geometry audit) stays inside npm test's budget.
+-->
+<style>
+  html, body { margin: 0; padding: 0; background: #fff; }
+  .slide { position: relative; width: 950px; height: 650px; box-sizing: border-box;
+           padding: 50px 60px; background: #fff; color: #413258;
+           font-family: Arial, sans-serif; overflow: hidden; }
+  .slide h1 { margin: 0 0 22px; font-size: 32px; }
+  .slide p, .slide li { font-size: 20px; line-height: 1.6; margin: 0 0 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 18px; }
+  th, td { border: 1px solid #413258; padding: 8px 10px; text-align: center; }
+  th { background: #413258; color: #fff; }
+  .cover { position: absolute; inset: 0; background: linear-gradient(180deg, #413258 0%, #BFA19F 100%); }
+  .cover h1 { position: absolute; top: 70px; inset-inline-end: 60px; color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="slide">
+  <h1>نص عربي أصيل</h1>
+  <p>هذه فقرة عربية تُصدَّر كمربعات نص قابلة للتحرير في باوربوينت.</p>
+  <p>السطر الثاني يزيد كثافة البكسل المقاسة في المقارنة.</p>
+</div>
+
+<div class="slide">
+  <h1>جدول وقائمة</h1>
+  <table>
+    <tr><th>البند</th><th>القيمة</th></tr>
+    <tr><td>الأول</td><td>120</td></tr>
+    <tr><td>الثاني</td><td>240</td></tr>
+  </table>
+  <ul>
+    <li>عنصر أول في القائمة</li>
+    <li>عنصر ثانٍ في القائمة</li>
+  </ul>
+</div>
+
+<div class="slide">
+  <div class="cover"></div>
+  <h1 style="position:absolute;top:70px;inset-inline-end:60px;color:#fff;">غلاف متدرّج مع رسم</h1>
+  <svg style="position:absolute;left:90px;top:250px;width:280px;height:170px" viewBox="0 0 280 170">
+    <rect x="0" y="0" width="280" height="170" fill="#fff" stroke="#413258"></rect>
+    <polyline points="10,160 70,100 140,120 210,40 270,15" fill="none" stroke="#1AD9C7" stroke-width="4"></polyline>
+  </svg>
+</div>
+
+</body>
+</html>

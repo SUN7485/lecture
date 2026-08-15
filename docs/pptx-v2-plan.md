@@ -107,6 +107,11 @@ This is a wiring-and-calibration problem, not a rewrite.
 
 ## 4. Phases & missions
 
+> **RITUAL: no commit that touches the pptx pipeline without `node verify-pptx-corpus.js`
+> green — paste the scorecard in the commit message.** Single deck: `node verify-pptx-corpus.js <deck.html>`.
+> Exit 0 means every slide of every deck was measured against PowerPoint's own
+> render and passed; nothing less.
+
 > **2026-08-14 (user decision): all seven missions are handed off to a Claude
 > Opus 5 executor session** — handoff files `.claude/handoffs/032…038-pptx-*.md`,
 > one per phase, run strictly in order, `/qc` after each before the next starts.
@@ -226,7 +231,7 @@ remaining per-glyph difference.
   out), SESSION_LOG updated.
 - **Exit:** driven live via playwright (the LVE_OPEN recipe), screenshot proof.
 
-### Phase 6 — Regression lock (Mission 038, 🟢 handoff)
+### Phase 6 — Regression lock (Mission 038) — ✅ DONE 2026-08-15
 - `verify-pptx-corpus.js` (verify-030 pattern): one command → per-deck,
   per-slide scorecard printed + written to `.fidelity/index.md`.
 - `npm test` keeps the fast mocked suite + one real 3-slide end-to-end chain
