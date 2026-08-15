@@ -9,9 +9,9 @@
  * explain a rejection.  It does not know how a scene graph becomes a PPTX;
  * callers inject that renderer through `renderPptx`.
  *
- * The defaults are intentionally strict.  In particular, a caller that has
- * not installed/provided the bundled OCR adapter gets an OCR failure instead
- * of a warning or an export-anyway path.
+ * The defaults are intentionally strict. Pixel and geometry evidence decide
+ * whether an editable candidate is verified; OCR is retained only as a
+ * diagnostic utility outside the shipping gate.
  */
 
 const fs = require('fs');
@@ -23,6 +23,14 @@ const { pathToFileURL } = require('url');
 const { spawn } = require('child_process');
 
 const FIDELITY_VERSION = '1.0.0';
+// Bump this whenever tools/pptx/renderer.py changes in a way that can alter
+// the emitted OOXML or its pixels. Slide cache entries are never valid across
+// a renderer revision.
+const PPTX_RENDERER_VERSION = 'scene-v2-font-embed-2026-08-14';
+const SELF_HEAL_MAX_ROUNDS = 2;
+const SELF_HEAL_MAX_DEMOTIONS_PER_ROUND = 3;
+const HEALABLE_RENDER_KINDS = new Set(['shape', 'shape-text', 'text', 'image', 'table', 'list', 'line']);
+const TEXTUAL_RENDER_KINDS = new Set(['text', 'shape-text', 'list']);
 const DEFAULT_TARGET = Object.freeze({ width: 1900, height: 1300 });
 const FIDELITY_POLICIES = Object.freeze({
   STRICT: 'strict',
@@ -178,6 +186,376 @@ function safeTransientPath(workDir, name) {
     throw fidelityError('UNSAFE_TEMPORARY_PATH', 'Refused to create a fidelity artifact outside its work directory.', { workDir, name });
   }
   return target;
+}
+
+function cloneSceneGraph(sceneGraph) {
+  // Scene graphs are JSON-shaped data from the renderer iframe. Clone before
+  // any self-heal mutation so the caller's editable source is never changed.
+  if (typeof structuredClone === 'function') return structuredClone(sceneGraph);
+  return JSON.parse(JSON.stringify(sceneGraph));
+}
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.keys(value).sort().reduce((result, key) => {
+    if (value[key] !== undefined) result[key] = stableValue(value[key]);
+    return result;
+  }, {});
+}
+
+function stableStringify(value) {
+  return JSON.stringify(stableValue(value));
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function boundsOf(value) {
+  const bounds = value?.bounds || value || {};
+  const number = (short, long) => {
+    const result = Number(bounds[short] ?? bounds[long] ?? 0);
+    return Number.isFinite(result) ? result : 0;
+  };
+  return { x: number('x', 'left'), y: number('y', 'top'), w: number('w', 'width'), h: number('h', 'height') };
+}
+
+function intersectionArea(a, b) {
+  const left = Math.max(a.x, b.x);
+  const top = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.w, b.x + b.w);
+  const bottom = Math.min(a.y + a.h, b.y + b.h);
+  return Math.max(0, right - left) * Math.max(0, bottom - top);
+}
+
+function pageSizeForScene(sceneGraph) {
+  const pageSize = sceneGraph?.pageSize || {};
+  return {
+    width: Number(pageSize.widthPx || pageSize.width || 950) || 950,
+    height: Number(pageSize.heightPx || pageSize.height || 650) || 650
+  };
+}
+
+function sceneRegion(region, sceneGraph, target) {
+  const pageSize = pageSizeForScene(sceneGraph);
+  const xScale = pageSize.width / target.width;
+  const yScale = pageSize.height / target.height;
+  return {
+    x: Number(region?.x || 0) * xScale,
+    y: Number(region?.y || 0) * yScale,
+    w: Number(region?.width || region?.w || 0) * xScale,
+    h: Number(region?.height || region?.h || 0) * yScale
+  };
+}
+
+function nodeChildren(nodes) {
+  const byParent = new Map();
+  for (const node of nodes || []) {
+    if (!node?.parentId) continue;
+    if (!byParent.has(node.parentId)) byParent.set(node.parentId, []);
+    byParent.get(node.parentId).push(node.id);
+  }
+  return byParent;
+}
+
+function hasSelectedAncestor(nodeId, selectedIds, byParent, nodesById) {
+  let current = nodesById.get(nodeId);
+  while (current?.parentId) {
+    if (selectedIds.has(current.parentId)) return true;
+    current = nodesById.get(current.parentId);
+  }
+  return false;
+}
+
+function pickHealCandidates(sceneGraph, slideIndex, visual, target, round) {
+  const slide = sceneGraph?.slides?.[slideIndex];
+  if (!slide || !Array.isArray(slide.nodes)) return [];
+  const nodesById = new Map(slide.nodes.filter((node) => node?.id).map((node) => [node.id, node]));
+  const byParent = nodeChildren(slide.nodes);
+  const regions = (visual?.regions || [])
+    .filter((region) => Number(region?.area) > 0 && Number(region?.width || region?.w) > 0 && Number(region?.height || region?.h) > 0)
+    .slice()
+    .sort((a, b) => Number(b.area || 0) - Number(a.area || 0));
+  const selected = [];
+  const selectedIds = new Set();
+  // Round two exists specifically to protect native text until a non-text bake
+  // has failed. It focuses on the largest residual region and prefers text.
+  const regionsToInspect = round === 2 ? regions.slice(0, 1) : regions;
+  for (const region of regionsToInspect) {
+    const inScene = sceneRegion(region, sceneGraph, target);
+    const regionArea = inScene.w * inScene.h;
+    if (!(regionArea > 0)) continue;
+    const matches = slide.nodes
+      .filter((node) => node?.id && node.parentId && HEALABLE_RENDER_KINDS.has(node.renderAs))
+      .filter((node) => round !== 1 || !TEXTUAL_RENDER_KINDS.has(node.renderAs))
+      .filter((node) => !selectedIds.has(node.id) && !hasSelectedAncestor(node.id, selectedIds, byParent, nodesById))
+      .map((node) => {
+        const bounds = boundsOf(node);
+        const overlap = intersectionArea(bounds, inScene);
+        return { node, bounds, overlap, coverage: overlap / regionArea };
+      })
+      .filter((candidate) => candidate.coverage >= 0.5)
+      .sort((a, b) => {
+        const textRank = (candidate) => TEXTUAL_RENDER_KINDS.has(candidate.node.renderAs) ? 1 : 0;
+        // First round: non-text only. Second round: text earns first choice.
+        const kind = round === 2 ? textRank(a) - textRank(b) : textRank(a) - textRank(b);
+        if (kind) return round === 2 ? -kind : kind;
+        const area = a.bounds.w * a.bounds.h - b.bounds.w * b.bounds.h;
+        if (area) return area;
+        const order = Number(a.node.order || 0) - Number(b.node.order || 0);
+        return order || String(a.node.id).localeCompare(String(b.node.id));
+      });
+    const winner = matches[0];
+    if (!winner) continue;
+    selected.push({
+      slideIndex,
+      nodeId: winner.node.id,
+      region: { ...region },
+      sceneRegion: inScene,
+      coverage: winner.coverage,
+      renderAs: winner.node.renderAs
+    });
+    selectedIds.add(winner.node.id);
+    if (selected.length >= SELF_HEAL_MAX_DEMOTIONS_PER_ROUND) break;
+  }
+  return selected;
+}
+
+function demoteSceneNodes(sceneGraph, plans) {
+  const scene = cloneSceneGraph(sceneGraph);
+  const bySlide = new Map();
+  for (const plan of plans || []) {
+    if (!Number.isInteger(plan?.slideIndex) || !plan?.nodeId) continue;
+    if (!bySlide.has(plan.slideIndex)) bySlide.set(plan.slideIndex, []);
+    bySlide.get(plan.slideIndex).push(plan);
+  }
+  const requests = [];
+  const demoted = [];
+  for (const [slideIndex, slidePlans] of bySlide) {
+    const slide = scene.slides?.[slideIndex];
+    if (!slide || !Array.isArray(slide.nodes)) continue;
+    const nodesById = new Map(slide.nodes.filter((node) => node?.id).map((node) => [node.id, node]));
+    const children = nodeChildren(slide.nodes);
+    const requestedIds = new Set(slidePlans.map((plan) => plan.nodeId));
+    const selectedIds = new Set([...requestedIds].filter((id) => {
+      const node = nodesById.get(id);
+      return node && HEALABLE_RENDER_KINDS.has(node.renderAs) && !hasSelectedAncestor(id, requestedIds, children, nodesById);
+    }));
+    if (!selectedIds.size) continue;
+    const descendants = new Set();
+    const queue = [...selectedIds];
+    while (queue.length) {
+      const parentId = queue.shift();
+      for (const childId of children.get(parentId) || []) {
+        if (selectedIds.has(childId) || descendants.has(childId)) continue;
+        descendants.add(childId);
+        queue.push(childId);
+      }
+    }
+    const planFor = new Map(slidePlans.map((plan) => [plan.nodeId, plan]));
+    slide.nodes = slide.nodes
+      .filter((node) => !descendants.has(node.id))
+      .map((node) => {
+        if (!selectedIds.has(node.id)) return node;
+        const plan = planFor.get(node.id) || {};
+        const baked = {
+          ...node,
+          renderAs: 'bake',
+          text: '',
+          runs: [],
+          unsupported: [...(node.unsupported || []), {
+            code: 'SELF_HEAL_BAKE',
+            reason: `self-heal round ${plan.round || '?'} demoted this node after a visual mismatch`
+          }],
+          bake: { bakeId: node.id, reasons: [{ code: 'SELF_HEAL_BAKE', round: plan.round || null, regions: plan.reasons || [] }] }
+        };
+        delete baked.textLines;
+        delete baked.table;
+        delete baked.list;
+        delete baked.image;
+        requests.push({ bakeId: node.id, bounds: node.bounds });
+        demoted.push({ slideIndex, nodeId: node.id, renderAs: node.renderAs, reasons: plan.reasons || [] });
+        return baked;
+      });
+    const existing = new Set((slide.bakeRequests || []).map((request) => request.bakeId));
+    for (const request of requests.filter((request) => request.bakeId.startsWith(`s${slideIndex}:`))) {
+      if (!existing.has(request.bakeId)) {
+        slide.bakeRequests = [...(slide.bakeRequests || []), request];
+        existing.add(request.bakeId);
+      }
+    }
+  }
+  scene.bakeCount = (scene.slides || []).reduce((count, slide) => count + (slide.bakeRequests || []).length, 0);
+  return { sceneGraph: scene, requests, demoted };
+}
+
+function hashDataUrl(value) {
+  return sha256(String(value || ''));
+}
+
+const VOID_HTML_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+
+function classValueFromTag(tag) {
+  const match = /\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
+  return match ? (match[1] ?? match[2] ?? match[3] ?? '') : '';
+}
+
+// The scene graph intentionally omits CSS such as `outline`, so a cache key
+// cannot rely on scene data alone. Fingerprint each slide's authored markup,
+// plus everything outside slides (global CSS, scripts, assets) that can alter
+// the render. A content edit on slide 3 therefore leaves slides 1/2 reusable,
+// while a stylesheet edit correctly invalidates every slide.
+function sourceFingerprintForSlide(html, slideIndex) {
+  const source = String(html || '');
+  const stack = [];
+  const slides = [];
+  const tags = /<!--[\s\S]*?-->|<![^>]*>|<\/?[A-Za-z][\w:-]*\b[^>]*>/g;
+  let match;
+  while ((match = tags.exec(source))) {
+    const tag = match[0];
+    if (/^<!--|^<![^-]/.test(tag)) continue;
+    const closing = /^<\//.test(tag);
+    const nameMatch = /^<\/?\s*([A-Za-z][\w:-]*)/.exec(tag);
+    if (!nameMatch) continue;
+    const name = nameMatch[1].toLowerCase();
+    if (closing) {
+      for (let position = stack.length - 1; position >= 0; position -= 1) {
+        if (stack[position].name !== name) continue;
+        const [entry] = stack.splice(position, 1);
+        if (entry.isSlide) slides.push({ start: entry.start, end: tags.lastIndex });
+        break;
+      }
+      continue;
+    }
+    const entry = {
+      name,
+      start: match.index,
+      isSlide: /(^|\s)slide(\s|$)/.test(classValueFromTag(tag))
+    };
+    if (!VOID_HTML_TAGS.has(name) && !/\/\s*>$/.test(tag)) stack.push(entry);
+  }
+  slides.sort((left, right) => left.start - right.start);
+  const current = slides[slideIndex];
+  if (!current) return sha256(source);
+  let outside = '';
+  let cursor = 0;
+  for (const slide of slides) {
+    outside += source.slice(cursor, slide.start);
+    cursor = slide.end;
+  }
+  outside += source.slice(cursor);
+  return sha256(stableStringify({
+    slide: source.slice(current.start, current.end),
+    outside,
+    slideCount: slides.length
+  }));
+}
+
+function uncacheableExternalInput(sceneGraph, html, themeCss) {
+  for (const slide of sceneGraph?.slides || []) {
+    for (const node of slide?.nodes || []) {
+      const source = String(node?.image?.src || '').trim();
+      if (source && !/^data:/i.test(source)) return 'external-image';
+    }
+  }
+  const source = `${String(html || '')}\n${String(themeCss || '')}`;
+  if (/<link\b[^>]*\brel\s*=\s*(?:"[^"]*\bstylesheet\b[^"]*"|'[^']*\bstylesheet\b[^']*'|stylesheet)\b/i.test(source)) {
+    return 'external-stylesheet';
+  }
+  if (/<script\b[^>]*\bsrc\s*=/i.test(source)) return 'external-script';
+  if (/url\(\s*(?!['"]?data:)[^)]+\)/i.test(source)) return 'external-css-asset';
+  return null;
+}
+
+function slideCacheKey({ sceneGraph, slideIndex, themeCss, html, thresholds, target }) {
+  const slide = sceneGraph?.slides?.[slideIndex] || {};
+  const bakeIds = new Set([
+    ...(slide.bakeRequests || []).map((request) => request.bakeId),
+    ...(slide.nodes || []).filter((node) => node?.renderAs === 'bake').map((node) => node.id)
+  ]);
+  const bakeHashes = [...bakeIds].sort().reduce((result, id) => {
+    result[id] = hashDataUrl(sceneGraph?.bakes?.[id]);
+    return result;
+  }, {});
+  return sha256(stableStringify({
+    rendererVersion: PPTX_RENDERER_VERSION,
+    pageSize: pageSizeForScene(sceneGraph),
+    target: normaliseTarget(target),
+    slide: { nodes: slide.nodes || [], bakeRequests: slide.bakeRequests || [] },
+    bakeHashes,
+    themeCssHash: sha256(String(themeCss || '')),
+    sourceFingerprint: sourceFingerprintForSlide(html, slideIndex),
+    thresholds
+  }));
+}
+
+async function readSlideCache(cachePath) {
+  if (!cachePath) return { entries: {} };
+  try {
+    const parsed = JSON.parse(await fsp.readFile(cachePath, 'utf8'));
+    return parsed && typeof parsed.entries === 'object' ? parsed : { entries: {} };
+  } catch (error) {
+    if (error.code === 'ENOENT') return { entries: {} };
+    return { entries: {}, error: asErrorInfo(error, 'FIDELITY_CACHE_READ_FAILED') };
+  }
+}
+
+async function writeSlideCache(cachePath, cache) {
+  if (!cachePath) return;
+  await ensureDirectory(path.dirname(cachePath));
+  const temporary = `${cachePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await fsp.writeFile(temporary, JSON.stringify(cache, null, 2), 'utf8');
+  await fsp.rename(temporary, cachePath);
+}
+
+function pngBufferFromDataUrl(dataUrl) {
+  const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/i.exec(String(dataUrl || ''));
+  return match ? Buffer.from(match[1], 'base64') : null;
+}
+
+async function persistCachedBakes(bakes, cacheBakeDirectory) {
+  const result = {};
+  const entries = Object.entries(bakes || {});
+  if (!entries.length) return result;
+  if (!cacheBakeDirectory) throw fidelityError('FIDELITY_CACHE_BAKE_DIR_MISSING', 'A stable cache bake directory is required to cache healed bakes.');
+  await ensureDirectory(cacheBakeDirectory);
+  for (const [id, dataUrl] of entries) {
+    const buffer = pngBufferFromDataUrl(dataUrl);
+    if (!buffer) throw fidelityError('FIDELITY_CACHE_BAKE_INVALID', `Healed bake ${id} was not a PNG data URL.`);
+    const hash = sha256(buffer);
+    const file = `${hash}.png`;
+    const destination = path.join(cacheBakeDirectory, file);
+    if (!fs.existsSync(destination)) await fsp.writeFile(destination, buffer);
+    result[id] = { hash, file };
+  }
+  return result;
+}
+
+async function loadCachedBakes(entry, cacheBakeDirectory) {
+  const assets = entry?.healedBakes || {};
+  const ids = Object.keys(assets);
+  if (!ids.length) return {};
+  if (!cacheBakeDirectory) return null;
+  const bakes = {};
+  for (const id of ids) {
+    const asset = assets[id] || {};
+    if (!/^[a-f0-9]{64}$/i.test(asset.hash || '') || asset.file !== `${asset.hash}.png`) return null;
+    try {
+      const buffer = await fsp.readFile(path.join(cacheBakeDirectory, asset.file));
+      if (sha256(buffer) !== asset.hash) return null;
+      bakes[id] = `data:image/png;base64,${buffer.toString('base64')}`;
+    } catch (_) {
+      return null;
+    }
+  }
+  return bakes;
+}
+
+function visualForCache(visual) {
+  if (!visual || typeof visual !== 'object') return null;
+  const { heatmapPath, ...metrics } = visual;
+  return cloneSceneGraph(metrics);
 }
 
 async function removeIfExists(filePath) {
@@ -1157,9 +1535,13 @@ function findDifferenceRegions(mask, width, height) {
     maxWidth = Math.max(maxWidth, region.width);
     maxHeight = Math.max(maxHeight, region.height);
     maxArea = Math.max(maxArea, area);
-    if (regions.length < 50) regions.push(region);
+    regions.push(region);
   }
-  return { regions, maxWidth, maxHeight, maxArea };
+  // Self-healing consumes these regions. Retaining the first 50 connected
+  // components made a large real mismatch disappear behind glyph speckles;
+  // keep the most consequential regions instead.
+  regions.sort((a, b) => b.area - a.area || b.width * b.height - a.width * a.height);
+  return { regions: regions.slice(0, 50), maxWidth, maxHeight, maxArea };
 }
 
 async function compareSlideVisual(options = {}) {
@@ -1594,6 +1976,7 @@ function makeInitialReport({ workDir, target, expectedSlideCount, requiredFonts,
       reportPath: path.join(workDir, 'fidelity-report.json')
     },
     preflight: null,
+    fontEmbedding: null,
     source: null,
     powerPoint: null,
     structural: null,
@@ -1607,6 +1990,11 @@ function makeInitialReport({ workDir, target, expectedSlideCount, requiredFonts,
       ocr: null,
       visual: null,
       structural: null,
+      cached: false,
+      visualAttempts: [],
+      selfHeal: null,
+      healed: null,
+      bakedByHeal: 0,
       failures: [],
       warnings: []
     })),
@@ -1637,6 +2025,11 @@ function recordIssue(report, bucket, stage, error, extra = {}) {
         ocr: null,
         visual: null,
         structural: null,
+        cached: false,
+        visualAttempts: [],
+        selfHeal: null,
+        healed: null,
+        bakedByHeal: 0,
         failures: [],
         warnings: []
       };
@@ -1736,10 +2129,14 @@ async function verifyAndExport(options = {}) {
   const fidelityPolicy = normaliseFidelityPolicy(options.fidelityPolicy);
   const evidenceMode = normaliseEvidenceMode(options.evidenceMode, fidelityPolicy);
   const target = normaliseTarget({ width: options.sourceWidth, height: options.sourceHeight, ...options.target });
+  // Keep the source graph immutable. Every baked fallback below is applied to
+  // this private export copy, never to the editor-owned graph passed in.
+  const originalSceneGraph = cloneSceneGraph(options.sceneGraph);
+  let activeSceneGraph = cloneSceneGraph(options.sceneGraph);
   const expectedSlideCount = Number.isInteger(options.expectedSlideCount)
     ? options.expectedSlideCount
-    : sceneSlideCount(options.sceneGraph);
-  const requiredFonts = collectRequiredFonts(options.sceneGraph, options.requiredFonts);
+    : sceneSlideCount(originalSceneGraph);
+  const requiredFonts = collectRequiredFonts(originalSceneGraph, options.requiredFonts);
   const workDir = await createWorkDirectory(options.workDir);
   const report = makeInitialReport({
     workDir,
@@ -1747,7 +2144,7 @@ async function verifyAndExport(options = {}) {
     expectedSlideCount,
     requiredFonts,
     destinationPath: options.destinationPath,
-    sceneGraph: options.sceneGraph,
+    sceneGraph: originalSceneGraph,
     fidelityPolicy,
     evidenceMode
   });
@@ -1759,11 +2156,39 @@ async function verifyAndExport(options = {}) {
   const compare = adapters.compare || options.compare || compareSlideVisual;
   const audit = adapters.audit || options.audit || auditPptxStructure;
   const auditGeometry = adapters.auditGeometry || options.auditGeometry || null;
-  const ocr = adapters.ocr || options.ocr;
+  const captureHealBakes = adapters.captureBakes || options.captureBakes || captureBakes;
   const cleanup = adapters.cleanup || options.cleanup || cleanupTransientArtifacts;
   const thresholds = mergeThresholds(options.thresholds);
   const candidatePptxPath = path.resolve(options.tempPptxPath || report.artifacts.candidatePptxPath);
   report.artifacts.candidatePptxPath = candidatePptxPath;
+  const cacheDisabledReason = uncacheableExternalInput(originalSceneGraph, options.html, options.themeCss || originalSceneGraph?.themeCss || '');
+  const cacheEnabled = evidenceMode === EVIDENCE_MODES.FULL && Boolean(options.destinationPath) &&
+    Boolean(options.cachePath) && options.noCache !== true && process.env.LVE_NO_CACHE !== '1' && !cacheDisabledReason;
+  const cacheKeys = new Map(Array.from({ length: expectedSlideCount || 0 }, (_, index) => [
+    index,
+    slideCacheKey({
+      sceneGraph: originalSceneGraph,
+      slideIndex: index,
+      themeCss: options.themeCss || originalSceneGraph?.themeCss || '',
+      html: options.html,
+      thresholds,
+      target
+    })
+  ]));
+  let cache = { schemaVersion: 1, entries: {} };
+  const cachedIndexes = new Set();
+  report.cache = {
+    enabled: cacheEnabled,
+    path: cacheEnabled ? path.resolve(options.cachePath) : null,
+    disabledReason: cacheEnabled ? null : (cacheDisabledReason ||
+      (options.noCache === true || process.env.LVE_NO_CACHE === '1' ? 'disabled-by-override' : null)),
+    hitCount: 0,
+    missCount: expectedSlideCount || 0,
+    allHit: false
+  };
+  let sourceSlides = [];
+  let powerPointSlides = [];
+  const fontEmbeddingWarningKeys = new Set();
 
   /**
    * Per-slide verdict, so a reader can tell the three states apart:
@@ -1778,14 +2203,21 @@ async function verifyAndExport(options = {}) {
     report.slideVerdicts = report.slides.map((slide) => {
       const metrics = slide.visual;
       const compared = Number.isFinite(metrics?.ssim) && Number.isFinite(metrics?.mismatchPercent);
-      const reasons = issuesFor(slide.index).map((issue) => issue.code);
-      const verdict = !compared ? 'unverified' : (metrics.ok === false || reasons.length ? 'failed' : 'verified');
+      const issues = issuesFor(slide.index);
+      const reasons = issues.map((issue) => issue.code);
+      const failedWithoutMetrics = metrics?.ok === false || issues.some((issue) =>
+        ['visual', 'geometry', 'structural'].includes(issue.stage));
+      const verdict = slide.cached && !reasons.length ? 'verified'
+        : (failedWithoutMetrics ? 'failed' : (!compared ? 'unverified' : (reasons.length ? 'failed' : 'verified')));
       return {
         slide: slide.slideNumber ?? slide.index + 1,
         verdict,
         ssim: compared ? metrics.ssim : null,
         mismatchPercent: compared ? metrics.mismatchPercent : null,
-        reasons
+        reasons,
+        cached: Boolean(slide.cached),
+        healed: slide.healed || null,
+        bakedByHeal: Number(slide.bakedByHeal || 0)
       };
     });
     const verdicts = report.slideVerdicts.map((entry) => entry.verdict);
@@ -1825,6 +2257,364 @@ async function verifyAndExport(options = {}) {
       : failureResponse(report);
   };
 
+  const recordVisualAttempt = (slideReport, round, visual, error) => {
+    const attempt = {
+      round,
+      sourceRender: slideReport.sourceRender || null,
+      powerPointRender: slideReport.powerPointRender || null,
+      visual: visual ? visualForCache(visual) : null
+    };
+    if (visual?.heatmapPath) attempt.heatmap = visual.heatmapPath;
+    if (error) attempt.error = asErrorInfo(error, 'VISUAL_COMPARISON_FAILED');
+    slideReport.visualAttempts.push(attempt);
+  };
+
+  const visualErrors = (visual) => {
+    if (!visual) return [{ code: 'VISUAL_MISMATCH', message: 'Visual comparison returned no result.' }];
+    if (Array.isArray(visual.errors) && visual.errors.length) return visual.errors;
+    if (visual.error) return [visual.error];
+    return [{ code: 'VISUAL_MISMATCH', message: 'Visual comparison failed.' }];
+  };
+
+  const renderCandidate = async (attempt) => {
+    report.stage = 'pptx-render';
+    // A caller can supply a pre-built candidate only for the first pass. A
+    // healed export necessarily rebuilds it from the cloned scene graph.
+    if (!options.tempPptxPath || attempt > 0) {
+      await removeIfExists(candidatePptxPath);
+      const pptxResult = await renderPptx({
+        sceneGraph: activeSceneGraph,
+        html: options.html,
+        themeCss: options.themeCss || activeSceneGraph?.themeCss || '',
+        baseDir: options.baseDir || '',
+        outputPath: candidatePptxPath,
+        workDir
+      });
+      if (pptxResult?.ok === false) {
+        throw fidelityError('PPTX_RENDER_FAILED', pptxResult.error || 'Native PPTX rendering failed.', { pptxResult });
+      }
+      if (pptxResult?.fontEmbedding) {
+        report.fontEmbedding = pptxResult.fontEmbedding;
+        for (const skipped of pptxResult.fontEmbedding.skipped || []) {
+          const key = JSON.stringify([
+            skipped.typeface || '',
+            skipped.slot || '',
+            skipped.sourceFamily || '',
+            skipped.reason || ''
+          ]);
+          if (fontEmbeddingWarningKeys.has(key)) continue;
+          fontEmbeddingWarningKeys.add(key);
+          recordWarning(report, 'font-embed', {
+            code: 'FONT_EMBED_SKIPPED',
+            message: `Font ${skipped.typeface || skipped.sourceFamily || 'face'} was not embedded: ${skipped.reason || 'unknown reason'}.`,
+            details: skipped
+          });
+        }
+      }
+      const emitted = pptxResult?.filePath || pptxResult?.path;
+      if (emitted && path.resolve(emitted) !== candidatePptxPath && fs.existsSync(emitted)) {
+        await fsp.copyFile(emitted, candidatePptxPath);
+      }
+    }
+    if (!fs.existsSync(candidatePptxPath)) {
+      throw fidelityError('PPTX_CANDIDATE_MISSING', 'Native PPTX renderer did not create its requested temporary output.', { candidatePptxPath });
+    }
+  };
+
+  const renderCandidateInPowerPoint = async (round) => {
+    report.stage = 'powerpoint-render';
+    const outputDir = path.join(report.artifacts.powerPointDirectory, `round-${round}`);
+    const powerPointResult = await renderPowerPoint({
+      pptxPath: candidatePptxPath,
+      outputDir,
+      target,
+      timeoutMs: options.powerPointTimeoutMs,
+      rendererPath: options.powerPointRendererPath,
+      expectedSlideCount
+    });
+    powerPointSlides = normaliseSlideRenders(powerPointResult, 'PowerPoint');
+    assertRenderCount('PowerPoint', powerPointSlides, expectedSlideCount);
+    report.powerPoint = { ...powerPointResult, outputDir, round, slides: powerPointSlides };
+  };
+
+  const attachRenderPaths = () => {
+    const renderedSlideCount = evidenceMode === EVIDENCE_MODES.FULL
+      ? Math.min(sourceSlides.length, powerPointSlides.length)
+      : powerPointSlides.length;
+    for (let index = 0; index < renderedSlideCount; index += 1) {
+      const slideReport = report.slides[index] || {
+        index,
+        slideNumber: index + 1,
+        failures: [],
+        warnings: [],
+        cached: false,
+        visualAttempts: [],
+        selfHeal: null,
+        healed: null,
+        bakedByHeal: 0
+      };
+      slideReport.sourceRender = sourceSlides[index]?.path || null;
+      slideReport.powerPointRender = powerPointSlides[index]?.path || null;
+      slideReport.expectedDomText = slideReport.expectedDomText || sceneTextForSlide(originalSceneGraph, index) || sourceSlides[index]?.domText || '';
+      slideReport.heatmap = slideReport.heatmap || null;
+      slideReport.ocr = slideReport.ocr || null;
+      slideReport.visual = slideReport.visual || null;
+      slideReport.structural = slideReport.structural || null;
+      if (!report.slides[index]) report.slides[index] = slideReport;
+    }
+  };
+
+  const compareOneSlide = async (slideIndex, round) => {
+    const slideReport = report.slides[slideIndex];
+    try {
+      const visual = await compare({
+        sourcePath: slideReport.sourceRender,
+        powerPointPath: slideReport.powerPointRender,
+        heatmapPath: path.join(report.artifacts.heatmapDirectory, `round-${round}`, `heatmap-slide-${slideNo(slideIndex)}.png`),
+        thresholds,
+        slideIndex
+      });
+      const normalised = visual && typeof visual === 'object'
+        ? visual
+        : { ok: false, errors: [{ code: 'VISUAL_COMPARISON_INVALID', message: 'Visual comparison returned no report.' }] };
+      slideReport.visual = normalised;
+      slideReport.heatmap = normalised.heatmapPath || null;
+      recordVisualAttempt(slideReport, round, normalised);
+      return normalised;
+    } catch (error) {
+      const visual = { ok: false, errors: [asErrorInfo(error, 'VISUAL_COMPARISON_FAILED')], regions: [] };
+      slideReport.visual = visual;
+      slideReport.heatmap = null;
+      recordVisualAttempt(slideReport, round, visual, error);
+      return visual;
+    }
+  };
+
+  const restoreCachedSlides = async () => {
+    if (!cacheEnabled) return;
+    cache = await readSlideCache(options.cachePath);
+    if (cache.error) recordWarning(report, 'cache', cache.error);
+    for (let index = 0; index < expectedSlideCount; index += 1) {
+      const key = cacheKeys.get(index);
+      const entry = cache.entries?.[key];
+      if (!entry || entry.verdict !== 'verified' || !entry.visual || entry.visual.ok === false) continue;
+      const hydratedBakes = await loadCachedBakes(entry, options.cacheBakeDirectory);
+      if (hydratedBakes === null) continue;
+      const healedDemotions = Array.isArray(entry.healedDemotions)
+        ? entry.healedDemotions
+          .filter((plan) => plan && plan.nodeId)
+          .map((plan) => ({ ...plan, slideIndex: index }))
+        : [];
+      let candidateScene = activeSceneGraph;
+      if (healedDemotions.length) {
+        const demoted = demoteSceneNodes(activeSceneGraph, healedDemotions);
+        if (demoted.demoted.length !== healedDemotions.length || healedDemotions.some((plan) => !hydratedBakes[plan.nodeId])) continue;
+        candidateScene = demoted.sceneGraph;
+      }
+      activeSceneGraph = {
+        ...candidateScene,
+        bakes: { ...(candidateScene.bakes || {}), ...hydratedBakes }
+      };
+      const slideReport = report.slides[index];
+      slideReport.cached = true;
+      slideReport.visual = { ...cloneSceneGraph(entry.visual), ok: true, cached: true };
+      slideReport.healed = entry.healed ? cloneSceneGraph(entry.healed) : null;
+      slideReport.selfHeal = entry.selfHeal ? cloneSceneGraph(entry.selfHeal) : null;
+      slideReport.bakedByHeal = Number(entry.bakedByHeal || healedDemotions.length || 0);
+      cachedIndexes.add(index);
+    }
+    report.cache.hitCount = cachedIndexes.size;
+    report.cache.missCount = Math.max(0, expectedSlideCount - cachedIndexes.size);
+    report.cache.allHit = cachedIndexes.size === expectedSlideCount;
+  };
+
+  const selfHealVisualMismatches = async (initialFailures) => {
+    let failedIndexes = [...initialFailures];
+    for (let round = 1; round <= SELF_HEAL_MAX_ROUNDS && failedIndexes.length; round += 1) {
+      const plans = failedIndexes.flatMap((slideIndex) => {
+        const slideReport = report.slides[slideIndex];
+        return pickHealCandidates(activeSceneGraph, slideIndex, slideReport.visual, target, round).map((candidate) => ({
+          ...candidate,
+          round,
+          reasons: [{
+            code: 'VISUAL_DIFFERENCE_REGION',
+            region: candidate.region,
+            coverage: candidate.coverage,
+            renderAs: candidate.renderAs
+          }]
+        }));
+      });
+      if (!plans.length) continue;
+      const demotion = demoteSceneNodes(activeSceneGraph, plans);
+      if (!demotion.demoted.length) continue;
+      const priorSceneGraph = activeSceneGraph;
+      const priorPowerPoint = report.powerPoint ? cloneSceneGraph(report.powerPoint) : null;
+      const priorPowerPointSlides = powerPointSlides;
+      const priorEvidence = report.slides.map((slide) => ({
+        sourceRender: slide.sourceRender,
+        powerPointRender: slide.powerPointRender,
+        heatmap: slide.heatmap,
+        visual: slide.visual ? cloneSceneGraph(slide.visual) : null
+      }));
+      const backupPptxPath = safeTransientPath(workDir, `candidate-before-self-heal-round-${round}.pptx`);
+      if (fs.existsSync(candidatePptxPath)) await fsp.copyFile(candidatePptxPath, backupPptxPath);
+      try {
+        const captured = await captureHealBakes({
+          html: options.html,
+          baseDir: options.baseDir || '',
+          sceneGraph: activeSceneGraph,
+          sourceSize: activeSceneGraph?.pageSize,
+          target,
+          requests: demotion.requests,
+          workDir,
+          outputDir: path.join(workDir, 'bakes', `round-${round}`),
+          slideSelector: options.slideSelector
+        });
+        if (!captured?.bakes || demotion.demoted.some((entry) => !captured.bakes[entry.nodeId])) {
+          throw fidelityError('SELF_HEAL_BAKE_CAPTURE_FAILED', 'Self-heal did not capture every requested bake.', { round, demoted: demotion.demoted, captured });
+        }
+        activeSceneGraph = {
+          ...demotion.sceneGraph,
+          bakes: { ...(demotion.sceneGraph.bakes || {}), ...captured.bakes }
+        };
+        await renderCandidate(round);
+        await renderCandidateInPowerPoint(round);
+        attachRenderPaths();
+        const retried = new Set(failedIndexes);
+        const retryVisuals = [];
+        for (const slideIndex of retried) retryVisuals.push(await compareOneSlide(slideIndex, round));
+        if (retryVisuals.some((visual) => (visual.errors || []).some((error) =>
+          ['VISUAL_COMPARISON_FAILED', 'VISUAL_COMPARISON_INVALID'].includes(error.code)))) {
+          throw fidelityError('SELF_HEAL_VISUAL_RETRY_FAILED', 'Self-heal could not collect visual evidence for its retry.', { round });
+        }
+
+        const demotedBySlide = new Map();
+        for (const entry of demotion.demoted) {
+          if (!demotedBySlide.has(entry.slideIndex)) demotedBySlide.set(entry.slideIndex, []);
+          demotedBySlide.get(entry.slideIndex).push(entry);
+        }
+        for (const [slideIndex, entries] of [...demotedBySlide.entries()]
+          .sort(([left], [right]) => left - right)) {
+          entries.sort((left, right) => String(left.nodeId).localeCompare(String(right.nodeId)));
+          const slideReport = report.slides[slideIndex];
+          slideReport.selfHeal = slideReport.selfHeal || {
+            initialVerdict: 'failed',
+            initialVisual: visualForCache(priorEvidence[slideIndex]?.visual),
+            rounds: [],
+            attempts: []
+          };
+          slideReport.selfHeal.rounds.push({
+            round,
+            demotedNodeIds: entries.map((entry) => entry.nodeId),
+            reasons: entries.flatMap((entry) => entry.reasons || []),
+            demotions: entries.map((entry) => ({ nodeId: entry.nodeId, round, reasons: entry.reasons || [] }))
+          });
+          slideReport.bakedByHeal += entries.length;
+        }
+        await removeIfExists(backupPptxPath);
+        failedIndexes = [...retried].filter((slideIndex) => report.slides[slideIndex]?.visual?.ok === false);
+      } catch (error) {
+        activeSceneGraph = priorSceneGraph;
+        report.powerPoint = priorPowerPoint;
+        powerPointSlides = priorPowerPointSlides;
+        for (const [index, evidence] of priorEvidence.entries()) {
+          Object.assign(report.slides[index], evidence);
+        }
+        try {
+          if (fs.existsSync(backupPptxPath)) await fsp.copyFile(backupPptxPath, candidatePptxPath);
+        } catch (restoreError) {
+          throw fidelityError('SELF_HEAL_ROLLBACK_FAILED', 'Self-heal failed and the last known-good candidate could not be restored.', {
+            round,
+            error: asErrorInfo(error, 'SELF_HEAL_ATTEMPT_FAILED'),
+            restore: asErrorInfo(restoreError, 'SELF_HEAL_ROLLBACK_FAILED')
+          });
+        } finally {
+          await removeIfExists(backupPptxPath);
+        }
+        const info = asErrorInfo(error, 'SELF_HEAL_ATTEMPT_FAILED');
+        const affectedSlides = [...new Set(demotion.demoted.map((entry) => entry.slideIndex))];
+        for (const slideIndex of affectedSlides) {
+          const slideReport = report.slides[slideIndex];
+          slideReport.selfHeal = slideReport.selfHeal || {
+            initialVerdict: 'failed',
+            initialVisual: visualForCache(priorEvidence[slideIndex]?.visual),
+            rounds: [],
+            attempts: []
+          };
+          slideReport.selfHeal.attempts = slideReport.selfHeal.attempts || [];
+          slideReport.selfHeal.attempts.push({
+            round,
+            status: 'aborted',
+            demotedNodeIds: demotion.demoted.filter((entry) => entry.slideIndex === slideIndex).map((entry) => entry.nodeId),
+            error: info
+          });
+        }
+        recordWarning(report, 'self-heal', {
+          code: 'SELF_HEAL_ATTEMPT_FAILED',
+          message: `Self-heal round ${round} was abandoned; the original native candidate was retained.`,
+          details: info
+        }, { slideIndexes: affectedSlides });
+        break;
+      }
+    }
+    for (const slideReport of report.slides) {
+      if (!slideReport.selfHeal || slideReport.visual?.ok === false) continue;
+      const allRounds = slideReport.selfHeal.rounds || [];
+      const finalRound = allRounds[allRounds.length - 1];
+      slideReport.healed = {
+        round: finalRound?.round || 0,
+        demotedNodeIds: allRounds.flatMap((entry) => entry.demotedNodeIds || []),
+        reasons: allRounds.flatMap((entry) => entry.reasons || [])
+      };
+    }
+  };
+
+  const recordFinalVisualIssues = () => {
+    for (const slideReport of report.slides) {
+      if (slideReport.cached || slideReport.visual?.ok !== false) continue;
+      for (const error of visualErrors(slideReport.visual)) {
+        (fidelityPolicy === FIDELITY_POLICIES.EDITABLE_BEST_EFFORT ? recordWarning : recordFailure)(
+          report, 'visual', error, { slideIndex: slideReport.index });
+      }
+    }
+  };
+
+  const persistCachedSlides = async () => {
+    if (!cacheEnabled || report.failures.length) return;
+    assignVerdicts();
+    const nextCache = { ...cache, schemaVersion: 1, entries: { ...(cache.entries || {}) } };
+    for (const slideReport of report.slides) {
+      const verdict = report.slideVerdicts.find((entry) => entry.slide === slideReport.slideNumber);
+      if (!verdict || verdict.verdict !== 'verified') continue;
+      const healedDemotions = (slideReport.selfHeal?.rounds || []).flatMap((round) =>
+        (round.demotions || []).map((demotion) => ({
+          nodeId: demotion.nodeId,
+          round: demotion.round,
+          reasons: cloneSceneGraph(demotion.reasons || [])
+        }))
+      );
+      const healedBakeInputs = healedDemotions.reduce((result, demotion) => {
+        const bake = activeSceneGraph?.bakes?.[demotion.nodeId];
+        if (bake) result[demotion.nodeId] = bake;
+        return result;
+      }, {});
+      const healedBakes = await persistCachedBakes(healedBakeInputs, options.cacheBakeDirectory);
+      nextCache.entries[cacheKeys.get(slideReport.index)] = {
+        schemaVersion: 1,
+        verdict: 'verified',
+        visual: visualForCache(slideReport.visual),
+        healed: slideReport.healed ? cloneSceneGraph(slideReport.healed) : null,
+        selfHeal: slideReport.selfHeal ? cloneSceneGraph(slideReport.selfHeal) : null,
+        bakedByHeal: Number(slideReport.bakedByHeal || 0),
+        healedDemotions,
+        healedBakes,
+        savedAt: nowIso()
+      };
+    }
+    await writeSlideCache(options.cachePath, nextCache);
+    cache = nextCache;
+  };
+
   try {
     report.stage = 'scene-validation';
     const sceneErrors = Array.isArray(options.sceneGraph?.errors) ? options.sceneGraph.errors : [];
@@ -1849,11 +2639,19 @@ async function verifyAndExport(options = {}) {
 
     report.stage = 'preflight';
     report.preflight = await preflight({
-      sceneGraph: options.sceneGraph,
+      sceneGraph: originalSceneGraph,
       requiredFonts,
+      themeCss: options.themeCss || originalSceneGraph?.themeCss || '',
       powerpointPath: options.powerpointPath,
       installedFonts: options.installedFonts
     });
+    for (const candidate of report.preflight?.embeddedFontCandidates || []) {
+      recordWarning(report, 'font-embed', {
+        code: 'FONT_EMBED_LOCAL_FACE_MISSING',
+        message: `Local Office does not have ${candidate.requiredFace}, so this export relies on the embedded ${candidate.themeFamily} theme face.`,
+        details: candidate
+      });
+    }
     if (!report.preflight?.ok) {
       const errors = report.preflight?.errors?.length ? report.preflight.errors : [{ code: 'PREFLIGHT_FAILED', message: 'PowerPoint/font preflight failed.' }];
       errors.forEach((error) => recordFailure(report, 'preflight', error,
@@ -1861,18 +2659,18 @@ async function verifyAndExport(options = {}) {
       return await finalise();
     }
 
-    let sourceSlides = [];
-    if (evidenceMode === EVIDENCE_MODES.FULL) {
+    await restoreCachedSlides();
+    if (evidenceMode === EVIDENCE_MODES.FULL && !report.cache.allHit) {
       report.stage = 'source-render';
       const sourceResult = await renderHtml({
         html: options.html,
         baseDir: options.baseDir,
         outputDir: report.artifacts.sourceDirectory,
         target,
-        sourceSize: options.sceneGraph?.pageSize,
-        sceneGraph: options.sceneGraph,
+        sourceSize: originalSceneGraph?.pageSize,
+        sceneGraph: originalSceneGraph,
         expectedSlideCount,
-        requiredFonts: sourceFontCheckEntries(options.sceneGraph, requiredFonts),
+        requiredFonts: sourceFontCheckEntries(originalSceneGraph, requiredFonts),
         slideSelector: options.slideSelector,
         loadTimeoutMs: options.sourceLoadTimeoutMs,
         readyTimeoutMs: options.sourceReadyTimeoutMs
@@ -1898,62 +2696,11 @@ async function verifyAndExport(options = {}) {
       if (report.failures.length) return await finalise();
     }
 
-    report.stage = 'pptx-render';
-    if (!options.tempPptxPath) {
-      const pptxResult = await renderPptx({
-        sceneGraph: options.sceneGraph,
-        html: options.html,
-        themeCss: options.themeCss || options.sceneGraph?.themeCss || '',
-        baseDir: options.baseDir || '',
-        outputPath: candidatePptxPath,
-        workDir
-      });
-      if (pptxResult?.ok === false) {
-        throw fidelityError('PPTX_RENDER_FAILED', pptxResult.error || 'Native PPTX rendering failed.', { pptxResult });
-      }
-      const emitted = pptxResult?.filePath || pptxResult?.path;
-      if (emitted && path.resolve(emitted) !== candidatePptxPath && fs.existsSync(emitted)) {
-        // Renderers may create an adjacent temp file.  Copying it into our
-        // candidate location is safe because it is still inside the work dir.
-        await fsp.copyFile(emitted, candidatePptxPath);
-      }
-    }
-    if (!fs.existsSync(candidatePptxPath)) {
-      throw fidelityError('PPTX_CANDIDATE_MISSING', 'Native PPTX renderer did not create its requested temporary output.', { candidatePptxPath });
-    }
+    await renderCandidate(0);
 
-    if (evidenceMode !== EVIDENCE_MODES.NATIVE) {
-    report.stage = 'powerpoint-render';
-    const powerPointResult = await renderPowerPoint({
-      pptxPath: candidatePptxPath,
-      outputDir: report.artifacts.powerPointDirectory,
-      target,
-      timeoutMs: options.powerPointTimeoutMs,
-      rendererPath: options.powerPointRendererPath,
-      expectedSlideCount
-    });
-    const powerPointSlides = normaliseSlideRenders(powerPointResult, 'PowerPoint');
-    assertRenderCount('PowerPoint', powerPointSlides, expectedSlideCount);
-    report.powerPoint = { ...powerPointResult, slides: powerPointSlides };
-
-    const renderedSlideCount = evidenceMode === EVIDENCE_MODES.FULL
-      ? Math.min(sourceSlides.length, powerPointSlides.length)
-      : powerPointSlides.length;
-    for (let index = 0; index < renderedSlideCount; index += 1) {
-      const slideReport = report.slides[index] || {
-        index,
-        slideNumber: index + 1,
-        failures: []
-      };
-      slideReport.sourceRender = sourceSlides[index]?.path || null;
-      slideReport.powerPointRender = powerPointSlides[index].path;
-      slideReport.expectedDomText = slideReport.expectedDomText || sceneTextForSlide(options.sceneGraph, index) || sourceSlides[index]?.domText || '';
-      slideReport.heatmap = slideReport.heatmap || null;
-      slideReport.ocr = slideReport.ocr || null;
-      slideReport.visual = slideReport.visual || null;
-      slideReport.structural = slideReport.structural || null;
-      if (!report.slides[index]) report.slides[index] = slideReport;
-    }
+    if (evidenceMode !== EVIDENCE_MODES.NATIVE && !report.cache.allHit) {
+    await renderCandidateInPowerPoint(0);
+    attachRenderPaths();
     if (evidenceMode === EVIDENCE_MODES.FULL && sourceSlides.length !== powerPointSlides.length) {
       recordFailure(report, 'powerpoint-render', {
         code: 'RENDER_PAIR_COUNT_MISMATCH',
@@ -1961,38 +2708,19 @@ async function verifyAndExport(options = {}) {
       });
     }
 
-    // Full evidence is intentionally an explicit diagnostic operation.  A
-    // preview needs PowerPoint images, but does not need the slow OCR/diff
-    // pass merely to let the user inspect the editable deck.
+    // Full evidence is intentionally an explicit diagnostic operation. A
+    // preview needs PowerPoint images, but no slow pixel loop. Do not record a
+    // first-pass mismatch yet: a successful bounded repair resolves it.
     if (evidenceMode === EVIDENCE_MODES.FULL) {
-    // OCR was RETIRED from the gate in mission 034: it required exact token
-    // order, so one misread killed a correct slide, while the pixel diff
-    // already catches misplaced or missing text deterministically. The bundled
-    // engine survives as a diagnostic CLI (tools/pptx/diagnose-ocr.js).
-    report.stage = report.failures.length ? report.failures[0].stage : 'visual';
-    for (const slideReport of report.slides) {
-      try {
-        const visual = await compare({
-          sourcePath: slideReport.sourceRender,
-          powerPointPath: slideReport.powerPointRender,
-          heatmapPath: path.join(report.artifacts.heatmapDirectory, `heatmap-slide-${slideNo(slideReport.index)}.png`),
-          thresholds,
-          slideIndex: slideReport.index
-        });
-        slideReport.visual = visual;
-        slideReport.heatmap = visual?.heatmapPath || null;
-        if (!visual?.ok) {
-          const visualErrors = visual?.errors?.length ? visual.errors : [visual?.error || { code: 'VISUAL_MISMATCH', message: 'Visual comparison failed.' }];
-          for (const error of visualErrors) {
-            (fidelityPolicy === FIDELITY_POLICIES.EDITABLE_BEST_EFFORT ? recordWarning : recordFailure)(
-              report, 'visual', error, { slideIndex: slideReport.index });
-          }
-        }
-      } catch (error) {
-        (fidelityPolicy === FIDELITY_POLICIES.EDITABLE_BEST_EFFORT ? recordWarning : recordFailure)(
-          report, 'visual', error, { slideIndex: slideReport.index });
+      report.stage = report.failures.length ? report.failures[0].stage : 'visual';
+      const failedIndexes = [];
+      for (const slideReport of report.slides) {
+        if (slideReport.cached) continue;
+        const visual = await compareOneSlide(slideReport.index, 0);
+        if (visual.ok === false) failedIndexes.push(slideReport.index);
       }
-    }
+      await selfHealVisualMismatches(failedIndexes);
+      recordFinalVisualIssues();
     }
     }
     // "We did not check" is a STATE, not a warning. Before mission 034 every
@@ -2010,15 +2738,19 @@ async function verifyAndExport(options = {}) {
       try {
         report.geometry = await auditGeometry({
           pptxPath: candidatePptxPath,
-          sceneGraph: options.sceneGraph,
+          sceneGraph: activeSceneGraph,
           tolerancePx: thresholds.geometryTolerancePx
         });
         for (const mismatch of report.geometry?.mismatches || []) {
+          const idMatch = /^s(\d+):/.exec(String(mismatch.id || ''));
+          const slideIndex = Number.isInteger(mismatch.slideIndex)
+            ? mismatch.slideIndex
+            : (idMatch ? Number(idMatch[1]) : undefined);
           recordFailure(report, 'geometry', {
-            code: 'SHAPE_GEOMETRY_MISMATCH',
-            message: `Shape ${mismatch.id} is ${mismatch.worstPx}px from its measured bounds.`,
+            code: mismatch.code || 'SHAPE_GEOMETRY_MISMATCH',
+            message: mismatch.message || `Shape ${mismatch.id} is ${mismatch.worstPx}px from its measured bounds.`,
             details: mismatch
-          });
+          }, Number.isInteger(slideIndex) ? { slideIndex } : {});
         }
       } catch (error) {
         recordFailure(report, 'geometry', asErrorInfo(error, 'GEOMETRY_AUDIT_FAILED'));
@@ -2029,7 +2761,7 @@ async function verifyAndExport(options = {}) {
     try {
       report.structural = await audit({
         pptxPath: candidatePptxPath,
-        sceneGraph: options.sceneGraph,
+        sceneGraph: activeSceneGraph,
         expectedSlideCount
       });
       for (const structuralSlide of report.structural.slides || []) {
@@ -2045,6 +2777,13 @@ async function verifyAndExport(options = {}) {
     }
 
     if (report.failures.length) return await finalise();
+
+    try {
+      await persistCachedSlides();
+    } catch (error) {
+      // Cache health must never veto an otherwise verified editable export.
+      recordWarning(report, 'cache', asErrorInfo(error, 'FIDELITY_CACHE_WRITE_FAILED'));
+    }
 
     report.stage = 'commit';
     // Atomic commit still requires a valid native-object candidate and all

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<title>LVE shifted-heading gate fixture</title>
+<!--
+  Intentional Mission 034 tripwire. The ::after content is a second heading,
+  translated exactly 40 CSS px in both axes *outside* its native heading box.
+  Generated content is deliberately absent from the editable scene graph. It
+  also cannot be captured by Mission 035's bounded node-bake repair, which is
+  essential: this fixture must remain a genuine visual-gate rejection case.
+-->
+<style>
+  html, body { margin: 0; padding: 0; background: #fff; }
+  .slide { position: relative; width: 950px; height: 650px; box-sizing: border-box;
+           padding: 40px; background: #fff; color: #413258; font-family: Arial, sans-serif; }
+  .tripwire-heading { position: absolute; left: 40px; top: 40px; width: 200px; margin: 0;
+                      color: #413258; font-size: 36px; font-weight: 900; line-height: 1;
+                      text-align: left; overflow: visible; }
+  .tripwire-heading::after { content: attr(data-duplicate); position: absolute; top: 0; left: 100%;
+                              width: 360px; transform: translate(40px, 40px); white-space: pre-line;
+                              font: 900 72px/1 Arial, sans-serif; color: inherit; pointer-events: none; }
+</style>
+</head>
+<body>
+  <div class="slide">
+    <h1 class="tripwire-heading" data-duplicate="WMWMWM&#10;WMWMWM&#10;WMWMWM&#10;WMWMWM">Native heading</h1>
+  </div>
+</body>
+</html>

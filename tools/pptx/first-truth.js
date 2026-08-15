@@ -29,7 +29,7 @@ const EXPORT_TIMEOUT_MS = 10 * 60 * 1000;
 function runDirs() {
   if (!fs.existsSync(FIDELITY_ROOT)) return [];
   return fs.readdirSync(FIDELITY_ROOT, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() && /^\d{4}-\d\d-\d\dT/.test(entry.name))
     .map((entry) => entry.name);
 }
 
@@ -43,7 +43,9 @@ async function exportDeck({ name, deck }) {
   const { app, page } = await launchLve({
     open: deck,
     exportPath: outPath,
-    extraEnv: { LVE_EVIDENCE_MODE: 'full' }
+    // Corpus evidence must be a fresh browser-to-Office measurement, never a
+    // cache replay. Cache behavior has its own focused Mission 035 proof.
+    extraEnv: { LVE_EVIDENCE_MODE: 'full', LVE_NO_CACHE: '1' }
   });
 
   try {

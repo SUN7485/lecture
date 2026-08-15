@@ -21,10 +21,13 @@ test('main-process export is wired to the fidelity gate and has no pixel-PPTX by
   assert.match(mainSource, /require\(['"]\.\/pptxFidelity['"]\)/);
   assert.match(mainSource, /verifyAndExport\s*\(/);
   assert.match(mainSource, /sceneGraph/);
-  assert.match(mainSource, /require\(['"]\.\/pptxTesseractOcr['"]\)/);
-  assert.match(mainSource, /preflightBundledTesseractOcr\s*\(/);
-  assert.match(mainSource, /runBundledTesseractOcr\s*\(/);
-  assert.match(mainSource, /pptxToolPath\('ocr'\)/);
+  // OCR remains available through tools/pptx/diagnose-ocr.js, but it is not a
+  // shipping-export dependency. A missing/tampered OCR bundle must not turn a
+  // full PowerPoint evidence run into an export refusal.
+  assert.doesNotMatch(mainSource, /pptxTesseractOcr/);
+  assert.doesNotMatch(mainSource, /preflightBundledOcr/);
+  assert.doesNotMatch(mainSource, /runBundledOcr/);
+  assert.doesNotMatch(mainSource, /pptxToolPath\('ocr'\)/);
   assert.doesNotMatch(mainSource, /ocr-winrt\.ps1/);
   assert.match(mainSource, /preflightVerifiedPptx/);
   assert.doesNotMatch(mainSource, /mode\s*===\s*['"]pixel['"]/);
@@ -155,6 +158,9 @@ function makeAdapters({ scenario, slideCount, calls }) {
       assert.equal(thresholds.ssim, 0.8487);
       assert.equal(thresholds.pixelMismatchPercent, 8.45);
       assert.equal(thresholds.pixelDelta, 24);
+      if (scenario === 'compare-error') {
+        throw failure('VISUAL_ENGINE_DIED', 'The visual comparison engine stopped before returning metrics.');
+      }
       if (scenario === 'visual-mismatch') {
         return { ok: false, errors: [{ code: 'SSIM_BELOW_THRESHOLD', message: 'SSIM 0.8000000 is below 0.8487.' }], heatmapPath: 'heatmap.png' };
       }
@@ -199,6 +205,7 @@ for (const [scenario, expected] of [
   // 'ocr-mismatch' removed with the OCR gate (mission 034): the pixel diff
   // catches misplaced text deterministically, without OCR's token-order flakiness.
   ['visual-mismatch', { stage: 'visual', code: 'SSIM_BELOW_THRESHOLD', property: null }],
+  ['compare-error', { stage: 'visual', code: 'VISUAL_ENGINE_DIED', property: null }],
   ['renderer-timeout', { stage: 'powerpoint-render', code: 'POWERPOINT_RENDER_TIMEOUT', property: null }]
 ]) {
   test(`production fidelity service: ${scenario} blocks export and retains the chosen file`, async (t) => {
@@ -215,6 +222,11 @@ for (const [scenario, expected] of [
     // concrete slide row for the report UI, rather than only a global toast.
     assert.equal(result.report.slides.length, 1);
     assert.ok(result.report.slides[0].failures.length > 0);
+    if (scenario === 'compare-error') {
+      assert.equal(result.report.verificationState, 'partial');
+      assert.equal(result.report.slideVerdicts[0].verdict, 'failed',
+        'a comparison exception is an explicit failed check, not an unverified slide');
+    }
     if (expected.property) {
       assert.equal(result.report.failures[0].details.property, expected.property);
       assert.equal(result.report.failures[0].details.node, 'text-1');

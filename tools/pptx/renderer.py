@@ -14,6 +14,16 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.enum.shapes import MSO_SHAPE
 
 from rtl import set_rtl
+# Font embedding needs fontTools (+ brotli for woff2). Those are optional
+# extras: a machine without them must still produce an editable deck, with the
+# fonts simply not travelling. Importing them at module scope would make one
+# missing wheel refuse every export, which is what happened until 2026-08-15.
+try:
+    from fonts import embed_theme_fonts
+    FONT_EMBED_IMPORT_ERROR = None
+except Exception as _font_import_error:  # pragma: no cover - environment dependent
+    embed_theme_fonts = None
+    FONT_EMBED_IMPORT_ERROR = str(_font_import_error)
 
 
 # Slide dimensions: 950x650 px at 96 DPI
@@ -632,6 +642,7 @@ def scene_add_image(slide, node, base_dir, scratch):
             x += (w - w2) / 2
             w = w2
     picture = slide.shapes.add_picture(path, px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
+    scene_name_shape(picture, node)
     if fit == 'cover':
         # python-pptx accepts crop fractions (0.25 == 25%), even though the
         # underlying OOXML serializes them as Office percentages.
@@ -755,7 +766,7 @@ def validate_scene_graph(scene):
     return list(scene.get('errors') or [])
 
 
-def render_scene_graph(scene, suggested_name, base_dir=''):
+def render_scene_graph(scene, suggested_name, base_dir='', theme_css=''):
     errors = validate_scene_graph(scene)
     if errors:
         raise ValueError(json.dumps({'stage': 'scene', 'errors': errors}, ensure_ascii=False))
@@ -820,9 +831,29 @@ def render_scene_graph(scene, suggested_name, base_dir=''):
         fd, out_path = tempfile.mkstemp(suffix='.pptx')
         os.close(fd)
         prs.save(out_path)
+        # The browser keeps active theme faces as data URLs.  Embed only faces
+        # that the measured scene actually requests, after python-pptx has
+        # finished generating its package but before it becomes the candidate.
+        if os.environ.get('LVE_DISABLE_FONT_EMBED') == '1':
+            font_embedding = {'embedded': [], 'skipped': [], 'disabled': True}
+        elif embed_theme_fonts is None:
+            font_embedding = {
+                'embedded': [],
+                'skipped': [{
+                    'family': '*',
+                    'reason': 'font tooling unavailable: %s' % FONT_EMBED_IMPORT_ERROR,
+                }],
+                'unavailable': True,
+            }
+        else:
+            font_embedding = embed_theme_fonts(
+                out_path,
+                theme_css or scene.get('themeCss') or '',
+                scene.get('requiredFonts') or []
+            )
         os.makedirs(os.path.dirname(os.path.abspath(suggested_name)), exist_ok=True)
         shutil.copy2(out_path, suggested_name)
-        return suggested_name
+        return {'path': suggested_name, 'fontEmbedding': font_embedding}
     finally:
         if out_path and os.path.exists(out_path):
             try: os.unlink(out_path)
@@ -843,9 +874,15 @@ def main():
     scene_graph = payload.get('sceneGraph') or payload.get('slidePlan') or {}
     suggested_name = payload.get('suggestedName', 'lecture.pptx')
     base_dir = payload.get('baseDir', '')
+    theme_css = payload.get('themeCss') or scene_graph.get('themeCss') or ''
     try:
-        output_path = render_scene_graph(scene_graph, suggested_name, base_dir)
-        print(json.dumps({'ok': True, 'path': output_path, 'count': len(scene_graph.get('slides') or [])}, ensure_ascii=False))
+        rendered = render_scene_graph(scene_graph, suggested_name, base_dir, theme_css)
+        print(json.dumps({
+            'ok': True,
+            'path': rendered['path'],
+            'count': len(scene_graph.get('slides') or []),
+            'fontEmbedding': rendered.get('fontEmbedding') or {'embedded': [], 'skipped': []}
+        }, ensure_ascii=False))
     except Exception as e:
         detail = str(e)
         result = {'ok': False, 'stage': 'scene-render', 'error': detail}

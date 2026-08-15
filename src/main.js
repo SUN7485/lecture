@@ -4,13 +4,14 @@ const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
 const ai = require('./enrich/ai');
-const { verifyAndExport, preflightDesktopPowerPoint, renderHtmlSlides, captureBakes } = require('./pptxFidelity');
-const { preflightBundledTesseractOcr, runBundledTesseractOcr } = require('./pptxTesseractOcr');
+const { verifyAndExport, preflightDesktopPowerPoint, renderHtmlSlides, renderPptxWithPowerPoint, captureBakes } = require('./pptxFidelity');
 
 let mainWindow;
 
 if (process.env.LVE_TEST_FIDELITY_HOOK === '1') {
   app.__lveTestRenderHtmlSlides = renderHtmlSlides;
+  app.__lveTestRenderNativePptx = renderNativePptx;
+  app.__lveTestRenderPptxWithPowerPoint = renderPptxWithPowerPoint;
 }
 
 // Remember the last lecture opened so we can offer to reopen it next launch.
@@ -344,11 +345,55 @@ function nativePptxRendererPath() {
   return path.join(appRoot, 'tools', 'pptx', 'renderer.py');
 }
 
-function pptxToolPath(name) {
-  const appRoot = app.isPackaged
-    ? path.join(process.resourcesPath, 'app.asar.unpacked')
-    : path.join(__dirname, '..');
-  return path.join(appRoot, 'tools', 'pptx', name);
+// The packaged app normally uses the Windows Python launcher. An explicit
+// interpreter path makes the runtime testable and supports installs where the
+// launcher is unavailable (for example a portable Python deployment).
+function pptxPythonCommand() {
+  const configured = String(process.env.LVE_PYTHON || '').trim();
+  if (configured) return configured;
+  return process.platform === 'win32' ? 'py' : 'python3';
+}
+
+function normaliseThemeFontName(value) {
+  return String(value || '').trim().replace(/^['"]|['"]$/g, '').replace(/\s+/g, ' ').toLowerCase();
+}
+
+// A self-contained theme face can satisfy a missing local Office font, but
+// only when it is a complete data URL face. A CSS unicode-range shard cannot
+// become a whole PowerPoint face without merging/subsetting, so it remains an
+// honest preflight failure instead of a misleading promise to make it travel.
+function completeThemeDataFontFamilies(themeCss) {
+  const families = new Set();
+  for (const match of String(themeCss || '').matchAll(/@font-face\s*\{([^}]*)\}/gi)) {
+    const body = match[1];
+    const family = body.match(/font-family\s*:\s*(['"]?)([^;'"\s][^;'"}]*)\1\s*;/i);
+    if (!family || !/src\s*:\s*url\(\s*data:[^;]+;base64,/i.test(body) || /unicode-range\s*:/i.test(body)) continue;
+    families.add(normaliseThemeFontName(family[2]));
+  }
+  return families;
+}
+
+function embeddedThemeFaceFor(sceneGraph, themeCss, requiredFace) {
+  const available = completeThemeDataFontFamilies(themeCss || sceneGraph?.themeCss || '');
+  if (!available.size) return null;
+  const requested = normaliseThemeFontName(requiredFace);
+  for (const descriptor of sceneGraph?.requiredFonts || []) {
+    const values = typeof descriptor === 'string' ? { family: descriptor } : (descriptor || {});
+    const nativeFace = normaliseThemeFontName(
+      values.powerPointFontFamily || values.resolvedFontFamily || values.family || values.fontFamily || values.browserFamily
+    );
+    if (nativeFace !== requested) continue;
+    const aliases = [
+      values.powerPointFontFamily,
+      values.resolvedFontFamily,
+      values.family,
+      values.fontFamily,
+      values.browserFamily
+    ].map(normaliseThemeFontName).filter(Boolean);
+    const matched = aliases.find((alias) => available.has(alias));
+    if (matched) return { requiredFace, themeFamily: matched };
+  }
+  return null;
 }
 
 function renderNativePptx(payload, timeoutMs = 120000) {
@@ -358,7 +403,7 @@ function renderNativePptx(payload, timeoutMs = 120000) {
       reject(new Error('Native PPTX renderer is missing: ' + rendererPath));
       return;
     }
-    const python = process.platform === 'win32' ? 'py' : 'python3';
+    const python = pptxPythonCommand();
     let child;
     try {
       child = spawn(python, ['-X', 'utf8', rendererPath], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -392,7 +437,12 @@ function renderNativePptx(payload, timeoutMs = 120000) {
           error.details = result.errors || result;
           throw error;
         }
-        resolve({ ok: true, filePath: result.path, count: (payload.sceneGraph?.slides || []).length });
+        resolve({
+          ok: true,
+          filePath: result.path,
+          count: (payload.sceneGraph?.slides || []).length,
+          fontEmbedding: result.fontEmbedding || null
+        });
       } catch (err) {
         reject(err instanceof Error ? err : new Error(String(err)));
       }
@@ -402,36 +452,6 @@ function renderNativePptx(payload, timeoutMs = 120000) {
 }
 
 // Preview the exact temporary PPTX through PowerPoint — never the source HTML.
-function runBundledOcr({ sourcePath, powerPointPath, languages }) {
-  return runBundledTesseractOcr({
-    bundleRoot: pptxToolPath('ocr'),
-    sourcePath,
-    powerPointPath,
-    languages
-  });
-}
-
-async function preflightBundledOcr() {
-  try {
-    const result = await preflightBundledTesseractOcr({
-      bundleRoot: pptxToolPath('ocr'),
-      timeoutMs: 30000
-    });
-    return { ...result, stage: 'preflight' };
-  } catch (error) {
-    return {
-      ok: false,
-      stage: 'preflight',
-      provider: 'Bundled Tesseract',
-      error: {
-        code: error.code || 'BUNDLED_OCR_PREFLIGHT_FAILED',
-        message: error.message || String(error),
-        details: error.details
-      }
-    };
-  }
-}
-
 function preflightNativePptxRuntime(timeoutMs = 15000) {
   return new Promise((resolve) => {
     const rendererPath = nativePptxRendererPath();
@@ -446,9 +466,14 @@ function preflightNativePptxRuntime(timeoutMs = 15000) {
       });
       return;
     }
-    const python = process.platform === 'win32' ? 'py' : 'python3';
+    const python = pptxPythonCommand();
     let child;
     try {
+      // Only python-pptx and lxml are load-bearing: without them no deck can be
+      // built at all. fontTools/brotli are needed solely to convert and embed
+      // fonts, so a machine missing them must still EXPORT — with fonts not
+      // travelling, reported honestly — instead of refusing every deck.
+      // (A missing brotli refused 100% of exports until 2026-08-15.)
       child = spawn(python, ['-X', 'utf8', '-c', 'import pptx, lxml; print("lve-pptx-runtime-ok")'], {
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -528,7 +553,7 @@ function auditPptxGeometry(payload, timeoutMs = 120000) {
       reject(new Error('Geometry audit script is missing: ' + scriptPath));
       return;
     }
-    const python = process.platform === 'win32' ? 'py' : 'python3';
+    const python = pptxPythonCommand();
     const child = spawn(python, ['-X', 'utf8', scriptPath], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', finished = false;
     const settle = (fn) => { if (finished) return; finished = true; clearTimeout(timer); fn(); };
@@ -550,37 +575,40 @@ function auditPptxGeometry(payload, timeoutMs = 120000) {
 async function preflightVerifiedPptx(options = {}) {
   const evidenceMode = options.evidenceMode || 'native';
   const needsPowerPoint = evidenceMode !== 'native';
-  const needsOcr = evidenceMode === 'full';
-  const [desktop, ocr, nativePptx] = await Promise.all([
+  const [desktop, nativePptx] = await Promise.all([
     preflightDesktopPowerPoint(options),
-    needsOcr ? preflightBundledOcr() : Promise.resolve({ ok: true, skipped: 'OCR is only required for full evidence.' }),
     preflightNativePptxRuntime()
   ]);
+  const embeddedFontCandidates = [];
   const errors = (desktop.errors || [])
-    .filter((error) => needsPowerPoint || !POWERPOINT_ONLY_ERRORS.has(error.code));
-  if (needsOcr && !ocr.ok) {
-    errors.push({
-      code: ocr.error?.code || 'BUNDLED_OCR_PREFLIGHT_FAILED',
-      message: ocr.error?.message || 'Bundled Arabic + English OCR is unavailable.',
-      details: ocr.error?.details
+    .filter((error) => needsPowerPoint || !POWERPOINT_ONLY_ERRORS.has(error.code))
+    .filter((error) => {
+      if (error.code !== 'REQUIRED_FONT_MISSING') return true;
+      const candidate = embeddedThemeFaceFor(options.sceneGraph, options.themeCss, error.font);
+      if (!candidate) return true;
+      embeddedFontCandidates.push(candidate);
+      return false;
     });
-  }
   if (!nativePptx.ok) errors.push(nativePptx.error);
-  return { ...desktop, evidenceMode, ocr, nativePptx, errors, ok: errors.length === 0 };
+  return { ...desktop, evidenceMode, nativePptx, embeddedFontCandidates, errors, ok: errors.length === 0 };
 }
 
 // ---- Fidelity evidence retention ----
 // Verification artifacts used to land in %TEMP% and were effectively lost, so
 // no export was ever inspectable after the fact.  They now live in a
 // gitignored `.fidelity/` beside the repo, newest 10 runs kept.
-const FIDELITY_ROOT = path.join(__dirname, '..', '.fidelity');
+const FIDELITY_ROOT = process.env.LVE_FIDELITY_ROOT
+  ? path.resolve(process.env.LVE_FIDELITY_ROOT)
+  : path.join(__dirname, '..', '.fidelity');
 const FIDELITY_RUNS_KEPT = 10;
 
 function ensureFidelityRoot() {
   fs.mkdirSync(FIDELITY_ROOT, { recursive: true });
   try {
     const runs = fs.readdirSync(FIDELITY_ROOT, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
+      // Cache assets and the test-only Electron profile are durable support
+      // directories, not retained run evidence.
+      .filter((entry) => entry.isDirectory() && /^\d{4}-\d\d-\d\dT/.test(entry.name))
       .map((entry) => entry.name)
       .sort(); // ISO timestamps sort chronologically
     for (const stale of runs.slice(0, Math.max(0, runs.length - (FIDELITY_RUNS_KEPT - 1)))) {
@@ -638,7 +666,7 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
   // export against PowerPoint's own render at the frozen thresholds. A machine
   // without it still exports — as 'unverified', an honest state, never a
   // refusal. LVE_EVIDENCE_MODE remains an explicit diagnostic override.
-  const decided = await preflightVerifiedPptx({ sceneGraph, evidenceMode: 'full' });
+  const decided = await preflightVerifiedPptx({ sceneGraph, themeCss, evidenceMode: 'full' });
   const powerPointReady = Boolean(decided.powerpoint?.ok);
   evidenceMode = powerPointReady ? 'full' : 'native';
   const requestedMode = process.env.LVE_EVIDENCE_MODE;
@@ -681,12 +709,30 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
     fidelityPolicy: 'editable-best-effort',
     evidenceMode,
     workDir,
+    // The cache is export-only: a preview still needs fresh source and
+    // PowerPoint images to hand back to the renderer UI.
+    cachePath: destinationPath ? path.join(FIDELITY_ROOT, 'cache.json') : null,
+    cacheBakeDirectory: destinationPath ? path.join(FIDELITY_ROOT, 'cache-bakes') : null,
+    noCache: process.env.LVE_NO_CACHE === '1',
     // Reuse the font enumeration the mode decision already paid for.
-    preflight: (input) => preflightVerifiedPptx({ ...input, evidenceMode, installedFonts: decided.installedFonts }),
+    preflight: (input) => preflightVerifiedPptx({ ...input, themeCss, evidenceMode, installedFonts: decided.installedFonts }),
     auditGeometry: auditPptxGeometry,
-    renderPptx: ({ sceneGraph: graph, outputPath, baseDir: sceneBaseDir }) =>
-      renderNativePptx({ sceneGraph: graph, baseDir: sceneBaseDir, suggestedName: outputPath }),
-    ocr: runBundledOcr
+    renderPptx: ({ sceneGraph: graph, themeCss: renderThemeCss, outputPath, baseDir: sceneBaseDir }) =>
+      renderNativePptx({
+        sceneGraph: graph,
+        themeCss: renderThemeCss || themeCss || graph?.themeCss || '',
+        baseDir: sceneBaseDir,
+        suggestedName: outputPath
+      }),
+    captureBakes: ({ sceneGraph: graph, requests, outputDir, target }) => captureBakes({
+      html,
+      baseDir: baseDir || '',
+      sourceSize: graph?.pageSize,
+      target: target || { width: 1900, height: 1300 },
+      requests,
+      workDir,
+      outputDir
+    })
   });
   appendFidelityIndexRow({
     workDir,

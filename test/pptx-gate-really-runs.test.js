@@ -17,6 +17,7 @@ const { test } = require('node:test');
 const { ROOT, launchLve } = require('./support/launch-electron');
 
 const FIXTURE = path.join(ROOT, 'test', 'fixtures', 'gate-deck.html');
+const SHIFTED_HEADING_FIXTURE = path.join(ROOT, 'test', 'fixtures', 'gate-shifted-heading-deck.html');
 const FIDELITY_ROOT = path.join(ROOT, '.fidelity');
 
 const runDirs = () => (fs.existsSync(FIDELITY_ROOT)
@@ -41,7 +42,10 @@ async function exportThroughTheRealPath(deck, outName) {
   const before = new Set(runDirs());
   // LVE_EXPORT_PATH only skips the save dialog. Evidence mode is deliberately
   // NOT set: the shipping code must choose it.
-  const { app, page } = await launchLve({ open: deck, exportPath: outPath });
+  // Cache is disabled only because this tripwire must prove a fresh
+  // browser-to-Office evidence pass every time; evidence mode remains owned by
+  // the shipping code.
+  const { app, page } = await launchLve({ open: deck, exportPath: outPath, extraEnv: { LVE_NO_CACHE: '1' } });
   try {
     await page.waitForFunction(() => window.__editor && window.__editor.doc
       && window.__editor.doc.querySelectorAll('.slide').length > 0, null, { timeout: 120000 });
@@ -96,4 +100,41 @@ test('the shipping export path really runs the fidelity gate', { timeout: 20 * 6
   assert.ok(report.geometry.checked > 0);
   // "Didn't check" must never reappear as a warning.
   assert.equal(report.warnings.some((warning) => warning.code === 'FIDELITY_EVIDENCE_DEFERRED'), false);
+});
+
+test('the shipping fidelity gate fails a 40px-shifted duplicate heading', { timeout: 20 * 60 * 1000 }, async () => {
+  const { status, report } = await exportThroughTheRealPath(SHIFTED_HEADING_FIXTURE, 'gate-shifted-heading.pptx');
+  assert.ok(report, `no fidelity report was produced (status: ${status})`);
+
+  if (!powerPointInstalled) {
+    // Keep the same loud, filesystem-backed guard as the clean-path case.
+    // Do not infer this from the report: that would conceal a disconnected
+    // shipping gate as an unavailable local dependency.
+    console.error('\n*** SKIPPED: desktop PowerPoint is not installed on this machine.');
+    console.error(`*** evidenceMode=${report.evidenceMode} verificationState=${report.verificationState}`);
+    console.error('*** The shifted-heading tripwire only proves anything where PowerPoint is installed.\n');
+    assert.equal(report.verificationState, 'unverified',
+      'without PowerPoint the export must still succeed, honestly marked unverified');
+    return;
+  }
+
+  assert.equal(report.evidenceMode, 'full',
+    'PowerPoint is installed, so the shipping export path must run full evidence');
+  assert.equal(report.verificationState, 'partial', `status was: ${status}`);
+  assert.equal(report.failedSlideCount, 1);
+  assert.equal(report.slideVerdicts.length, 1);
+
+  const [verdict] = report.slideVerdicts;
+  assert.equal(verdict.verdict, 'failed');
+  assert.equal(typeof verdict.ssim, 'number', 'the failed verdict must carry a real SSIM');
+  assert.equal(typeof verdict.mismatchPercent, 'number');
+  assert.ok(
+    verdict.reasons.includes('SSIM_BELOW_THRESHOLD') ||
+      verdict.reasons.includes('PIXEL_MISMATCH_ABOVE_THRESHOLD'),
+    `the deliberate 40px heading shift must fail the visual thresholds: ${JSON.stringify(verdict)}`
+  );
+  assert.ok(report.slides[0].sourceRender && report.slides[0].powerPointRender,
+    'the failed verdict must come from two real renders');
+  assert.equal(report.geometry?.ok, true,
+    'this is a visual tripwire; native scene geometry itself remains valid');
 });

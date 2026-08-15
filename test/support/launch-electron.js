@@ -10,6 +10,7 @@
 // The fix is two lines that must never be copy-pasted again: strip the
 // variable from every child env, then assert what actually booted.
 const path = require('node:path');
+const fs = require('node:fs');
 const { _electron } = require('../../node_modules/playwright-core');
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -34,9 +35,17 @@ async function launchLve({ open, exportPath, extraEnv } = {}) {
   if (open) env.LVE_OPEN = open;
   if (exportPath) env.LVE_EXPORT_PATH = exportPath;
 
+  // Codex's Windows workspace sandbox and Chromium's child-process sandbox
+  // clash on this host: the GPU child exits before a renderer exists and
+  // Electron raises an EXCEPTION_BREAKPOINT dialog. This is *test-only* — the
+  // shipping app retains Electron's normal sandbox. Keep test state inside the
+  // gitignored fidelity directory rather than the protected AppData profile.
+  const testUserData = path.join(ROOT, '.fidelity', 'electron-test-profile');
+  fs.mkdirSync(testUserData, { recursive: true });
+
   const app = await _electron.launch({
     executablePath: require('electron'),
-    args: ['.'],
+    args: ['.', '--no-sandbox', `--user-data-dir=${testUserData}`],
     cwd: ROOT,
     env
   });

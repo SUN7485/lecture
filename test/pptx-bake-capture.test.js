@@ -11,8 +11,13 @@ const { ROOT, electronEnv } = require('./support/launch-electron');
 const MAIN = path.join(ROOT, 'test', 'support', 'bake-capture-main.js');
 
 test('a bake request becomes a 2x PNG crop at the node bounds', { timeout: 60000 }, async () => {
+  // Match the regular Electron test launcher. In Codex's Windows workspace
+  // sandbox, Electron's GPU child cannot use the default AppData profile and
+  // crashes before this harness can load its file URL.
+  const testUserData = path.join(ROOT, '.fidelity', 'electron-bake-capture-profile');
+  require('node:fs').mkdirSync(testUserData, { recursive: true });
   const output = await new Promise((resolve, reject) => {
-    const child = spawn(require('electron'), [MAIN], {
+    const child = spawn(require('electron'), ['--no-sandbox', `--user-data-dir=${testUserData}`, MAIN], {
       cwd: ROOT,
       windowsHide: true,
       env: electronEnv(),

@@ -5,7 +5,7 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test --test-concurrency=1 test/fidelity-contract.test.js test/pptx-fidelity-service.test.js test/pptx-audit.test.js test/pptx-tesseract-ocr.test.js test/electron-scene-preview.test.js test/electron-source-render.test.js test/electron-visual-compare.test.js test/pptx-bake-capture.test.js test/pptx-gate-really-runs.test.js",
+    "test": "node --test --test-concurrency=1 test/fidelity-contract.test.js test/pptx-fidelity-service.test.js test/pptx-audit.test.js test/pptx-tesseract-ocr.test.js test/electron-scene-preview.test.js test/electron-source-render.test.js test/electron-visual-compare.test.js test/pptx-bake-capture.test.js test/pptx-gate-really-runs.test.js test/pptx-self-heal.test.js test/pptx-font-embed.test.js test/pptx-self-heal-really-runs.test.js",
     "dist": "electron-builder",
     "pack": "electron-builder --dir"
   },
