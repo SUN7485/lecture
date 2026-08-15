@@ -23,6 +23,7 @@ Claude plans → `/handoff` writes mission (`.claude/handoffs/NNN.md`, gitignore
 ## Plans
 - `docs/v4-plan.md` — V4 (missions 008–014: doctor, import, Arabic pack, templates, present) — **all landed**.
 - `docs/studio-v3-plan.md` — Electron Studio phases 4–6 (image lab, hardening, advisor) — pending, parked since web pivot.
+- `docs/pptx-v2-plan.md` — "HTML = PPT" editable PPTX export (missions 032–038: first truth, total coverage, calibrated gate, self-heal, font embedding, proof screen, regression lock). **Phases 0–5 landed** on `wip/pptx-v2`; every export is now verified against a real PowerPoint render at thresholds derived from measurement, and the PPTX preview is the side-by-side proof screen.
 
 ## WIP right now (2026-07-17)
 - **Phase A (sellable product)** — strategy locked 2026-07-15: Arabic-first wedge, market ME → EU → world. `docs/resell-study.md` is the product bible. **LOCAL-FIRST (user decision 2026-07-15): no Hostinger/deploy/domain spend until the product is proven great locally on real lectures.** Order: commit backlog ✓ → local hardening (save-in-place, autosave — study §2.1 "fix first") → prove on real lectures/users → only then deploy.

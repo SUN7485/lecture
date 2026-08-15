@@ -194,7 +194,7 @@ remaining per-glyph difference.
   thresholds documented in this file.
 </details>
 
-### Phase 3 — Self-healing export (Mission 035, 🟢 handoff after Claude specs the demote algorithm)
+### Phase 3 — Self-healing export (Mission 035) — ✅ DONE 2026-08-15
 - Diff-region → scene-node mapping (bounds intersection, non-text nodes first,
   then text clusters); demote → re-render → re-compare, ≤ 2 passes; residual
   failures commit with per-slide "unverified" verdict + side-by-side evidence.
@@ -202,7 +202,7 @@ remaining per-glyph difference.
   (COM render ~1–2 s/slide is the cost driver).
 - **Exit:** seeded-mismatch test deck converges; corpus verdict all-green.
 
-### Phase 4 — Fonts travel (Mission 036, Claude spike → 🟢 hardening)
+### Phase 4 — Fonts travel (Mission 036) — ✅ DONE 2026-08-15
 - Rewrite `embed_fonts`: ECMA-376-correct `p:embeddedFontLst`
   (`p:font typeface` + `p:regular/p:bold/... r:id`), `.fntdata` parts,
   `embedTrueTypeFonts="1"`, correct element order in `presentation.xml`.
@@ -216,7 +216,7 @@ remaining per-glyph difference.
   repair prompt. That proves embedding without needing a second machine.
 - **Exit:** corpus decks carry embedded fonts; proof test green.
 
-### Phase 5 — The product face (Mission 037, 🟢 handoff)
+### Phase 5 — The product face (Mission 037) — ✅ DONE 2026-08-15
 - Preview modal: per-slide **side-by-side** (Chromium | PowerPoint) + heatmap
   toggle + verdict chip + baked-element badges. This *is* the "preview
   html = ppt" feature.

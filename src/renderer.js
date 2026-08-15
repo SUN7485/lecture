@@ -719,13 +719,17 @@
     const report = res.report || {};
     const verified = report.verifiedSlideCount || 0;
     const failed = report.failedSlideCount || 0;
+    const baked = (report.slides || []).reduce((total, slide) =>
+      total + ((slide.bakedNodeIds || slide.healed?.demotedNodeIds || []).length), 0);
+    // Every bake is confessed, never silent.
+    const bakedNote = baked ? ` — ${baked} عنصر مطبوخ` : '';
     switch (report.verificationState) {
       case 'verified':
-        return `تم التصدير — تم التحقق من ${verified} شريحة مطابقة: ${res.filePath}`;
+        return `تم التصدير — تم التحقق من ${verified} شريحة مطابقة${bakedNote}: ${res.filePath}`;
       case 'partial':
-        return `تم التصدير — ${failed} شريحة غير مطابقة، راجع المعاينة: ${res.filePath}`;
+        return `تم التصدير — ${failed} شريحة غير مطابقة، راجع المعاينة${bakedNote}: ${res.filePath}`;
       default:
-        return `تم التصدير بدون تحقق (PowerPoint غير متوفر): ${res.filePath}`;
+        return `تم التصدير بدون تحقق (PowerPoint غير متوفر)${bakedNote}: ${res.filePath}`;
     }
   }
 
@@ -1485,53 +1489,194 @@
   }
 
   // Preview the actual generated PPTX through PowerPoint, not the source HTML.
+  // ---------- PPTX proof screen (mission 037) ----------
+  // Every string here is derived from report fields (verdict, metrics, baked
+  // ids). Never from warnings.length — "we didn't check" and "we checked and
+  // found problems" are different facts and must never share a number.
+  const VERDICT_CHIPS = {
+    verified: { text: 'مطابقة', cls: 'is-verified' },
+    failed: { text: 'غير مطابقة', cls: 'is-failed' },
+    unverified: { text: 'غير متحقق', cls: 'is-unverified' }
+  };
+
+  function previewChip(slide) {
+    if (slide.verdict === 'verified' && slide.bakedNodeIds.length) {
+      return { text: `مُعالجة بالخَبز · ${slide.bakedNodeIds.length}`, cls: 'is-baked' };
+    }
+    return VERDICT_CHIPS[slide.verdict] || VERDICT_CHIPS.unverified;
+  }
+
+  function previewPane(labelText, src, altText, heatmapSrc) {
+    const pane = document.createElement('div');
+    pane.className = 'preview-pane';
+    const label = document.createElement('div');
+    label.className = 'preview-pane-label';
+    label.textContent = labelText;
+    pane.appendChild(label);
+    const frame = document.createElement('div');
+    frame.className = 'preview-pane-frame';
+    if (src) {
+      const image = document.createElement('img');
+      image.src = src;
+      image.alt = altText;
+      frame.appendChild(image);
+      if (heatmapSrc) {
+        const layer = document.createElement('img');
+        layer.className = 'heatmap-layer';
+        layer.src = heatmapSrc;
+        layer.alt = 'خريطة الفروق';
+        frame.appendChild(layer);
+      }
+    } else {
+      const missing = document.createElement('div');
+      missing.className = 'preview-pane-missing';
+      missing.textContent = 'لا توجد صورة لهذه الشريحة';
+      frame.appendChild(missing);
+    }
+    pane.appendChild(frame);
+    return pane;
+  }
+
+  function renderPreviewSlides(container, slides) {
+    container.innerHTML = '';
+    for (const slide of slides) {
+      const row = document.createElement('div');
+      row.className = 'preview-row';
+
+      const head = document.createElement('div');
+      head.className = 'preview-row-head';
+      const num = document.createElement('span');
+      num.className = 'slide-num';
+      num.textContent = `شريحة ${slide.slide}`;
+      head.appendChild(num);
+
+      const chipInfo = previewChip(slide);
+      const chip = document.createElement('span');
+      chip.className = `verdict-chip ${chipInfo.cls}`;
+      chip.textContent = chipInfo.text;
+      head.appendChild(chip);
+
+      if (slide.bakedNodeIds.length) {
+        const badge = document.createElement('span');
+        badge.className = 'baked-badge';
+        badge.textContent = `عناصر مطبوخة: ${slide.bakedNodeIds.length}`;
+        badge.title = slide.bakedNodeIds.join('\n');
+        head.appendChild(badge);
+      }
+
+      const metrics = document.createElement('span');
+      metrics.className = 'preview-row-metrics';
+      metrics.textContent = Number.isFinite(slide.ssim)
+        ? `SSIM ${slide.ssim.toFixed(4)} · اختلاف ${slide.mismatchPercent.toFixed(2)}%`
+        : 'بدون قياس';
+      head.appendChild(metrics);
+      row.appendChild(head);
+
+      const pair = document.createElement('div');
+      pair.className = 'preview-pair';
+      // RTL: the source sits on the right, its PowerPoint output on the left.
+      pair.appendChild(previewPane('HTML (المصدر)', slide.sourcePng, `مصدر الشريحة ${slide.slide}`, null));
+      pair.appendChild(previewPane('PowerPoint (الناتج)', slide.powerPointPng, `ناتج الشريحة ${slide.slide}`, slide.heatmapPng));
+      row.appendChild(pair);
+      container.appendChild(row);
+    }
+  }
+
+  function previewSummaryText(summary) {
+    const parts = [`تم التحقق من ${summary.verifiedSlideCount}/${summary.slideCount} شريحة`];
+    if (summary.failedSlideCount) parts.push(`${summary.failedSlideCount} غير مطابقة`);
+    if (summary.bakedCount) parts.push(`${summary.bakedCount} عنصر مطبوخ`);
+    if (Number.isFinite(summary.minSsim)) parts.push(`SSIM الأدنى: ${summary.minSsim.toFixed(4)}`);
+    if (summary.verificationState === 'unverified') parts.push('(PowerPoint غير متوفر)');
+    return parts.join(' · ');
+  }
+
+  function setPreviewBusy(busy) {
+    for (const id of ['btn-preview-export', 'btn-preview-retry', 'chk-preview-heatmap']) {
+      const element = document.getElementById(id);
+      if (element) element.disabled = busy;
+    }
+  }
+
+  function showPreviewSkeletons(container, count) {
+    container.innerHTML = '';
+    for (let index = 0; index < Math.max(1, Math.min(count, 4)); index += 1) {
+      const row = document.createElement('div');
+      row.className = 'preview-row';
+      const pair = document.createElement('div');
+      pair.className = 'preview-pair';
+      pair.appendChild(Object.assign(document.createElement('div'), { className: 'preview-skeleton' }));
+      pair.appendChild(Object.assign(document.createElement('div'), { className: 'preview-skeleton' }));
+      row.appendChild(pair);
+      container.appendChild(row);
+    }
+  }
+
   async function previewPptx() {
-    try {
-      if (!editor) { status('Open a lecture first.'); return; }
-      status('Building editable PowerPoint preview…');
-      const container = document.getElementById('preview-slides');
-      if (!container) { status('Preview not available.'); return; }
+    const container = document.getElementById('preview-slides');
+    const summaryEl = document.getElementById('preview-summary');
+    const errorBox = document.getElementById('preview-error');
+    const emptyBox = document.getElementById('preview-empty');
+    const advisory = document.getElementById('preview-advisory');
+    if (!container) { status('Preview not available.'); return; }
+
+    const show = (element, visible) => { if (element) element.hidden = !visible; };
+    show(errorBox, false);
+    show(emptyBox, !editor);
+    if (!editor) {
       container.innerHTML = '';
+      if (summaryEl) summaryEl.textContent = '';
+      openModal('preview-modal');
+      return;
+    }
+
+    openModal('preview-modal');
+    setPreviewBusy(true);
+    if (summaryEl) summaryEl.textContent = 'جارٍ التحقق — يُرسم الملف في PowerPoint…';
+    try {
       const sceneGraph = editor.serializeForPptx();
+      showPreviewSkeletons(container, sceneGraph?.slides?.length || 1);
+
+      // Doctor is advisory only — it never gates the export.
+      show(advisory, false);
+      try {
+        const issues = runPptxDoctor({ showModal: false }) || [];
+        if (issues.length && advisory) {
+          advisory.textContent = `يقترح الفاحص ${issues.length} إصلاحًا قبل التصدير`;
+          show(advisory, true);
+        }
+      } catch (_) { /* the advisory must never break the preview */ }
+
       const result = await window.api.previewPptx({
         sceneGraph,
         themeCss: sceneGraph?.themeCss,
         baseDir: currentFile?.dir || '',
         html: editor.getCleanHtml()
       });
-      if (!result.ok) {
-        if (result.report) showFidelityReport(result.report);
-        throw new Error(result.error || 'Could not build PPTX preview.');
-      }
+      if (!result.ok) throw new Error(result.error || 'تعذّر بناء المعاينة.');
 
-      const warningCount = result.report?.warnings?.length || 0;
-      if (warningCount) {
-        const note = document.createElement('div');
-        note.className = 'fidelity-report-summary';
-        note.textContent = `Editable best-effort preview: ${warningCount} OCR/visual fidelity notes are recorded in the report.`;
-        container.appendChild(note);
-      }
-      result.images.forEach((src, i) => {
-        const card = document.createElement('div');
-        card.className = 'preview-slide';
-        const image = document.createElement('img');
-        image.src = src;
-        image.alt = `Rendered PowerPoint slide ${i + 1}`;
-        card.appendChild(image);
-
-        const num = document.createElement('div');
-        num.className = 'slide-num';
-        num.textContent = `Slide ${i + 1} of ${result.images.length} — PowerPoint render`;
-        card.appendChild(num);
-        container.appendChild(card);
-      });
-
-      openModal('preview-modal');
-      status(`Editable PowerPoint preview ready — ${result.images.length} slides${warningCount ? ` (${warningCount} fidelity notes)` : ''}.`);
+      renderPreviewSlides(container, result.slides || []);
+      const summaryText = previewSummaryText(result.summary || {});
+      if (summaryEl) summaryEl.textContent = summaryText;
+      applyPreviewHeatmap();
+      status(summaryText);
     } catch (error) {
       console.error('PPTX preview failed', error);
-      status('Preview failed. See console for details.');
+      container.innerHTML = '';
+      if (summaryEl) summaryEl.textContent = '';
+      const text = document.getElementById('preview-error-text');
+      if (text) text.textContent = String(error.message || error);
+      show(errorBox, true);
+      status('تعذّرت المعاينة — راجع الرسالة في النافذة.');
+    } finally {
+      setPreviewBusy(false);
     }
+  }
+
+  function applyPreviewHeatmap() {
+    const on = document.getElementById('chk-preview-heatmap')?.checked;
+    document.querySelectorAll('#preview-slides .preview-row')
+      .forEach((row) => row.classList.toggle('show-heatmap', Boolean(on)));
   }
 
   // Doctor: validate the PPTX export plan
@@ -1605,5 +1750,14 @@
     if (exportBtn) exportBtn.addEventListener('click', () => { closeModal(id); onExport(); });
   };
   wireModal('preview-modal', exportPptxDirect);
-  wireModal('doctor-modal', doctorFixAndExport);
+  // `doctorFixAndExport` never existed: this line threw a ReferenceError on
+  // every boot, killing the rest of this IIFE — so the doctor modal's own
+  // export button was dead too. The doctor is advisory (mission 037), so its
+  // primary action is simply "export anyway".
+  wireModal('doctor-modal', exportPptxDirect);
+
+  // Proof-screen controls: the heatmap overlays the diff on the PowerPoint side,
+  // and retry re-runs the whole verification after a failure.
+  document.getElementById('chk-preview-heatmap')?.addEventListener('change', applyPreviewHeatmap);
+  document.getElementById('btn-preview-retry')?.addEventListener('click', () => { previewPptx(); });
 })();

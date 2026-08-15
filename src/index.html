@@ -156,18 +156,31 @@
   </div>
 
   <div id="preview-modal" class="pptx-modal" hidden role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
-    <div class="modal-content preview-content">
+    <!-- The proof screen is Arabic, so it reads right-to-left: the HTML source
+         pane lands on the right and its PowerPoint output on the left. Scoped
+         here because the surrounding app chrome is still LTR. -->
+    <div class="modal-content preview-content" dir="rtl">
       <div class="modal-header">
-        <h2 id="preview-modal-title">PPTX Preview</h2>
-        <span class="pptx-mode-label">Editable PPTX · best-effort fidelity</span>
-        <button class="modal-close" data-close="preview-modal">&times;</button>
+        <h2 id="preview-modal-title">مطابقة HTML ↔ PowerPoint</h2>
+        <span id="preview-summary" class="pptx-mode-label">جارٍ التحقق…</span>
+        <span id="preview-advisory" class="preview-advisory" hidden></span>
+        <button class="modal-close" data-close="preview-modal" title="إغلاق">&times;</button>
       </div>
       <div class="modal-body">
+        <div id="preview-error" class="preview-error" hidden>
+          <p id="preview-error-text"></p>
+          <button id="btn-preview-retry" class="secondary">إعادة المحاولة</button>
+        </div>
+        <div id="preview-empty" class="preview-empty" hidden>افتح محاضرة أولًا.</div>
         <div id="preview-slides"></div>
       </div>
       <div class="modal-footer">
-        <button id="btn-preview-close" class="secondary">Close</button>
-        <button id="btn-preview-export" class="primary">Export this PPTX</button>
+        <label class="preview-heatmap-toggle">
+          <input type="checkbox" id="chk-preview-heatmap"> إظهار خريطة الفروق
+        </label>
+        <span class="spacer"></span>
+        <button id="btn-preview-close" class="secondary">إغلاق</button>
+        <button id="btn-preview-export" class="primary">تصدير</button>
       </div>
     </div>
   </div>

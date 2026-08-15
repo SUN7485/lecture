@@ -49,7 +49,24 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 }
 
+// Verification used to strand work directories in %TEMP% forever. Evidence now
+// lives in .fidelity/, so sweep the old location on boot — best effort, silent.
+function pruneStaleTempFidelityDirs(maxAgeDays = 7) {
+  try {
+    const root = os.tmpdir();
+    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+    for (const name of fs.readdirSync(root)) {
+      if (!name.startsWith('lve-pptx-fidelity-')) continue;
+      const target = path.join(root, name);
+      try {
+        if (fs.statSync(target).mtimeMs < cutoff) fs.rmSync(target, { recursive: true, force: true });
+      } catch (_) { /* a locked dir is not worth a startup failure */ }
+    }
+  } catch (_) { /* never block boot on housekeeping */ }
+}
+
 app.whenReady().then(() => {
+  pruneStaleTempFidelityDirs();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -748,6 +765,58 @@ function previewImagesFromReport(report) {
   return paths.map((imagePath) => `data:image/png;base64,${fs.readFileSync(imagePath).toString('base64')}`);
 }
 
+function pngDataUrl(imagePath) {
+  try {
+    if (!imagePath || !fs.existsSync(imagePath)) return null;
+    return `data:image/png;base64,${fs.readFileSync(imagePath).toString('base64')}`;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * The "HTML = PPT" proof screen's data: for every slide, both renders, the diff
+ * heatmap, the verdict, and what had to be baked. Everything comes from report
+ * fields — the UI must never infer status from a warning count.
+ */
+function previewSlidesFromReport(report) {
+  const powerPointSlides = report?.powerPoint?.slides || [];
+  const verdicts = report?.slideVerdicts || [];
+  return (report?.slides || []).map((slide, index) => {
+    const verdict = verdicts.find((entry) => entry.slide === (slide.slideNumber ?? index + 1)) || {};
+    const bakedNodeIds = (slide.bakedNodeIds || slide.healed?.demotedNodeIds || []).slice();
+    return {
+      slide: slide.slideNumber ?? index + 1,
+      sourcePng: pngDataUrl(slide.sourceRender),
+      powerPointPng: pngDataUrl(powerPointSlides[index]?.path || slide.powerPointRender),
+      heatmapPng: pngDataUrl(slide.heatmap),
+      verdict: verdict.verdict || 'unverified',
+      ssim: verdict.ssim ?? slide.visual?.ssim ?? null,
+      mismatchPercent: verdict.mismatchPercent ?? slide.visual?.mismatchPercent ?? null,
+      reasons: verdict.reasons || [],
+      bakedNodeIds,
+      healed: slide.healed || null
+    };
+  });
+}
+
+function previewSummaryFromReport(report) {
+  const slides = report?.slides || [];
+  const ssims = (report?.slideVerdicts || [])
+    .map((entry) => entry.ssim).filter((value) => Number.isFinite(value));
+  const bakedCount = slides.reduce((total, slide) =>
+    total + ((slide.bakedNodeIds || slide.healed?.demotedNodeIds || []).length), 0);
+  return {
+    verificationState: report?.verificationState || 'unverified',
+    slideCount: slides.length,
+    verifiedSlideCount: report?.verifiedSlideCount || 0,
+    failedSlideCount: report?.failedSlideCount || 0,
+    unverifiedSlideCount: report?.unverifiedSlideCount || 0,
+    bakedCount,
+    minSsim: ssims.length ? Math.min(...ssims) : null
+  };
+}
+
 // The export path publishes after preflight + native-object XML audit so it
 // remains responsive. Preview additionally renders the candidate through
 // desktop PowerPoint; full OCR/pixel diagnostics are an explicit, slow audit.
@@ -776,9 +845,17 @@ ipcMain.handle('export-pptx', async (_e, payload) => {
 ipcMain.handle('preview-pptx', async (_e, payload) => {
   const { sceneGraph, themeCss, baseDir, html } = payload || {};
   try {
-    const result = await runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinationPath: null, evidenceMode: 'preview' });
+    // The preview IS the fidelity proof screen, so it runs FULL evidence: the
+    // Chromium capture, the PowerPoint render, the diff and the verdicts. It
+    // saves nothing (destinationPath null).
+    const result = await runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinationPath: null, evidenceMode: 'full' });
     if (!result.ok) return result;
-    return { ...result, images: previewImagesFromReport(result.report) };
+    return {
+      ...result,
+      images: previewImagesFromReport(result.report),
+      slides: previewSlidesFromReport(result.report),
+      summary: previewSummaryFromReport(result.report)
+    };
   } catch (error) {
     console.error('Verified PPTX preview error:', error);
     return { ok: false, stage: error.stage || 'preview', error: String(error.message || error) };
