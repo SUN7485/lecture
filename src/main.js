@@ -711,7 +711,27 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
     console.log(`PPTX bakes: ${captured.captured} captured, ${captured.deduplicated} deduplicated, ${captured.requested} requested.`);
   }
 
+  // Arabic, Western digits, matching the rest of the shell. Only the stages a
+  // user waits on get a line; the instant ones would just flicker.
+  const STAGE_LABELS = {
+    preflight: 'يتحقق من المتطلبات…',
+    'source-render': 'يرسم المصدر في المتصفح…',
+    'pptx-render': 'يبني ملف PowerPoint…',
+    'powerpoint-render': 'يفتح الملف في PowerPoint للمقارنة…',
+    visual: 'يقارن الشرائح…',
+    'self-heal': 'يعالج الشرائح غير المطابقة…',
+    geometry: 'يتحقق من مواضع العناصر…',
+    structural: 'يفحص بنية الملف…',
+    commit: 'يحفظ الملف…'
+  };
+  const emitStage = (stage) => {
+    const label = STAGE_LABELS[stage];
+    if (!label || !mainWindow || mainWindow.isDestroyed()) return;
+    try { mainWindow.webContents.send('pptx-progress', { stage, label }); } catch (_) {}
+  };
+
   const result = await verifyAndExport({
+    onStage: emitStage,
     sceneGraph,
     html,
     themeCss: themeCss || sceneGraph.themeCss || '',

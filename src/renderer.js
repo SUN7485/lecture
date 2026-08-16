@@ -733,11 +733,26 @@
     }
   }
 
+  // Stage lines from the main process, so a minute-long verified export never
+  // looks frozen. Live only while an export/preview is in flight.
+  let stopPptxProgress = null;
+  function watchPptxProgress(prefix) {
+    if (stopPptxProgress) stopPptxProgress();
+    stopPptxProgress = window.api.onPptxProgress
+      ? window.api.onPptxProgress(({ label }) => status(`${prefix} ${label}`))
+      : null;
+  }
+  function unwatchPptxProgress() {
+    if (stopPptxProgress) stopPptxProgress();
+    stopPptxProgress = null;
+  }
+
   async function exportPptxDirect() {
     if (!editor) { status('Open a lecture first.'); return; }
     const sceneGraph = editor.serializeForPptx();
     const slideCount = sceneGraph?.slides?.length || 0;
-    if (slideCount) status(`Building editable PPTX — ${slideCount} slides…`);
+    if (slideCount) status(`جارٍ التصدير — ${slideCount} شريحة…`);
+    watchPptxProgress(`جارٍ التصدير (${slideCount} شريحة) —`);
     const suggested = baseName(currentFile?.filePath, '.pptx');
     const res = await window.api.exportPptx({
       sceneGraph,
@@ -746,6 +761,7 @@
       baseDir: currentFile?.dir || '',
       html: editor.getCleanHtml()
     });
+    unwatchPptxProgress();
     if (res.ok) {
       status(pptxExportStatus(res));
     } else {
@@ -1633,6 +1649,7 @@
     openModal('preview-modal');
     setPreviewBusy(true);
     if (summaryEl) summaryEl.textContent = 'جارٍ التحقق — يُرسم الملف في PowerPoint…';
+    let stopPreviewProgress = null;
     try {
       const sceneGraph = editor.serializeForPptx();
       showPreviewSkeletons(container, sceneGraph?.slides?.length || 1);
@@ -1647,6 +1664,12 @@
         }
       } catch (_) { /* the advisory must never break the preview */ }
 
+      // The header doubles as the progress line while PowerPoint renders.
+      if (window.api.onPptxProgress) {
+        stopPreviewProgress = window.api.onPptxProgress(({ label }) => {
+          if (summaryEl) summaryEl.textContent = label;
+        });
+      }
       const result = await window.api.previewPptx({
         sceneGraph,
         themeCss: sceneGraph?.themeCss,
@@ -1669,6 +1692,7 @@
       show(errorBox, true);
       status('تعذّرت المعاينة — راجع الرسالة في النافذة.');
     } finally {
+      if (stopPreviewProgress) stopPreviewProgress();
       setPreviewBusy(false);
     }
   }

@@ -13,6 +13,14 @@ contextBridge.exposeInMainWorld('api', {
   previewPdf: (payload) => ipcRenderer.invoke('preview-pdf', payload),
   exportPptx: (payload) => ipcRenderer.invoke('export-pptx', payload),
   previewPptx: (payload) => ipcRenderer.invoke('preview-pptx', payload),
+  // A verified export renders the deck twice (Chromium + real PowerPoint) and
+  // compares every slide, so it can take a minute on a long lecture. Without
+  // stage updates the UI looks frozen. Returns an unsubscribe function.
+  onPptxProgress: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('pptx-progress', listener);
+    return () => ipcRenderer.removeListener('pptx-progress', listener);
+  },
 
   // ---- AI enrichment ----
   aiStatus: () => ipcRenderer.invoke('ai-status'),

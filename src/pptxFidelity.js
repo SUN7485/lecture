@@ -2158,6 +2158,23 @@ async function verifyAndExport(options = {}) {
     fidelityPolicy,
     evidenceMode
   });
+  // A verified export runs for a minute on a long deck. Rather than thread a
+  // progress callback through ten stages, observe the one field they all
+  // already write: `report.stage`. Enumerable so JSON.stringify still emits it.
+  const onStage = typeof options.onStage === 'function' ? options.onStage : null;
+  if (onStage) {
+    let stageValue = report.stage;
+    Object.defineProperty(report, 'stage', {
+      get: () => stageValue,
+      set: (value) => {
+        stageValue = value;
+        try { onStage(value, report); } catch (_) { /* progress must never break an export */ }
+      },
+      enumerable: true,
+      configurable: true
+    });
+  }
+
   const adapters = options.adapters || {};
   const preflight = adapters.preflight || options.preflight || preflightDesktopPowerPoint;
   const renderHtml = adapters.renderHtml || options.renderHtml || renderHtmlSlides;
