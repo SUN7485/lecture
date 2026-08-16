@@ -1330,7 +1330,17 @@ async function renderPptxWithPowerPoint(options = {}) {
     ];
     let child;
     try {
-      child = spawn('powershell.exe', args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      // Every argument above is an absolute path, so this process has no use
+      // for the caller's working directory — and inheriting it is harmful:
+      // desktop PowerPoint resolves some of its cache folders relative to cwd,
+      // which littered the user's project root with 34 junk directories named
+      // from uninitialised bytes (each holding an empty `Microsoft` folder)
+      // during the mission 033/034 corpus runs. Render from the temp dir.
+      child = spawn('powershell.exe', args, {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: os.tmpdir()
+      });
     } catch (error) {
       reject(fidelityError('POWERPOINT_RENDER_START_FAILED', error.message, { cause: error }));
       return;
