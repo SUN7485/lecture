@@ -2629,7 +2629,54 @@
         return Number.isFinite(parsed) ? parsed : fallback;
       };
       const tidy = (value) => String(value || '').replace(/[\t\r\n ]+/g, ' ').trim();
-      const firstFont = (value) => cleanFamilyName((value || '').split(',')[0]);
+      // A declared family the browser cannot resolve is NOT the font on screen:
+      // the browser silently walks to the next family in the stack. Reporting
+      // the first declared name anyway told PowerPoint to paint a face the
+      // reference render never used — e.g. a deck declaring
+      // `"Lyon Arabic Regular", "Times New Roman", serif` with no @font-face
+      // paints Times New Roman in Chromium while PowerPoint painted installed
+      // Lyon, which is why such decks scored ~0.72 SSIM and verified 4/26.
+      //
+      // `document.fonts.check()` cannot answer this (it returns true whenever
+      // fallback covers the glyphs), so measure: if `"family", generic` renders
+      // the probe string at the same width as `generic` alone, the family was
+      // not used.
+      const FONT_PROBE_TEXT = 'مرحبا Abcdefghij 0123456789';
+      const fontProbeContext = (() => {
+        try { return this.doc.createElement('canvas').getContext('2d'); } catch (_) { return null; }
+      })();
+      const fontAvailability = new Map();
+      const familyAvailable = (family) => {
+        const key = normaliseFamilyKey(family);
+        if (!key) return false;
+        if (fontAvailability.has(key)) return fontAvailability.get(key);
+        let available = false;
+        if (fontProbeContext) {
+          for (const generic of ['monospace', 'serif', 'sans-serif']) {
+            fontProbeContext.font = `72px ${generic}`;
+            const base = fontProbeContext.measureText(FONT_PROBE_TEXT).width;
+            fontProbeContext.font = `72px "${family}", ${generic}`;
+            if (Math.abs(fontProbeContext.measureText(FONT_PROBE_TEXT).width - base) > 0.5) {
+              available = true;
+              break;
+            }
+          }
+        } else {
+          available = true; // no canvas: keep the declared family rather than guess
+        }
+        fontAvailability.set(key, available);
+        return available;
+      };
+      const firstFont = (value) => {
+        const families = String(value || '').split(',').map(cleanFamilyName).filter(Boolean);
+        for (const family of families) {
+          // A generic keyword ends the walk: whatever it resolves to is what
+          // painted, and there is nothing more specific to report.
+          if (genericFonts.has(family.toLowerCase())) return family;
+          if (familyAvailable(family)) return family;
+        }
+        return families[0] || '';
+      };
       const transparent = (value) => !value || value === 'transparent' || /^rgba\([^,]+,[^,]+,[^,]+,\s*0\)$/i.test(value);
       const parseShadow = (raw) => {
         if (!raw || raw === 'none') return [];

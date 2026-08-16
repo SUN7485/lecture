@@ -5,17 +5,54 @@
 // ordinary pointer input. It does not invoke a PPTX export, so it remains
 // deterministic on machines intentionally blocked by a missing fidelity font.
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
 const { ROOT, launchLve } = require('./support/launch-electron');
 
 const FIXTURE = path.join(ROOT, 'Chp1-Lec1-2.html');
 
-async function launchFixture() {
+// The fixture's CSS asks for "Lyon Arabic Regular", but ships no @font-face, so
+// on a bare machine Chromium silently falls back down the stack to Times New
+// Roman. The scene reports the font that ACTUALLY painted, so these tests must
+// register the real Lyon bytes exactly as the production theme kit does —
+// otherwise they assert a mapping for a face the reference render never used.
+// (That mismatch is what made kit-less decks export against the wrong font.)
+const LYON_FACES = [
+  { file: 'lyon-regular.otf', weight: '400' },
+  { file: 'lyon-bold.otf', weight: '700' }
+];
+
+function lyonKitCss() {
+  return LYON_FACES.map(({ file, weight }) => {
+    const bytes = fs.readFileSync(path.join(ROOT, 'src', 'fonts', file)).toString('base64');
+    return `@font-face{font-family:'Lyon Arabic Regular';font-style:normal;font-weight:${weight};` +
+      `src:url(data:font/otf;base64,${bytes}) format('opentype');}`;
+  }).join('');
+}
+
+async function installLyonKit(page, css) {
+  await page.evaluate(async (kitCss) => {
+    const doc = window.__editor.doc;
+    let style = doc.getElementById('ve-theme');
+    if (!style) {
+      style = doc.createElement('style');
+      style.id = 've-theme';
+      doc.head.appendChild(style);
+    }
+    style.textContent = kitCss + (style.textContent || '');
+    await doc.fonts.load('400 16px "Lyon Arabic Regular"', 'مرحبا');
+    await doc.fonts.load('700 16px "Lyon Arabic Regular"', 'مرحبا');
+    await doc.fonts.ready;
+  }, css);
+}
+
+async function launchFixture({ withLyonKit = true } = {}) {
   const { app, page } = await launchLve({ open: FIXTURE });
   await page.waitForFunction(() =>
     window.__editor && window.__editor.doc && window.__editor.doc.querySelectorAll('.slide').length === 26,
   null, { timeout: 60000 });
+  if (withLyonKit) await installLyonKit(page, lyonKitCss());
   return { app, page };
 }
 
@@ -69,6 +106,41 @@ test('mandatory 26-slide fixture extracts a complete browser-measured scene grap
     assert.ok(scene.nativeKinds.table >= 2, 'expected both native tables');
     assert.ok(scene.nativeKinds.image >= 1, 'expected the fixture image');
     assert.ok(scene.nativeKinds.list >= 1, 'expected the fixture list');
+  } finally {
+    await app.close();
+  }
+});
+
+// The scene must name the font that PAINTED, not the one the CSS asked for.
+// Without the kit's bytes the fixture's `"Lyon Arabic Regular", "Times New
+// Roman", serif` stack renders as Times New Roman; reporting Lyon anyway made
+// PowerPoint paint its installed Lyon against a Times New Roman reference —
+// worth ~0.03 SSIM and a wall of failed slides on every kit-less deck.
+test('an unavailable declared family falls back to the face the browser actually used', { timeout: 90000 }, async () => {
+  const { app, page } = await launchFixture({ withLyonKit: false });
+  try {
+    const bare = await page.evaluate(() => {
+      const graph = window.__editor.serializeForPptx();
+      const nodes = graph.slides.flatMap((slide) => slide.nodes);
+      const lyonAsked = nodes.some((node) =>
+        /Lyon/i.test(String(node.style?.fontFamily || '')));
+      return {
+        families: graph.requiredFonts.map((font) => font.family),
+        lyonAsked,
+        // what the deck's CSS still declares, untouched
+        declaresLyon: Array.from(window.__editor.doc.querySelectorAll('.slide *'))
+          .some((el) => /Lyon/i.test(getComputedStyle(el).fontFamily))
+      };
+    });
+
+    assert.equal(bare.declaresLyon, true, 'the fixture must still declare Lyon in CSS');
+    assert.equal(bare.lyonAsked, false,
+      'no scene node may claim a Lyon face the browser could not render');
+    assert.equal(bare.families.some((family) => /Lyon/i.test(family)), false,
+      `requiredFonts must not ask PowerPoint for an unpainted face: ${JSON.stringify(bare.families)}`);
+    // The real fallback is reported instead, so both renderers agree.
+    assert.ok(bare.families.includes('Times New Roman'),
+      `expected the fallback face to be reported: ${JSON.stringify(bare.families)}`);
   } finally {
     await app.close();
   }
