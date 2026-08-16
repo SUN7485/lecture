@@ -46,7 +46,8 @@ const CORPUS = SINGLE
     { name: 'Chp5-Lec33-1', deck: path.join(DOWNLOADS, 'Chp5-Lec33-1.html') },
     { name: 'Chp1-Lec1-2', deck: path.join(ROOT, 'Chp1-Lec1-2.html') },
     { name: 'source-bnb', deck: path.join(ROOT, 'test', 'fixtures', 'source-bnb.html') },
-    { name: 'calibration-deck', deck: path.join(ROOT, 'test', 'fixtures', 'calibration-deck.html') }
+    { name: 'calibration-deck', deck: path.join(ROOT, 'test', 'fixtures', 'calibration-deck.html') },
+    { name: 'bidi-deck', deck: path.join(ROOT, 'test', 'fixtures', 'bidi-deck.html') }
   ];
 
 const runDirs = () => (fs.existsSync(FIDELITY_ROOT)

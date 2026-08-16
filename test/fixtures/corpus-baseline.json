@@ -31,6 +31,12 @@
       "verified": 14,
       "minSsim": 0.8538,
       "maxMismatch": 5.63
+    },
+    "bidi-deck": {
+      "slides": 1,
+      "verified": 1,
+      "minSsim": 0.9262,
+      "maxMismatch": 3.09
     }
   }
 }

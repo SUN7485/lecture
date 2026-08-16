@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>LVE bidi neutrals deck</title>
+<!--
+  Isolates the bidi-neutral defect seen on every real Arabic lecture:
+  «الدرس 33: الحل البياني» renders in PowerPoint as «33:الدرس الحل البياني» —
+  the colon (a Unicode "neutral") lands on the wrong side of an adjacent
+  number or Latin run.
+
+  Chromium resolves neutrals once, when it measures the line. The renderer then
+  hands PowerPoint the same characters, and PowerPoint re-runs its own bidi
+  algorithm over them, which can settle a neutral differently. Every line here
+  is a single measured text box, so any difference is purely reordering.
+-->
+<style>
+  html, body { margin: 0; padding: 0; background: #fff; }
+  .slide { position: relative; width: 950px; height: 650px; box-sizing: border-box;
+           padding: 50px 60px; background: #fff; color: #413258;
+           font-family: Arial, sans-serif; }
+  .slide h1 { margin: 0 0 22px; font-size: 30px; }
+  .slide p { font-size: 22px; line-height: 1.7; margin: 0 0 14px; }
+</style>
+</head>
+<body>
+
+<div class="slide">
+  <h1>الدرس 33: الحل البياني</h1>
+  <p>الوحدة الخامسة | الدرس 33: الحل البياني وخوارزمية السمبلكس</p>
+  <p>الوحدة الخامسة: بحوث العمليات (Operations Research).</p>
+  <p>القيمة MTBF = 1,240 ساعة تشغيل فعلية.</p>
+  <p>النتيجة: 45% خلال عام 1448 هـ.</p>
+  <p>المعادلة [Shadow Price = Z] في الجدول الأمثل.</p>
+  <p>الرمز ISO 9001: معتمد رسميًا.</p>
+</div>
+
+</body>
+</html>
