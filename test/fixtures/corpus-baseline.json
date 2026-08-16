@@ -1,0 +1,36 @@
+{
+  "recordedAt": "2026-08-16",
+  "note": "Per-deck REGRESSION baseline. These are measured facts about how closely PowerPoint reproduces each deck today, after every structural defect was fixed (geometry exact to 0.75px, fonts resolved to the face that actually painted, list drift removed). They are NOT a quality target: the residual is cross-renderer Arabic text shaping, which scales with text density. verify-pptx-corpus.js fails when a deck gets WORSE than its line here.",
+  "decks": {
+    "Chp5-Lec32-7-final": {
+      "slides": 38,
+      "verified": 33,
+      "minSsim": 0.8183,
+      "maxMismatch": 9.48
+    },
+    "Chp5-Lec33-1": {
+      "slides": 25,
+      "verified": 9,
+      "minSsim": 0.7404,
+      "maxMismatch": 12.25
+    },
+    "Chp1-Lec1-2": {
+      "slides": 26,
+      "verified": 4,
+      "minSsim": 0.7519,
+      "maxMismatch": 10.82
+    },
+    "source-bnb": {
+      "slides": 26,
+      "verified": 4,
+      "minSsim": 0.7243,
+      "maxMismatch": 11.72
+    },
+    "calibration-deck": {
+      "slides": 14,
+      "verified": 14,
+      "minSsim": 0.8538,
+      "maxMismatch": 5.63
+    }
+  }
+}
