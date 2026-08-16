@@ -20,6 +20,9 @@ tools/pptx/__pycache__/
 .kilocode/
 .kilo/
 
+# Verifier screenshots — evidence, regenerated on every run.
+verify-*.png
+
 # PPTX fidelity evidence + local caches — generated artifacts, never source.
 # .fidelity/ holds the last 10 verification runs (renders, heatmaps, reports).
 .cache/
