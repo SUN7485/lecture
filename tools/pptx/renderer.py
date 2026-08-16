@@ -668,27 +668,50 @@ def scene_add_line(slide, node):
 
 
 def scene_add_list(slide, node):
-    x, y, w, h = scene_box(node)
-    shape = slide.shapes.add_textbox(px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
-    scene_name_shape(shape, node)
+    """One measured text box per list item, keeping native bullets.
+
+    Everything else in this renderer places text at browser-measured
+    coordinates; a list used to be the single exception — all items went into
+    one auto-laid-out box and PowerPoint decided the line positions. Its line
+    spacing is tighter than Chromium's, so every item after the first drifted
+    upward and the diff showed each line twice (heatmap, Lec33 slide 25,
+    SSIM 0.71). Boxing each item at its own measured bounds removes the drift
+    while `a:buChar` keeps the list a real, editable list.
+    """
     list_data = node.get('list') or {}
     items = list_data.get('items') or []
     style = node.get('style') or {}
-    tf = shape.text_frame
-    tf.clear()
-    tf.word_wrap = True
+    if not items:
+        return None
+
+    ordered = bool(list_data.get('ordered'))
+    shapes = []
     for index, item in enumerate(items):
-        paragraph = tf.paragraphs[0] if index == 0 else tf.add_paragraph()
+        bounds = item.get('bounds')
+        x, y, w, h = scene_box(item) if bounds else scene_box(node)
+        shape = slide.shapes.add_textbox(px_to_emu(x), px_to_emu(y), px_to_emu(w), px_to_emu(h))
+        scene_name_shape(shape, node, '#item%d' % index)
         item_style = item.get('style') or style
+        tf = shape.text_frame
+        tf.clear()
+        # An item may legitimately wrap inside its own measured box, but
+        # PowerPoint must not resize the box or the type to make it fit.
+        tf.word_wrap = True
+        try:
+            tf.auto_size = MSO_AUTO_SIZE.NONE
+        except Exception:
+            pass
+        paragraph = tf.paragraphs[0]
         paragraph.alignment = scene_alignment(item_style.get('textAlign'), item_style.get('direction'))
         if item_style.get('direction') == 'rtl':
             set_rtl(paragraph)
-        scene_set_bullet(paragraph, bool(list_data.get('ordered')))
+        scene_set_bullet(paragraph, ordered)
         for run_info in item.get('runs') or [{'text': item.get('text') or '', 'style': {}}]:
             run = paragraph.add_run()
             run.text = run_info.get('text') or ''
             scene_run_font(run, run_info.get('style') or {}, item_style)
-    return shape
+        shapes.append(shape)
+    return shapes[0]
 
 
 def scene_set_cell_border(cell, side, edge):

@@ -93,6 +93,20 @@ def node_index(scene, emitted_names=None):
                         renderAs='text-line', sourceNodeId=node_id, slideIndex=slide_index)
                 continue
 
+            # A list emits one measured textbox per item (``nodeId#itemN``), so
+            # PowerPoint's tighter paragraph spacing cannot drift the items
+            # relative to each other. Audit the items, not the container.
+            items = ((node.get('list') or {}).get('items')) or []
+            has_emitted_items = any(
+                name.startswith(f'{node_id}#item') for name in emitted_names)
+            if kind == 'list' and items and has_emitted_items:
+                for item_index, item in enumerate(items):
+                    index[f'{node_id}#item{item_index}'] = indexed_node(
+                        node, id=f'{node_id}#item{item_index}',
+                        bounds=item.get('bounds') or node.get('bounds') or {},
+                        renderAs='list-item', sourceNodeId=node_id, slideIndex=slide_index)
+                continue
+
             if kind == 'line':
                 # scene_add_line turns an <hr> into a rectangle centered inside
                 # the measured node bounds, with a minimum 1px thickness.
