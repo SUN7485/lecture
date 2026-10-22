@@ -213,5 +213,100 @@
     return { html: '<!DOCTYPE html>\n' + doc.documentElement.outerHTML, slides: slides.length };
   }
 
-  window.DeckImporter = { fromWordHtml: fromWordHtml, normalizeDeckShape: normalizeDeckShape };
+  // ---- Bytes -> HTML (browser twin of src/decode-html.js) -----------------
+  // Arabic HTML saved by older Windows/Office/FrontPage is windows-1256;
+  // read as UTF-8 it became a wall of U+FFFD. BOM, then <meta charset>, then
+  // windows-1256 when UTF-8 produces replacement characters and 1256 yields
+  // Arabic. The result always declares UTF-8 (Save writes UTF-8).
+  var META_RE = /<meta[^>]+charset\s*=\s*["']?\s*([\w-]+)/i;
+  function decodeHtml(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var enc = null;
+    if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) enc = 'utf-8';
+    else if (bytes[0] === 0xFF && bytes[1] === 0xFE) enc = 'utf-16le';
+    else if (bytes[0] === 0xFE && bytes[1] === 0xFF) enc = 'utf-16be';
+    if (!enc) {
+      var m = META_RE.exec(new TextDecoder('windows-1252').decode(bytes.subarray(0, 4096)));
+      if (m) enc = m[1].toLowerCase();
+    }
+    var text = null, used = enc || 'utf-8';
+    if (enc && enc !== 'utf-8' && enc !== 'utf8') {
+      try { text = new TextDecoder(enc).decode(bytes); } catch (_) { text = null; used = 'utf-8'; }
+    }
+    if (text === null) {
+      text = new TextDecoder('utf-8').decode(bytes);
+      var bad = (text.match(/�/g) || []).length;
+      if (bad > 3) {
+        var ar = new TextDecoder('windows-1256').decode(bytes);
+        if (/[؀-ۿ]{3,}/.test(ar) && (ar.match(/�/g) || []).length < bad) { text = ar; used = 'windows-1256'; }
+      }
+    }
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    if (used !== 'utf-8' && used !== 'utf8') {
+      text = text
+        .replace(/<meta[^>]+http-equiv\s*=\s*["']?content-type["']?[^>]*>/ig, '<meta charset="utf-8">')
+        .replace(/(<meta[^>]+charset\s*=\s*["']?\s*)[\w-]+/i, '$1utf-8');
+    }
+    return { html: text, encoding: used };
+  }
+
+  // ---- Files that are not decks ---------------------------------------------
+  // Classifies what normalizeDeckShape could not turn into slides, and turns
+  // what can be into a deck: plain text (one paragraph per line) and articles
+  // (split at their headings, the Word-import way). Empty files and decks that
+  // build their slides with JavaScript are only named, so the editor can say
+  // what is going on instead of «جاهز» over an empty canvas.
+  function latinMajority(s) {
+    return (s.match(/[A-Za-z]/g) || []).length > (s.match(/[؀-ۿ]/g) || []).length;
+  }
+  function asLtr(deckHtml) {
+    return deckHtml.replace('<html lang="ar" dir="rtl">', '<html lang="en" dir="ltr">').replace('direction:rtl;', 'direction:ltr;');
+  }
+  function convertNonDeck(html) {
+    var raw = String(html || '');
+    if (!raw.trim()) return { html: html, kind: 'empty' };
+    if (!/<[a-z!][^>]*>/i.test(raw)) {
+      var lines = raw.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+      var esc = function (s) { return s.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); };
+      var deck = fromWordHtml(lines.map(function (l) { return '<p>' + esc(l) + '</p>'; }).join(''), { title: lines[0].slice(0, 60) });
+      return { html: latinMajority(raw) ? asLtr(deck) : deck, kind: 'text' };
+    }
+    var doc = new DOMParser().parseFromString(raw, 'text/html');
+    // Already a deck: .slide elements, or several heading-bearing blocks
+    // straight under <body> (a custom slide class the sniffer did not know).
+    if (doc.querySelector('.slide')) return { html: html, kind: 'deck' };
+    var blocks = Array.prototype.filter.call(doc.body.children, function (c) { return c.querySelector('h1, h2, h3') && !/^(HEADER|NAV|FOOTER|MAIN|ARTICLE)$/.test(c.tagName); });
+    if (blocks.length >= 3) return { html: html, kind: 'deck' };
+    var scripts = doc.querySelectorAll('script').length;
+    Array.prototype.forEach.call(doc.querySelectorAll('script, style, noscript, template'), function (n) { n.remove(); });
+    var bodyText = (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
+    var hasMedia = !!doc.body.querySelector('img, svg, video, canvas, iframe');
+    if (!bodyText && !hasMedia) return { html: html, kind: scripts ? 'scripted' : 'empty' };
+    if (bodyText.length < 40 && scripts && !hasMedia) return { html: html, kind: 'scripted' };
+    // An article: one long flow with headings. The main content root is the
+    // biggest of article/main/[role=main]/body by text.
+    var roots = [].concat(Array.prototype.slice.call(doc.querySelectorAll('article, main, [role="main"]')), [doc.body]);
+    var root = roots.reduce(function (a, b) { return (b.textContent || '').length > (a.textContent || '').length * 1.2 ? b : a; });
+    var headings = root.querySelectorAll('h1, h2, h3').length;
+    if (bodyText.length < 1200 && headings < 2) return { html: html, kind: 'deck' };
+    Array.prototype.forEach.call(root.querySelectorAll('nav, header, footer, aside, form, button, [role="navigation"]'), function (n) { n.remove(); });
+    // the Word splitter groups on h1/h2: promote h3 when that is all there is
+    if (!root.querySelector('h1, h2')) Array.prototype.forEach.call(root.querySelectorAll('h3'), function (h) {
+      var h2 = doc.createElement('h2'); h2.innerHTML = h.innerHTML; h.replaceWith(h2);
+    });
+    // flatten wrappers so headings and paragraphs are siblings for the splitter
+    var flat = [];
+    (function walk(el) {
+      Array.prototype.forEach.call(el.children, function (c) {
+        if (/^(DIV|SECTION|ARTICLE|MAIN|SPAN)$/.test(c.tagName) && c.querySelector('h1,h2,p,ul,ol,table,img')) walk(c);
+        else flat.push(c.outerHTML);
+      });
+    })(root);
+    var title = (doc.title || (root.querySelector('h1') || {}).textContent || 'مقال').trim().slice(0, 80);
+    var out = fromWordHtml(flat.join(''), { title: title });
+    return { html: latinMajority(bodyText) ? asLtr(out) : out, kind: 'article' };
+  }
+
+  window.DeckImporter = { fromWordHtml: fromWordHtml, normalizeDeckShape: normalizeDeckShape,
+                          decodeHtml: decodeHtml, convertNonDeck: convertNonDeck };
 })();

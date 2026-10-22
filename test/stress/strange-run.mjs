@@ -32,7 +32,7 @@ for (const name of files) {
       await page.goto(BASE + '/editor?flow=pdf-pptx', { waitUntil: 'networkidle' });
       const t0 = Date.now();
       await page.setInputFiles('#pdf-input', file);
-      await page.waitForFunction(() => /تمت|تعذّر|حجم|ممسوحة|صفحة/.test(document.getElementById('status').textContent) &&
+      await page.waitForFunction(() => /تمت|تعذّر|حجم|ممسوحة|صفحة|محمي|تالف/.test(document.getElementById('status').textContent) &&
         !/جارٍ/.test(document.getElementById('status').textContent), null, { timeout: 120000 }).catch(() => {});
       await page.waitForTimeout(400);
       row.ms = Date.now() - t0;
@@ -52,7 +52,7 @@ for (const name of files) {
       await page.goto(BASE + '/editor', { waitUntil: 'networkidle' });
       const t0 = Date.now();
       await page.setInputFiles('#file-input', file);
-      await page.waitForFunction(() => window.__editor && /جاهز|حُوّل|تعذّر/.test(document.getElementById('status').textContent), null, { timeout: 30000 }).catch(() => {});
+      await page.waitForFunction(() => window.__editor && /جاهز|حُوّل|تعذّر|فارغ|جافاسكربت/.test(document.getElementById('status').textContent), null, { timeout: 30000 }).catch(() => {});
       await page.waitForTimeout(500);
       row.ms = Date.now() - t0;
       row.message = await page.evaluate(() => document.getElementById('status').textContent);

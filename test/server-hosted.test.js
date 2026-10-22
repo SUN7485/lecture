@@ -26,6 +26,11 @@ before(async () => {
       PORT: String(PORT),
       HOST: '127.0.0.1',
       SOURCE_URL: 'https://example.test/source',
+      // The suite runs well over 10 conversions in its first minute; at the
+      // production default the later tests were refused with 429 and failed
+      // for a reason that has nothing to do with what they test.
+      RATE_MAX_CONVERSIONS: '1000',
+      RATE_MAX_EXPORTS: '1000',
       ELECTRON_RUN_AS_NODE: undefined
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -86,7 +91,7 @@ test('rejects non-PDF uploads by magic number, not extension', async () => {
     body: 'MZ\u0090\u0000this is a windows executable'
   });
   assert.equal(res.status, 400);
-  assert.match((await res.json()).error, /not a PDF/i);
+  assert.equal((await res.json()).code, 'NOT_PDF');
 });
 
 test('the filesystem is not addressable', async () => {
@@ -176,6 +181,43 @@ test('one session cannot export another session\'s document', async () => {
     body: JSON.stringify({ modelId })
   });
   assert.equal(stolen.status, 410, 'a foreign session was handed the model');
+});
+
+test('broken PDFs are refused with a code and an Arabic message, never "rebuilt"', { timeout: 120000 }, async () => {
+  // A password-protected PDF once imported as "21 scanned pages", and a
+  // half-finished download as a successful rebuild of zero pages.
+  const mupdf = await import(require('node:url').pathToFileURL(path.join(ROOT, 'node_modules', 'mupdf', 'dist', 'mupdf.js')).href);
+  const src = fs.readFileSync(LECTURE);
+  const locked = Buffer.from(mupdf.Document.openDocument(src, 'application/pdf').asPDF()
+    .saveToBuffer('encrypt=aes-256,user-password=secret,owner-password=owner').asUint8Array());
+  const cases = [
+    ['password', locked, 422, 'PDF_ENCRYPTED'],
+    ['truncated', src.subarray(0, Math.floor(src.length * 0.55)), 422, 'PDF_DAMAGED'],
+    ['empty', Buffer.alloc(0), 400, 'NOT_PDF']
+  ];
+  for (const [name, body, status, code] of cases) {
+    const r = await fetch(`${BASE}/api/convert`, {
+      method: 'POST', headers: { ...ORIGIN, 'content-type': 'application/pdf' }, body
+    });
+    const out = await r.json();
+    assert.equal(r.status, status, `${name}: HTTP ${r.status}`);
+    assert.equal(out.code, code, `${name}: code ${out.code}`);
+    assert.match(out.error, /[؀-ۿ]/, `${name}: the message is not Arabic: ${out.error}`);
+  }
+});
+
+test('a deck mixing slide sizes exports one PDF page per slide', { timeout: 120000 }, async () => {
+  // A 16:9 or A4 slide in a 950x650 deck used to spill onto extra pages.
+  const s = (w, h, t) => `<div class="slide" style="width:${w}px;height:${h}px;background:#fff"><h1>${t}</h1></div>`;
+  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"></head><body>` +
+    s(950, 650, 'أولى') + s(1280, 720, 'ثانية') + s(794, 1123, 'ثالثة') + `</body></html>`;
+  const r = await fetch(`${BASE}/api/export/pdf`, {
+    method: 'POST', headers: { ...ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ html })
+  });
+  assert.equal(r.status, 200);
+  const mupdf = await import(require('node:url').pathToFileURL(path.join(ROOT, 'node_modules', 'mupdf', 'dist', 'mupdf.js')).href);
+  const pages = mupdf.Document.openDocument(Buffer.from(await r.arrayBuffer()), 'application/pdf').countPages();
+  assert.equal(pages, 3, `3 slides became ${pages} pages`);
 });
 
 test('an HTML deck (no imported PDF) exports as an editable PPTX', { timeout: 180000 }, async () => {
@@ -345,7 +387,9 @@ test('an oversized PDF is refused before it is extracted', async () => {
     body: Buffer.from(pdf, 'latin1')
   });
   assert.equal(res.status, 413);
-  assert.match((await res.json()).error, /250 pages/);
+  const body = await res.json();
+  assert.equal(body.code, 'TOO_MANY_PAGES');
+  assert.match(body.error, /250 صفحة/, `the user is not told the page count: ${body.error}`);
   assert.ok(Date.now() - started < 5000, 'the limit was applied after doing the work');
 });
 

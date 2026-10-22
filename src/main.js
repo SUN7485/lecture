@@ -5,6 +5,9 @@ const os = require('os');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const ai = require('./enrich/ai');
+const { decodeHtmlBuffer } = require('./decode-html');
+// HTML lectures arrive in whatever encoding they were saved in (see decode-html.js).
+const readHtml = (p) => decodeHtmlBuffer(fs.readFileSync(p)).html;
 const { verifyAndExport, preflightDesktopPowerPoint, renderHtmlSlides, renderPptxWithPowerPoint, captureBakes } = require('./pptxFidelity');
 
 let mainWindow;
@@ -82,12 +85,13 @@ app.on('window-all-closed', () => {
 ipcMain.handle('open-html', async () => {
   const res = await dialog.showOpenDialog(mainWindow, {
     title: 'فتح محاضرة HTML',
-    filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
+    // .txt too: plain notes become slides (DeckImporter.convertNonDeck).
+    filters: [{ name: 'HTML', extensions: ['html', 'htm'] }, { name: 'نص', extensions: ['txt'] }],
     properties: ['openFile']
   });
   if (res.canceled || !res.filePaths.length) return null;
   const filePath = res.filePaths[0];
-  const content = fs.readFileSync(filePath, 'utf8');
+  const content = readHtml(filePath);
   rememberFile(filePath);
   return { filePath, dir: path.dirname(filePath), content };
 });
@@ -227,7 +231,7 @@ ipcMain.handle('import-pdf', async (_e, { filePath } = {}) => {
 ipcMain.handle('get-last-file', () => {
   const filePath = readLastFile();
   if (!filePath) return null;
-  return { filePath, dir: path.dirname(filePath), content: fs.readFileSync(filePath, 'utf8') };
+  return { filePath, dir: path.dirname(filePath), content: readHtml(filePath) };
 });
 
 // ---- Auto-open (tests / reopen-last-file) ----
@@ -235,7 +239,7 @@ ipcMain.handle('auto-open', () => {
   const p = process.env.LVE_OPEN;
   if (!p || !fs.existsSync(p)) return null;
   rememberFile(p);
-  return { filePath: p, dir: path.dirname(p), content: fs.readFileSync(p, 'utf8') };
+  return { filePath: p, dir: path.dirname(p), content: readHtml(p) };
 });
 
 // ---- Import another lecture (its slides get merged into the open one) ----
@@ -250,7 +254,7 @@ ipcMain.handle('import-html', async () => {
     if (res.canceled || !res.filePaths.length) return null;
     filePath = res.filePaths[0];
   }
-  return { filePath, dir: path.dirname(filePath), content: fs.readFileSync(filePath, 'utf8') };
+  return { filePath, dir: path.dirname(filePath), content: readHtml(filePath) };
 });
 
 // ---- Brand fonts (read once, base64 for data: URLs in the injected theme) ----

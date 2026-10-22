@@ -28,4 +28,23 @@ Extra local PDFs (never committed) can be listed one per line in
 | Import summary overwritten by «جاهز» | Fixed in both apps |
 | Scanned PDF imported silently as pictures | Fixed: the user is told |
 | Arabic typography had no doctor rules | Added rules 22-26 |
-| Mixed-direction fragments («(±0.1 كجم).») | Open — engine, see KNOWN_ISSUES |
+| Mixed-direction fragments («(+0.1) كجم.») | Not a visible defect: painted order, displays as the source — see KNOWN_ISSUES |
+
+## Strange inputs (2026-10-22)
+
+`node test/stress/build-strange.mjs` then `node test/stress/strange-run.mjs`
+(24 files: empty, renamed, truncated, password, 252-page, rotated, mixed
+orientation, A0 poster, business card, annotated, emoji/Hebrew/Chinese/harakat
+PDFs; windows-1256, UTF-16, empty, plain text, article, JS-built, mixed slide
+sizes, remote/missing images, 11 MB image, 500 slides, media, fixed/animated).
+
+| Finding | Outcome |
+|---|---|
+| Server errors in English inside the Arabic UI | Arabic messages + machine `code` |
+| Password PDF imported as "21 scanned pages" | `PDF_ENCRYPTED` with what to do |
+| Half-downloaded PDF "rebuilt" to 0 pages | `PDF_DAMAGED` |
+| windows-1256 HTML opened as U+FFFD | decoded (BOM / meta / 1256 sniff), saved as UTF-8 |
+| Empty / plain-text / article / JS-built HTML said «جاهز» with no slides | text and articles become slides; the others say why |
+| Mixed slide sizes: 3 slides -> 5 PDF pages | larger slides fit the page; margins contained |
+| Desktop PPTX refused any non-950x650 deck | verification at twice the deck's own size |
+| HTML -> PPTX over 200 slides spoke of "PDF pages" | message speaks of slides |

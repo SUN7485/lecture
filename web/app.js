@@ -94,7 +94,10 @@
     fileHandle = null; // cleared here; openViaPicker restores it for .html only
     if (/\.docx$/i.test(file.name)) { openDocx(file); return; }
     saveName = file.name.replace(/\.html?$/i, '') + '-edited.html';
-    const html = await file.text();
+    // Decode by BOM / <meta charset> / windows-1256 — not blindly as UTF-8.
+    const html = window.DeckImporter && window.DeckImporter.decodeHtml
+      ? window.DeckImporter.decodeHtml(await file.arrayBuffer()).html
+      : await file.text();
     loadIntoIframe(html);
     status('تم فتح: ' + file.name);
   }
@@ -130,15 +133,29 @@
     return out;
   }
 
+  function shapeMessage(kind, n) {
+    if (kind === 'text') return `حُوّل النص إلى شرائح (عددها ${n})، فقرة لكل سطر. عدّلها كما تشاء.`;
+    if (kind === 'article') return `حُوّل المقال إلى شرائح حسب عناوينه (عددها ${n}). راجعها وعدّلها كما تشاء.`;
+    if (kind === 'empty') return 'الملف فارغ — لا يحتوي على أي محتوى لعرضه.';
+    if (kind === 'scripted') return 'هذا العرض يبني شرائحه ببرمجة جافاسكربت عند فتحه، فلا تظهر هنا. افتحه في المتصفح واحفظه «صفحة ويب كاملة» (Ctrl+S)، ثم افتح النسخة المحفوظة.';
+    return null;
+  }
+
   function loadIntoIframe(html, modelId) {
     currentModelId = modelId || null;
     html = sanitizeLlmHtml(html);
     // AI-made decks (sections shown one at a time, reveal.js) become real
     // slides; a PDF reconstruction is already in the editor's shape.
-    let sniffed = 0;
+    let sniffed = 0, shape = 'deck';
     if (!modelId && window.DeckImporter && window.DeckImporter.normalizeDeckShape) {
       const n = window.DeckImporter.normalizeDeckShape(html);
       html = n.html; sniffed = n.slides;
+      // Not a deck at all: plain text and articles become slides; empty and
+      // script-built files are named instead of announced as «جاهز».
+      if (!sniffed && window.DeckImporter.convertNonDeck) {
+        const c = window.DeckImporter.convertNonDeck(html);
+        shape = c.kind; html = c.html;
+      }
     }
     iframe.onload = () => {
       editor = new window.LectureEditor();
@@ -162,7 +179,8 @@
       fitZoom();
       saveRecent(); // 019: remember this deck for the empty-state recents list
       const note = readyNote; readyNote = null;
-      status(note ? note : sniffed
+      const shapeNote = shapeMessage(shape, editor.slides().length);
+      status(note ? note : shapeNote ? shapeNote : sniffed
         ? `حُوّل العرض إلى شرائح قابلة للتحرير (عددها ${sniffed})، بعد أن كان يعرض شريحة واحدة في كل مرة. انقر مرتين على أي نص لتحريره.`
         : 'جاهز. انقر مرتين على أي نص لتحريره، واسحب أي عنصر لتحريكه.');
       // Consumed here, not at click time: the deck has to be on screen before

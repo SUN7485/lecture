@@ -139,6 +139,14 @@
     return out;
   }
 
+  function shapeMessage(kind, n) {
+    if (kind === 'text') return `حُوّل النص إلى شرائح (عددها ${n})، فقرة لكل سطر. عدّلها كما تشاء.`;
+    if (kind === 'article') return `حُوّل المقال إلى شرائح حسب عناوينه (عددها ${n}). راجعها وعدّلها كما تشاء.`;
+    if (kind === 'empty') return 'الملف فارغ — لا يحتوي على أي محتوى لعرضه.';
+    if (kind === 'scripted') return 'هذا العرض يبني شرائحه ببرمجة جافاسكربت عند فتحه، فلا تظهر هنا. افتحه في المتصفح واحفظه «صفحة ويب كاملة» (Ctrl+S)، ثم افتح النسخة المحفوظة.';
+    return null;
+  }
+
   function loadIntoIframe(html, dir) {
     // Whatever is being loaded, it is not a PDF import until importPdf() says
     // so immediately after this call. Leaving a stale value here would make a
@@ -147,10 +155,16 @@
     window.__importedPdf = null;
     html = sanitizeLlmHtml(html);
     // AI-made decks (sections shown one at a time, reveal.js) become real slides.
-    let sniffed = 0;
+    let sniffed = 0, shape = 'deck';
     if (window.DeckImporter && window.DeckImporter.normalizeDeckShape) {
       const n = window.DeckImporter.normalizeDeckShape(html);
       html = n.html; sniffed = n.slides;
+      // Not a deck at all: plain text and articles become slides; empty and
+      // script-built files are named instead of announced as «جاهز».
+      if (!sniffed && window.DeckImporter.convertNonDeck) {
+        const c = window.DeckImporter.convertNonDeck(html);
+        shape = c.kind; html = c.html;
+      }
     }
     const baseHref = 'file:///' + dir.replace(/\\/g, '/') + '/';
     const htmlWithBase = injectBase(html, baseHref);
@@ -192,7 +206,8 @@
       updateSlideInfo();
       updateBrandBtn(); // reflect whether the opened file already carries the theme
       const note = readyNote; readyNote = null;
-      status(note ? note : sniffed
+      const shapeNote = shapeMessage(shape, editor.slides().length);
+      status(note ? note : shapeNote ? shapeNote : sniffed
         ? `حُوّل العرض إلى شرائح قابلة للتحرير (عددها ${sniffed})، بعد أن كان يعرض شريحة واحدة في كل مرة. انقر مرتين على أي نص لتحريره.`
         : 'جاهز. انقر مرتين على أي نص (أو حدّده واضغط ✏ تحرير النص) لتغيير الكلمات. اسحب الصور، وأضف الشرائح، وكبّر العرض لتعمل براحة.');
       // Consumed here rather than at click time: the deck has to be on screen
@@ -714,9 +729,11 @@
         // shrink it to fit rather than let overflow:hidden cut it. `zoom`
         // scales the slide's own layout box so its clip scales with it — a
         // transform would clip at full size first, then shrink the stub.
-        const h = el.offsetHeight;
-        if (h > H + 1) {
-          const z = Math.floor(H / h * 1000) / 1000;
+        // Wider counts too: a deck mixing 950x650, 16:9 and A4 slides used to
+        // spill the larger ones onto extra pages.
+        const h = el.offsetHeight, w = el.offsetWidth;
+        if (h > H + 1 || w > W + 1) {
+          const z = Math.floor(Math.min(H / h, W / w) * 1000) / 1000;
           el.setAttribute('data-ve-fit', String(z));
           fits.add(z);
         }

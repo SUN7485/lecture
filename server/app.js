@@ -26,6 +26,7 @@ import { ModelStore } from './lib/store.js';
 import { RateLimiter } from './lib/ratelimit.js';
 import { WorkerPool } from './lib/pool.js';
 import { renderPdf, closeBrowser } from './lib/render-pdf.js';
+import { arCount } from './lib/ar.js';
 import {
   send, sendJson, sendBuffer, readBytes, readJson,
   clientIp, originAllowed, SECURITY_HEADERS
@@ -130,7 +131,7 @@ const server = http.createServer(async (req, res) => {
     const ip = clientIp(req);
     const gate = generalLimit.take(ip);
     if (!gate.ok) {
-      return sendJson(res, 429, { error: 'Too many requests. Slow down.' },
+      return sendJson(res, 429, { error: 'طلبات كثيرة في وقت قصير. انتظر قليلًا ثم حاول.', code: 'RATE_LIMITED' },
         { 'retry-after': String(gate.retryAfterSec) });
     }
 
@@ -149,8 +150,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ---- writes: CSRF gate -------------------------------------------------
-    if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' });
-    if (!originAllowed(req)) return sendJson(res, 403, { error: 'Cross-origin requests are not allowed.' });
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed', code: 'METHOD' });
+    if (!originAllowed(req)) return sendJson(res, 403, { error: 'طلب من موقع آخر غير مسموح.', code: 'CROSS_ORIGIN' });
 
     const sid = sessionOf(req, res);
 
@@ -158,14 +159,14 @@ const server = http.createServer(async (req, res) => {
     if (route === '/api/convert') {
       const quota = convertLimit.take(ip);
       if (!quota.ok) {
-        return sendJson(res, 429, { error: 'Conversion limit reached. Try again shortly.' },
+        return sendJson(res, 429, { error: 'وصلت إلى حد التحويلات المؤقت. انتظر دقيقة ثم حاول.', code: 'RATE_LIMITED' },
           { 'retry-after': String(quota.retryAfterSec) });
       }
       const bytes = await readBytes(req, CONFIG.maxUploadBytes);
       // Magic number, not the filename: an extension is a claim, the header is
       // evidence. Handing mupdf an arbitrary blob is an unnecessary risk.
       if (bytes.length < 5 || bytes.subarray(0, 1024).indexOf('%PDF-') < 0) {
-        return sendJson(res, 400, { error: 'That file is not a PDF.' });
+        return sendJson(res, 400, { error: 'هذا الملف ليس PDF، أو أنه فارغ. اختر ملف PDF.', code: 'NOT_PDF' });
       }
 
       const name = String(req.headers['x-file-name'] || 'lecture')
@@ -177,7 +178,7 @@ const server = http.createServer(async (req, res) => {
         maxPages: CONFIG.maxPages,
         maxObjectsTotal: CONFIG.maxObjectsTotal
       });
-      if (result.error) return sendJson(res, result.status || 413, { error: result.error });
+      if (result.error) return sendJson(res, result.status || 413, { error: result.error, code: result.code });
 
       const modelId = store.put(result.model, sid);
       const objects = result.objects;
@@ -194,7 +195,7 @@ const server = http.createServer(async (req, res) => {
     if (route === '/api/export/pptx' || route === '/api/export/pdf') {
       const eq = exportLimit.take(ip);
       if (!eq.ok) {
-        return sendJson(res, 429, { error: 'Export limit reached. Try again shortly.' },
+        return sendJson(res, 429, { error: 'وصلت إلى حد التصدير المؤقت. انتظر دقيقة ثم حاول.', code: 'RATE_LIMITED' },
           { 'retry-after': String(eq.retryAfterSec) });
       }
     }
@@ -214,7 +215,13 @@ const server = http.createServer(async (req, res) => {
         const rebuilt = await pool.run('convert', {
           bytes: pdf, name: 'deck', maxPages: CONFIG.maxPages, maxObjectsTotal: CONFIG.maxObjectsTotal
         });
-        if (rebuilt.error) return sendJson(res, rebuilt.status || 413, { error: rebuilt.error });
+        if (rebuilt.error) {
+          // The limit is about SLIDES here: the PDF is our own intermediate.
+          const error = rebuilt.code === 'TOO_MANY_PAGES'
+            ? `العرض فيه ${arCount(rebuilt.pages, 'slide')}، والحد الأقصى للتصدير إلى PowerPoint ${rebuilt.max}. قسّمه إلى عروض أصغر وصدّر كل جزء.`
+            : rebuilt.error;
+          return sendJson(res, rebuilt.status || 413, { error, code: rebuilt.code });
+        }
         const { buffer } = await pool.run('pptx', { model: rebuilt.model, objects: [] });
         const buf = Buffer.from(buffer);
         log('info', 'export-pptx-html', { bytes: buf.length, pages: rebuilt.pages, ms: rebuilt.ms });
@@ -225,7 +232,7 @@ const server = http.createServer(async (req, res) => {
 
       const stored = store.get(String(body.modelId || ''), sid);
       if (!stored) {
-        return sendJson(res, 410, { error: 'That document has expired. Import the PDF again to export.' });
+        return sendJson(res, 410, { error: 'انتهت صلاحية هذا المستند على الخادم. استورد ملف PDF مرة أخرى للتصدير.', code: 'EXPIRED' });
       }
 
       // Bound the payload before touching it. Measured unbounded: 20k
@@ -255,7 +262,7 @@ const server = http.createServer(async (req, res) => {
     if (route === '/api/export/pdf') {
       const body = await readJson(req, CONFIG.maxUploadBytes);
       if (typeof body.html !== 'string' || !body.html.length) {
-        return sendJson(res, 400, { error: 'No deck to export.' });
+        return sendJson(res, 400, { error: 'لا يوجد عرض لتصديره.', code: 'NO_DECK' });
       }
       const buf = await renderPdf(body.html, { timeoutMs: CONFIG.exportTimeoutMs });
       log('info', 'export-pdf', { bytes: buf.length });
@@ -266,16 +273,16 @@ const server = http.createServer(async (req, res) => {
   } catch (err) {
     const code = err && err.code;
     if (code === 'TOO_LARGE') {
-      return sendJson(res, 413, { error: 'File is larger than the ' + Math.round(CONFIG.maxUploadBytes / 1048576) + ' MB limit.' });
+      return sendJson(res, 413, { error: 'الملف أكبر من الحد المسموح (' + Math.round(CONFIG.maxUploadBytes / 1048576) + ' ميغابايت).', code: 'TOO_LARGE' });
     }
-    if (code === 'BAD_JSON') return sendJson(res, 400, { error: 'Malformed request.' });
-    if (code === 'BUSY') return sendJson(res, 503, { error: 'Server is busy. Try again in a moment.' }, { 'retry-after': '10' });
+    if (code === 'BAD_JSON') return sendJson(res, 400, { error: 'طلب غير صالح.', code: 'BAD_JSON' });
+    if (code === 'BUSY') return sendJson(res, 503, { error: 'الخادم مشغول الآن. حاول بعد لحظات.', code: 'BUSY' }, { 'retry-after': '10' });
     if (code === 'MODEL_TOO_LARGE') return sendJson(res, 413, { error: err.message });
     // Never return err.message for an unexpected fault: it can carry absolute
     // paths and internals. Log it; hand the user a reference instead.
     const ref = crypto.randomUUID().slice(0, 8);
     log('error', 'unhandled', { ref, route, err: String((err && err.stack) || err) });
-    if (!res.headersSent) return sendJson(res, 500, { error: 'Something went wrong on our side.', ref });
+    if (!res.headersSent) return sendJson(res, 500, { error: 'حدث خطأ من جهتنا. حاول مرة أخرى (رمز المرجع: ' + ref + ').', code: 'INTERNAL', ref });
     res.end();
   } finally {
     if (route.startsWith('/api/')) log('debug', 'req', { route, ms: Date.now() - started });

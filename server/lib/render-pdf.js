@@ -85,6 +85,18 @@ export async function renderPdf(html, { timeoutMs = 120_000 } = {}) {
     });
 
     if (size) {
+      // One page size per document: a slide larger than the first (a 16:9 or
+      // A4 slide in a 950x650 deck) is zoomed down to fit it instead of
+      // spilling onto extra pages — measured 3 slides -> 5 pages before.
+      await page.evaluate(({ w, h, base }) => {
+        document.querySelectorAll('.slide').forEach((s) => {
+          const r = s.getBoundingClientRect();
+          if (r.width > w + 1 || r.height > h + 1) {
+            s.style.zoom = String(base * Math.min(w / r.width, h / r.height));
+          }
+        });
+      }, { w: size.w, h: size.h, base: PX_PER_PT });
+
       // The deck's CSS px ARE the source PDF's points (model-to-html.js lays
       // out from bbox point coords), but CSS px is 1/96in while a PDF point is
       // 1/72in. Declaring the page in px therefore yields a page exactly 75%
@@ -101,6 +113,11 @@ export async function renderPdf(html, { timeoutMs = 120_000 } = {}) {
            .slide { zoom: ${PX_PER_PT} }
            html,body { margin:0 !important; padding:0 !important; background:#fff !important }
            .slide { margin:0 !important; box-shadow:none !important; page-break-after: always; break-after: page }
+           /* A slide is a fixed canvas: it contains its children's margins.
+              Without this a first <h1>'s top margin collapsed through an
+              unpadded slide, pushed it past its page, and printed a blank
+              page after it (3 slides -> 5 pages). */
+           .slide { overflow: hidden !important }
            .slide:last-child { page-break-after: auto; break-after: auto }`
       });
     }

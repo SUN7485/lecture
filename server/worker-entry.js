@@ -18,6 +18,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { arCount } from './lib/ar.js';
+
+const DAMAGED = 'الملف تالف أو ناقص (ربما لم يكتمل تنزيله)، فلم أجد فيه أي صفحة. نزّله من جديد ثم حاول.';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ENGINE = path.resolve(HERE, '..', 'engine');
@@ -49,17 +52,34 @@ const handlers = {
       fs.writeFileSync(pdf, Buffer.from(bytes));
 
       const mupdf = await import('mupdf');
-      const probe = mupdf.Document.openDocument(fs.readFileSync(pdf), 'application/pdf');
+      let probe;
+      try {
+        probe = mupdf.Document.openDocument(fs.readFileSync(pdf), 'application/pdf');
+      } catch (_) {
+        return { error: DAMAGED, code: 'PDF_DAMAGED', status: 422 };
+      }
+      // Encrypted with a user password: MuPDF can still count pages and paint
+      // blank-ish images, which once imported as "21 scanned pages". Say what
+      // it actually is and how to get a usable copy.
+      if (probe.needsPassword && probe.needsPassword()) {
+        return { error: 'الملف محمي بكلمة مرور، فلا يمكن قراءة محتواه. افتحه في قارئ PDF بكلمة المرور، واحفظ نسخة بلا حماية (اطبعه إلى PDF)، ثم استورد تلك النسخة.', code: 'PDF_ENCRYPTED', status: 422 };
+      }
       const pages = probe.countPages();
+      // A half-finished download opens and "repairs" to zero pages; reporting
+      // that as a successful rebuild of nothing is worse than an error.
+      if (!pages) return { error: DAMAGED, code: 'PDF_DAMAGED', status: 422 };
       if (pages > maxPages) {
-        return { error: `This PDF has ${pages} pages. The limit is ${maxPages}.`, status: 413 };
+        return {
+          error: `الملف فيه ${arCount(pages, 'page')}، والحد الأقصى ${maxPages}. قسّمه إلى أجزاء أصغر واستورد كل جزء وحده.`,
+          code: 'TOO_MANY_PAGES', pages, max: maxPages, status: 413
+        };
       }
 
       const started = Date.now();
       const model = normalize.modelFromPdf(pdf);
       const objects = model.pages.reduce((n, p) => n + p.objects.length, 0);
       if (objects > maxObjectsTotal) {
-        return { error: `This PDF has ${objects} objects. The limit is ${maxObjectsTotal}.`, status: 413 };
+        return { error: `الملف فيه ${arCount(objects, 'object')}، والحد الأقصى ${maxObjectsTotal}. قسّمه إلى أجزاء أصغر.`, code: 'TOO_MANY_OBJECTS', status: 413 };
       }
       const html = toHtml.modelToDeckHtml(model, { title: name });
       return { model, html, ms: Date.now() - started, pages: model.pages.length, objects };
