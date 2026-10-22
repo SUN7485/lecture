@@ -1952,6 +1952,14 @@ async function atomicCommitVerifiedPptx(options = {}) {
     // No destination write is attempted before every fidelity gate has passed.
     await fsp.rename(source, destination);
   } catch (error) {
+    if (error && error.code === 'EXDEV') {
+      // rename cannot cross volumes (app on D:, user saves to C: or a USB
+      // stick). Copy onto the destination's volume first, then rename there:
+      // the replace itself stays atomic, so a failed copy never leaves a
+      // half-written deck where the user's file was.
+      await commitAcrossVolumes(source, destination);
+      return destination;
+    }
     throw fidelityError(
       'ATOMIC_REPLACE_FAILED',
       `Could not atomically replace the selected PPTX: ${error.message}`,
@@ -1959,6 +1967,24 @@ async function atomicCommitVerifiedPptx(options = {}) {
     );
   }
   return destination;
+}
+
+async function commitAcrossVolumes(source, destination) {
+  const staged = path.join(path.dirname(destination),
+    `.${path.basename(destination)}.${process.pid}.${Date.now()}.partial`);
+  try {
+    await fsp.copyFile(source, staged);
+    await fsp.rename(staged, destination);
+  } catch (error) {
+    await fsp.rm(staged, { force: true }).catch(() => {});
+    throw fidelityError(
+      'ATOMIC_REPLACE_FAILED',
+      `Could not replace the selected PPTX across volumes: ${error.message}`,
+      { tempPptxPath: source, destinationPath: destination, cause: error.code }
+    );
+  }
+  // The deck is safely in place; a leftover candidate is only clutter.
+  await fsp.rm(source, { force: true }).catch(() => {});
 }
 
 function makeInitialReport({ workDir, target, expectedSlideCount, requiredFonts, destinationPath, sceneGraph, fidelityPolicy, evidenceMode }) {

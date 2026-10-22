@@ -11,10 +11,10 @@
     "serve": "node server/app.js",
     "serve:local": "node server/dev.js",
     "test:hosted": "node --test --test-concurrency=1 --expose-gc test/apply-edits.test.js test/store.test.js test/sync-law.test.js test/server-hosted.test.js",
-    "test:desktop": "node --test --test-concurrency=1 test/electron-home-screen.test.js test/electron-pdf-import.test.js test/electron-pdf-to-pptx.test.js"
+    "test:desktop": "node --test --test-concurrency=1 test/electron-home-screen.test.js test/electron-pdf-import.test.js test/electron-pdf-import-responsive.test.js test/electron-pdf-to-pptx.test.js test/pptx-atomic-commit.test.js"
   },
   "author": "SUN7485",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "build": {
     "appId": "com.sun7485.lecturevisualeditor",
     "productName": "Lecture Visual Editor",

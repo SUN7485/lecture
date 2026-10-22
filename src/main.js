@@ -127,10 +127,10 @@ async function pdfEngine() {
   return _pdfEngine;
 }
 
-// Picking and converting are two calls on purpose. Conversion is synchronous
-// and blocks this process (measured 0.5-2.1s across a 9-lecture corpus, and it
-// scales with page count), so the renderer needs the chance to paint a
-// "reconstructing…" status between the dialog closing and the work starting.
+// Picking and converting are two calls on purpose, so the renderer can paint a
+// "reconstructing…" status between the dialog closing and the work starting
+// (conversion measured 0.5-2.1s across a 9-lecture corpus; it runs on a worker
+// thread, see import-pdf below).
 ipcMain.handle('pick-pdf', async () => {
   const hook = process.env.LVE_OPEN_PDF; // test hook: skip the dialog
   if (hook && fs.existsSync(hook)) return { filePath: hook };
@@ -143,33 +143,84 @@ ipcMain.handle('pick-pdf', async () => {
   return { filePath: res.filePaths[0] };
 });
 
+// Reconstruction runs on a worker thread (engine/import-worker.js) so the
+// window keeps painting and responding while a long PDF converts. One worker
+// is reused: MuPDF's WASM loads once. If a worker cannot start at all (e.g. a
+// packaged build that cannot load ESM from the archive), import falls back to
+// the main process — slower to feel, but never broken.
+let _importWorker = null;
+let _importSeq = 0;
+const _importPending = new Map();
+
+function importWorker() {
+  if (_importWorker) return _importWorker;
+  const { Worker } = require('worker_threads');
+  const w = new Worker(path.join(__dirname, '..', 'engine', 'import-worker.js'));
+  const failAll = (err) => {
+    for (const { reject } of _importPending.values()) reject(err);
+    _importPending.clear();
+    if (_importWorker === w) _importWorker = null;
+  };
+  w.on('message', (msg) => {
+    const job = msg && _importPending.get(msg.id);
+    if (!job) return;
+    _importPending.delete(msg.id);
+    if (msg.error) job.resolve({ error: msg.error });
+    else job.resolve({ content: msg.content, stats: msg.stats });
+  });
+  w.on('error', failAll);
+  w.on('exit', (code) => failAll(new Error(`PDF import worker exited (${code})`)));
+  w.unref(); // never keep the app alive on its own
+  _importWorker = w;
+  return w;
+}
+
+function convertInWorker(filePath, title) {
+  return new Promise((resolve, reject) => {
+    const id = ++_importSeq;
+    _importPending.set(id, { resolve, reject });
+    importWorker().postMessage({ id, filePath, title });
+  });
+}
+
+async function convertInProcess(filePath, title) {
+  const started = Date.now();
+  const { modelFromPdf, modelToDeckHtml } = await pdfEngine();
+  const model = modelFromPdf(filePath);
+  return {
+    content: modelToDeckHtml(model, { title }),
+    stats: {
+      pages: model.pages.length,
+      objects: model.pages.reduce((n, p) => n + p.objects.length, 0),
+      ms: Date.now() - started
+    }
+  };
+}
+
 ipcMain.handle('import-pdf', async (_e, { filePath } = {}) => {
   if (!filePath || !fs.existsSync(filePath)) return { error: 'تعذّر العثور على ملف PDF هذا.' };
+  const name = path.basename(filePath).replace(/\.pdf$/i, '');
+  let res;
   try {
-    const started = Date.now();
-    const { modelFromPdf, modelToDeckHtml } = await pdfEngine();
-    const model = modelFromPdf(filePath);
-    const name = path.basename(filePath).replace(/\.pdf$/i, '');
-    const content = modelToDeckHtml(model, { title: name });
-
-    // The deck is offered as an HTML sibling of the PDF, never as the PDF
-    // itself — Save must not be able to write deck markup over the source
-    // document. For the same reason the PDF is NOT passed to rememberFile():
-    // "reopen last file" reads its target as UTF-8 HTML.
-    return {
-      filePath: path.join(path.dirname(filePath), name + '.html'),
-      dir: path.dirname(filePath),
-      sourcePdf: filePath,
-      content,
-      stats: {
-        pages: model.pages.length,
-        objects: model.pages.reduce((n, p) => n + p.objects.length, 0),
-        ms: Date.now() - started
-      }
-    };
-  } catch (err) {
-    return { error: err && err.message ? err.message : String(err) };
+    res = await convertInWorker(filePath, name);
+  } catch (workerErr) {
+    console.warn('PDF import worker unavailable, converting on the main process:', workerErr && workerErr.message);
+    try { res = await convertInProcess(filePath, name); }
+    catch (err) { return { error: err && err.message ? err.message : String(err) }; }
   }
+  if (res.error) return { error: res.error };
+
+  // The deck is offered as an HTML sibling of the PDF, never as the PDF
+  // itself — Save must not be able to write deck markup over the source
+  // document. For the same reason the PDF is NOT passed to rememberFile():
+  // "reopen last file" reads its target as UTF-8 HTML.
+  return {
+    filePath: path.join(path.dirname(filePath), name + '.html'),
+    dir: path.dirname(filePath),
+    sourcePdf: filePath,
+    content: res.content,
+    stats: res.stats
+  };
 });
 
 // ---- Reopen the last lecture (offered on the empty screen) ----
