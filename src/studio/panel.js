@@ -28,7 +28,7 @@
   // ---------- lifecycle ----------
   async function open() {
     const editor = getEditor();
-    if (!editor) { setStatus('Open a lecture first.'); return; }
+    if (!editor) { setStatus('افتح محاضرة أولًا.'); return; }
     build();
     dock.classList.add('open');
     document.body.classList.add('studio-docked');
@@ -42,7 +42,7 @@
     if (dock) dock.classList.remove('open');
     document.body.classList.remove('studio-docked');
     if (P.clearGhost) P.clearGhost();
-    setStatus('Studio closed — anything you inserted is in the lecture (Ctrl+Z undoes).');
+    setStatus('أُغلق الاستوديو — كل ما أدرجته موجود في المحاضرة (Ctrl+Z للتراجع).');
   }
   function toggle() { (dock && dock.classList.contains('open')) ? close() : open(); }
 

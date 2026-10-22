@@ -51,7 +51,7 @@
   async function importDocx() {
     const res = await window.api.openDocx();
     if (!res) return;
-    if (!window.mammoth || !window.DeckImporter) { status('Word import is unavailable (mammoth failed to load).'); return; }
+    if (!window.mammoth || !window.DeckImporter) { status('استيراد Word غير متاح الآن (تعذّر تحميل مكتبة mammoth).'); return; }
     status('Converting ' + res.filePath + '…');
     try {
       const bytes = Uint8Array.from(atob(res.base64), (c) => c.charCodeAt(0));
@@ -62,9 +62,9 @@
       currentFile = { filePath: dir + '\\' + name + '.html', dir, content: deckHtml };
       window.__currentFile = currentFile;
       loadIntoIframe(deckHtml, dir);
-      status('Imported from Word: ' + name + (result.messages.length ? ' (' + result.messages.length + ' mammoth notice(s))' : ''));
+      status('تم الاستيراد من Word: ' + name + (result.messages.length ? ' (' + result.messages.length + ' ملاحظة)' : ''));
     } catch (e) {
-      status('Word import failed: ' + e.message);
+      status('تعذّر استيراد Word: ' + e.message);
     }
   }
 
@@ -76,18 +76,18 @@
     const picked = await window.api.pickPdf();
     if (!picked) return;
     const name = picked.filePath.split(/[\\/]/).pop();
-    status('Reconstructing ' + name + ' — this can take a few seconds…');
+    status('جارٍ إعادة بناء ' + name + ' — قد يستغرق ذلك بضع ثوانٍ…');
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
     let res;
     try {
       res = await window.api.importPdf({ filePath: picked.filePath });
     } catch (e) {
-      status('PDF import failed: ' + e.message);
+      status('تعذّر استيراد PDF: ' + e.message);
       return;
     }
     if (!res) return;
-    if (res.error) { status('PDF import failed: ' + res.error); return; }
+    if (res.error) { status('تعذّر استيراد PDF: ' + res.error); return; }
 
     currentFile = { filePath: res.filePath, dir: res.dir, content: res.content };
     window.__currentFile = currentFile;
@@ -96,8 +96,8 @@
     // deck as PDF-sourced (test hook today, export routing tomorrow).
     window.__importedPdf = res.sourcePdf;
     status(
-      `Imported ${name}: ${res.stats.pages} page(s), ${res.stats.objects} objects ` +
-      `in ${(res.stats.ms / 1000).toFixed(1)}s. Edit it, then export PDF or PPTX.`
+      `تم استيراد ${name}: ${res.stats.pages} صفحة و${res.stats.objects} عنصرًا ` +
+      `في ${(res.stats.ms / 1000).toFixed(1)} ث. عدّلها ثم صدّرها PDF أو PowerPoint.`
     );
   }
 
@@ -137,14 +137,14 @@
         if (picked && picked.length) {
           addAssets(picked);
           editor.replaceSelected(picked[0].url);
-          status('Replaced image.');
+          status('تم استبدال الصورة.');
         }
       };
       editor.onPlaced = (type) => {
-        if (!type) { status('Insert cancelled.'); return; }
+        if (!type) { status('أُلغي الإدراج.'); return; }
         status(type === 'text'
-          ? 'Type your text — click anywhere else when done.'
-          : 'Inserted. Click it to style, move up a container, or delete.');
+          ? 'اكتب النص — ثم انقر في أي مكان آخر عند الانتهاء.'
+          : 'تم الإدراج. انقر عليه لتنسيقه أو تحديد حاويته أو حذفه.');
       };
       editor.onSaveRequest = () => saveHtml();
       editor.onContentResize = () => applyZoom();
@@ -161,7 +161,7 @@
       refreshSlideList();
       updateSlideInfo();
       updateBrandBtn(); // reflect whether the opened file already carries the theme
-      status('Ready. Double-click any text (or select it and press ✏ Edit text) to change the words. Drag images in, add slides, zoom to work comfortably.');
+      status('جاهز. انقر مرتين على أي نص (أو حدّده واضغط ✏ تحرير النص) لتغيير الكلمات. اسحب الصور، وأضف الشرائح، وكبّر العرض لتعمل براحة.');
       // Consumed here rather than at click time: the deck has to be on screen
       // before pointing at the button that acts on it.
       if (pendingIntent) { applyIntent(pendingIntent); pendingIntent = null; }
@@ -201,7 +201,7 @@
     const slides = editor.slides();
     slideCount.textContent = slides.length ? '(' + slides.length + ')' : '';
     if (!slides.length) {
-      slideList.innerHTML = '<p class="hint">No slides detected — this looks like a plain document.</p>';
+      slideList.innerHTML = '<p class="hint">لم تُكتشف شرائح — يبدو أن هذا مستند عادي.</p>';
       return;
     }
     slideList.innerHTML = '';
@@ -210,12 +210,12 @@
       item.className = 'slide-item' + (s === activeSlide ? ' active' : '');
       item.dataset.i = i;
       item.innerHTML =
-        `<span class="drag" title="Drag to reorder">⠿</span>` +
+        `<span class="drag" title="اسحب لإعادة الترتيب">⠿</span>` +
         `<span class="num">${i + 1}</span>` +
         `<span class="title"></span>` +
         `<span class="reorder">` +
-          `<button class="up" title="Move up"${i === 0 ? ' disabled' : ''}>▲</button>` +
-          `<button class="down" title="Move down"${i === slides.length - 1 ? ' disabled' : ''}>▼</button>` +
+          `<button class="up" title="تحريك لأعلى"${i === 0 ? ' disabled' : ''}>▲</button>` +
+          `<button class="down" title="تحريك لأسفل"${i === slides.length - 1 ? ' disabled' : ''}>▼</button>` +
         `</span>`;
       item.querySelector('.title').textContent = slideTitle(s, i);
       // Click the row (but not a control) to make it the current slide.
@@ -239,7 +239,7 @@
     e.preventDefault();
     try { item.setPointerCapture(e.pointerId); } catch (_) {}
     item.classList.add('dragging');
-    status('Drag up or down, then release to drop.');
+    status('اسحب لأعلى أو لأسفل ثم أفلت.');
 
     const items = () => Array.from(slideList.children);
     const clearMarks = () => items().forEach(c => c.classList.remove('drop-above', 'drop-below'));
@@ -308,7 +308,7 @@
     if (!slides.length) { slideInfo.textContent = ''; return; }
     activeSlide = currentSlideEl();
     const idx = slides.indexOf(activeSlide);
-    slideInfo.textContent = `Slide ${idx + 1} / ${slides.length}`;
+    slideInfo.textContent = `شريحة ${idx + 1} من ${slides.length}`;
     markActive();
   }
   stage.addEventListener('scroll', () => {
@@ -402,12 +402,12 @@
   }
 
   async function importSlidesFlow() {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     const res = await window.api.importHtml();
     if (!res) return;
-    status('Reading slides from ' + res.filePath + '…');
+    status('جارٍ قراءة الشرائح من ' + res.filePath + '…');
     const data = await loadSourceSlides(res.content, res.dir);
-    if (!data || !data.slides.length) { status('No slides detected in that file.'); return; }
+    if (!data || !data.slides.length) { status('لم تُكتشف شرائح في ذلك الملف.'); return; }
     openImportModal(res, data);
   }
 
@@ -432,21 +432,21 @@
     backdrop.className = 'modal-backdrop';
     backdrop.innerHTML =
       `<div class="modal">` +
-        `<div class="modal-head">📥 Import slides from <b></b></div>` +
+        `<div class="modal-head">📥 استيراد شرائح من <b></b></div>` +
         `<div class="modal-body">` +
           `<div class="imp-where">` +
             `<label><input type="radio" name="imp-pos" value="after"${curIdx >= 0 ? ' checked' : ''}> ` +
-              `After current slide${curIdx >= 0 ? ' (' + (curIdx + 1) + ')' : ''}</label>` +
-            `<label><input type="radio" name="imp-pos" value="end"${curIdx < 0 ? ' checked' : ''}> At the end</label>` +
+              `بعد الشريحة الحالية${curIdx >= 0 ? ' (' + (curIdx + 1) + ')' : ''}</label>` +
+            `<label><input type="radio" name="imp-pos" value="end"${curIdx < 0 ? ' checked' : ''}> في النهاية</label>` +
           `</div>` +
-          `<div class="imp-tools"><button data-all>Select all</button><button data-none>Select none</button>` +
-            (mismatch ? `<span class="imp-warn">⚠ Slide size differs from this deck — layout / one-page-per-slide PDF may be affected.</span>` : '') +
+          `<div class="imp-tools"><button data-all>تحديد الكل</button><button data-none>إلغاء التحديد</button>` +
+            (mismatch ? `<span class="imp-warn">⚠ مقاس الشريحة يختلف عن هذا العرض — قد يتأثر التخطيط أو PDF (صفحة لكل شريحة).</span>` : '') +
           `</div>` +
           `<div class="imp-list">${rows}</div>` +
         `</div>` +
         `<div class="modal-foot">` +
-          `<button data-cancel>Cancel</button>` +
-          `<button class="primary" data-confirm>Import</button>` +
+          `<button data-cancel>إلغاء</button>` +
+          `<button class="primary" data-confirm>استيراد</button>` +
         `</div>` +
       `</div>`;
     document.body.appendChild(backdrop);
@@ -467,7 +467,7 @@
     backdrop.querySelector('[data-all]').addEventListener('click', () => { checks().forEach(c => c.checked = true); updateConfirm(); });
     backdrop.querySelector('[data-none]').addEventListener('click', () => { checks().forEach(c => c.checked = false); updateConfirm(); });
     backdrop.querySelector('.imp-list').addEventListener('change', updateConfirm);
-    const cancel = () => { closeImportModal(); status('Import cancelled.'); };
+    const cancel = () => { closeImportModal(); status('أُلغي الاستيراد.'); };
     backdrop.querySelector('[data-cancel]').addEventListener('click', cancel);
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) cancel(); });
     confirmBtn.addEventListener('click', () => {
@@ -477,7 +477,7 @@
       const afterSlide = pos === 'after' ? (cur || destSlides.slice(-1)[0]) : destSlides.slice(-1)[0];
       editor.importSlides(chosen.map(s => s.html), afterSlide, data.heads, name);
       closeImportModal();
-      status(`Imported ${chosen.length} slide(s) from ${name}.`);
+      status(`استُوردت ${chosen.length} شريحة من ${name}.`);
     });
     updateConfirm();
   }
@@ -487,7 +487,7 @@
     const picked = await window.api.pickImages();
     if (picked && picked.length) {
       addAssets(picked);
-      status(`Added ${picked.length} image(s) to the library.`);
+      status(`أُضيفت ${picked.length} صورة إلى المكتبة.`);
     }
   }
 
@@ -501,24 +501,24 @@
 
   function renderAssets() {
     if (!assets.length) {
-      assetList.innerHTML = '<p class="hint">Click <b>🖼 Image</b> to load pictures, then drag them onto a slide — or double-click a picture to drop it on the current slide.</p>';
+      assetList.innerHTML = '<p class="hint">اضغط <b>🖼 صور</b> لتحميل الصور، ثم اسحبها إلى شريحة — أو انقر مرتين على صورة لإضافتها إلى الشريحة الحالية.</p>';
       return;
     }
     assetList.innerHTML = '';
     for (const a of assets) {
       const el = document.createElement('div');
       el.className = 'asset';
-      el.title = 'Drag onto a slide — or double-click to add it to the current slide';
-      el.innerHTML = `<button class="asset-del" title="Remove this image from the list">×</button>` +
+      el.title = 'اسحبها إلى شريحة — أو انقر مرتين لإضافتها إلى الشريحة الحالية';
+      el.innerHTML = `<button class="asset-del" title="إزالة الصورة من القائمة">×</button>` +
         `<img src="${a.url}"><div class="name">${escapeHtml(a.name)}</div>`;
       el.addEventListener('pointerdown', (e) => startAssetDrag(e, a));
       // Double-click = drop it on the current slide (no dragging needed).
       el.addEventListener('dblclick', () => {
-        if (!editor) { status('Open a lecture first.'); return; }
+        if (!editor) { status('افتح محاضرة أولًا.'); return; }
         const slide = currentSlideEl();
         editor.insertImageInto(a.url, a.name, slide);
         if (slide) { activeSlide = slide; scrollToSlide(slide); updateSlideInfo(); }
-        status('Added image to the current slide. Drag a corner to resize.');
+        status('أُضيفت الصورة إلى الشريحة الحالية. اسحب زاويتها لتغيير حجمها.');
       });
       // The × removes the tile; keep its clicks from starting a drag.
       const del = el.querySelector('.asset-del');
@@ -531,7 +531,7 @@
   function removeAsset(a) {
     assets = assets.filter(x => x.path !== a.path);
     renderAssets();
-    status('Removed image from the list. (Images already placed on the page stay.)');
+    status('أُزيلت الصورة من القائمة. (الصور الموضوعة في الصفحة تبقى كما هي.)');
   }
 
   function escapeHtml(s) {
@@ -546,7 +546,7 @@
   //    never steal the pointer stream.
   let ghost = null;
   function startAssetDrag(e, asset) {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     e.preventDefault();
     const tile = e.currentTarget;
     const stage = document.querySelector('#stage');
@@ -561,7 +561,7 @@
       borderRadius: '6px', left: e.clientX + 12 + 'px', top: e.clientY + 12 + 'px'
     });
     document.body.appendChild(ghost);
-    status('Drop the image where the blue line appears…');
+    status('أفلت الصورة حيث يظهر الخط الأزرق…');
 
     const move = (ev) => {
       ghost.style.left = ev.clientX + 12 + 'px';
@@ -586,10 +586,10 @@
       if (pt) {
         editor.showInsertAt(pt.x, pt.y); // make sure the target is current
         editor.dropInsert(asset.url, asset.name);
-        status('Image inserted. Drag a corner to resize; double-click text to edit it.');
+        status('أُدرجت الصورة. اسحب زاويتها لتغيير حجمها، وانقر مرتين على أي نص لتحريره.');
       } else {
         editor._hideInsert();
-        status('Cancelled — dropped outside the page.');
+        status('أُلغي — أُفلتت خارج الصفحة.');
       }
     };
 
@@ -616,7 +616,7 @@
 
   // ---------- Save / Export ----------
   async function saveHtml() {
-    if (!editor) { status('Nothing to save.'); return; }
+    if (!editor) { status('لا يوجد ما يُحفظ.'); return; }
     const html = editor.getCleanHtml();
     const suggested = baseName(currentFile?.filePath, '-edited.html');
     const res = await window.api.saveHtml({ html, suggestedName: suggested });
@@ -749,22 +749,22 @@
   }
 
   async function exportPdf() {
-    if (!editor) { status('Open a lecture first.'); return; }
-    status('Exporting PDF…');
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
+    status('جارٍ تصدير PDF…');
     const { html, pageSize, slideCount } = buildPdfHtml();
-    if (slideCount) status(`Exporting PDF — ${slideCount} slides, one per page…`);
+    if (slideCount) status(`جارٍ تصدير PDF — ${slideCount} شريحة، كل شريحة في صفحة…`);
     const suggested = baseName(currentFile?.filePath, '.pdf');
     const res = await window.api.exportPdf({ html, suggestedName: suggested, pageSize });
-    if (res.ok) status('Exported PDF: ' + res.filePath);
+    if (res.ok) status('تم تصدير PDF: ' + res.filePath);
     else status('Export ' + (res.error ? 'failed: ' + res.error : 'cancelled.'));
   }
 
   async function previewPdf() {
-    if (!editor) { status('Open a lecture first.'); return; }
-    status('Building PDF preview…');
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
+    status('جارٍ تجهيز معاينة PDF…');
     const { html, pageSize } = buildPdfHtml();
     const res = await window.api.previewPdf({ html, pageSize });
-    status(res.ok ? 'Preview opened — check it, then export.' : 'Preview failed: ' + (res.error || ''));
+    status(res.ok ? 'فُتحت المعاينة — راجعها ثم صدّر.' : 'تعذّرت المعاينة: ' + (res.error || ''));
   }
 
   // "Didn't check" and "checked and found problems" must never share a number.
@@ -802,7 +802,7 @@
   }
 
   async function exportPptxDirect() {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     const sceneGraph = editor.serializeForPptx();
     const slideCount = sceneGraph?.slides?.length || 0;
     if (slideCount) status(`جارٍ التصدير — ${slideCount} شريحة…`);
@@ -820,12 +820,12 @@
       status(pptxExportStatus(res));
     } else {
       if (res.report) showFidelityReport(res.report);
-      status('PPTX export ' + (res.error ? 'failed: ' + res.error : 'cancelled.'));
+      status(res.error ? 'تعذّر تصدير PowerPoint: ' + res.error : 'أُلغي تصدير PowerPoint.');
     }
   }
 
   async function exportPptx() {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     await exportPptxDirect();
   }
 
@@ -843,10 +843,10 @@
   // user said they were heading for so that button is nudged once the deck is
   // open — the job is not "open a file", it is "get a .pptx out of a PDF".
   const FLOWS = {
-    'pdf-pptx':  { run: importPdf,  intent: 'pptx', hint: 'Deck ready — export your PowerPoint.' },
-    'pdf-pdf':   { run: importPdf,  intent: 'pdf',  hint: 'Deck ready — export your PDF.' },
+    'pdf-pptx':  { run: importPdf,  intent: 'pptx', hint: 'العرض جاهز — صدّره PowerPoint.' },
+    'pdf-pdf':   { run: importPdf,  intent: 'pdf',  hint: 'العرض جاهز — صدّره PDF.' },
     'html-edit': { run: openHtml,   intent: null },
-    'html-pdf':  { run: openHtml,   intent: 'pdf',  hint: 'Lecture ready — export your PDF.' },
+    'html-pdf':  { run: openHtml,   intent: 'pdf',  hint: 'المحاضرة جاهزة — صدّرها PDF.' },
     'word':      { run: importDocx, intent: null }
   };
   document.querySelectorAll('#empty-state [data-flow]').forEach((el) => {
@@ -862,22 +862,22 @@
   $('#btn-add-images').addEventListener('click', addImages);
 
   function beginPlace(type, msg) {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     editor.beginPlace(type);
     status(msg);
   }
   $('#btn-add-text').addEventListener('click', () =>
-    beginPlace('text', 'Click on the page where the text should go… (Esc cancels)'));
+    beginPlace('text', 'انقر في المكان الذي تريد وضع النص فيه… (Esc للإلغاء)'));
   $('#btn-add-line').addEventListener('click', () =>
-    beginPlace('line', 'Click where the divider line should go… (Esc cancels)'));
+    beginPlace('line', 'انقر حيث تريد الخط الفاصل… (Esc للإلغاء)'));
   $('#btn-add-table').addEventListener('click', () =>
-    beginPlace('table', 'Click where the table should go… (Esc cancels)'));
+    beginPlace('table', 'انقر حيث تريد الجدول… (Esc للإلغاء)'));
   $('#btn-save').addEventListener('click', saveHtml);
   $('#btn-export').addEventListener('click', exportPdf);
   $('#btn-export-pptx').addEventListener('click', exportPptx);
   $('#btn-preview').addEventListener('click', previewPdf);
   $('#btn-preview-pptx')?.addEventListener('click', async () => {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     await previewPptx();
   });
 
@@ -891,38 +891,38 @@
     const on = !!kit && /^MiM/.test(kit);
     btnBrand.classList.toggle('active', on);
     const brandLbl = btnBrand.querySelector('.lbl') || btnBrand;
-    brandLbl.textContent = kit === 'MiM-print' ? 'MiM Print ✓' : on ? 'MiM ✓' : 'MiM Identity';
+    brandLbl.textContent = kit === 'MiM-print' ? 'MiM طباعة ✓' : on ? 'MiM ✓' : 'هوية MiM';
     btnBrand.title = on
-      ? 'MiM identity applied. Click to revert to the original fonts and colors.'
-      : 'Apply the MiM identity — ministry fonts + official screen palette. (Print palette: 🎨 Brand Kit.)';
+      ? 'هوية MiM مطبّقة. انقر للعودة إلى الخطوط والألوان الأصلية.'
+      : 'تطبيق هوية MiM — خطوط الوزارة وألوان الشاشة الرسمية. (ألوان الطباعة: 🎨 حزمة الهوية.)';
   }
   window.__updateBrandBtn = updateBrandBtn; // brandkit.js keeps the toggle in sync for modal-applied kits
   btnBrand.addEventListener('click', async () => {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     const kit = editor.activeThemeKit();
     if (kit && /^MiM/.test(kit)) {
       editor.removeBrandTheme();
       updateBrandBtn();
-      status('Reverted to the original fonts and colors.');
+      status('عادت الخطوط والألوان الأصلية.');
       return;
     }
     if (!brandFonts) {
-      status('Loading ministry fonts…');
+      status('جارٍ تحميل خطوط الوزارة…');
       try { brandFonts = await window.api.getFonts(); } catch (_) { brandFonts = []; }
     }
     editor.applyBrandTheme(brandFonts, 'MiM');
     updateBrandBtn();
     const audit = editor.themeAudit();
     if (!brandFonts.length) {
-      status('Applied the MiM identity. (Fonts folder not found — colors only.)');
+      status('طُبّقت هوية MiM. (لم يُعثر على مجلد الخطوط — الألوان فقط.)');
     } else if (audit) {
-      const fontMsg = audit.fontPct >= 90 ? `fonts cover ${audit.fontPct}% of text`
-        : audit.fontPct > 0 ? `⚠ fonts only cover ${audit.fontPct}% of text`
-        : '⚠ fonts embedded but no text uses them';
+      const fontMsg = audit.fontPct >= 90 ? `الخطوط تغطي ${audit.fontPct}% من النص`
+        : audit.fontPct > 0 ? `⚠ الخطوط تغطي ${audit.fontPct}% فقط من النص`
+        : '⚠ خطوط مضمّنة لا يستخدمها أي نص';
       const lostN = audit.lost ? audit.lost.length : 0;
-      const colorMsg = `${audit.recolored.length}/${audit.recolored.length + audit.missed.length + lostN} colors remapped`;
-      const lostMsg = lostN ? ` ⚠ ${lostN} blocked by the deck's own CSS — run 🩺.` : '';
-      status(`Applied the MiM identity — ${fontMsg}, ${colorMsg}.${lostMsg}`);
+      const colorMsg = `${audit.recolored.length}/${audit.recolored.length + audit.missed.length + lostN} لونًا أُعيد تعيينه`;
+      const lostMsg = lostN ? ` ⚠ ${lostN} حجبتها أنماط العرض نفسه — شغّل 🩺 الفحص.` : '';
+      status(`طُبّقت هوية MiM — ${fontMsg}، ${colorMsg}.${lostMsg}`);
     }
   });
 
@@ -942,12 +942,12 @@
     updateSlideInfo();
   }
   function slideDeleteAction() {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     const s = currentSlideEl();
-    if (!s) { status('No slide to delete.'); return; }
-    if (editor.slides().length <= 1) { status('Cannot delete the only slide.'); return; }
+    if (!s) { status('لا توجد شريحة لحذفها.'); return; }
+    if (editor.slides().length <= 1) { status('لا يمكن حذف الشريحة الوحيدة.'); return; }
     editor.deleteSlide(s);
-    status('Slide deleted.');
+    status('تم حذف الشريحة.');
   }
   const ACTIONS = [
     { id: 'open', ar: 'فتح ملف', en: 'Open file', run: openHtml },
@@ -957,17 +957,17 @@
     { id: 'export-pdf', ar: 'تصدير PDF', en: 'Export PDF', run: exportPdf },
     { id: 'export-pptx', ar: 'تصدير PPTX', en: 'Export PPTX', run: exportPptx },
     { id: 'preview-pptx', ar: 'معاينة PPTX', en: 'Preview PPTX', run: () => { $('#btn-preview-pptx')?.click(); } },
-    { id: 'insert-text', ar: 'إدراج نص', en: 'Insert text', run: () => beginPlace('text', 'Click on the page where the text should go… (Esc cancels)') },
+    { id: 'insert-text', ar: 'إدراج نص', en: 'Insert text', run: () => beginPlace('text', 'انقر في المكان الذي تريد وضع النص فيه… (Esc للإلغاء)') },
     { id: 'insert-image', ar: 'إدراج صورة', en: 'Insert image', run: addImages },
-    { id: 'add-slide', ar: 'إضافة شريحة', en: 'Add slide', run: () => { if (!editor) return status('Open a lecture first.'); editor.addSlide(currentSlideEl()); status('New slide added. Edit its title and content.'); } },
-    { id: 'dup-slide', ar: 'تكرار الشريحة', en: 'Duplicate slide', run: () => { if (!editor) return status('Open a lecture first.'); editor.duplicateSlide(currentSlideEl()); status('Slide duplicated.'); } },
+    { id: 'add-slide', ar: 'إضافة شريحة', en: 'Add slide', run: () => { if (!editor) return status('افتح محاضرة أولًا.'); editor.addSlide(currentSlideEl()); status('أُضيفت شريحة جديدة — عدّل عنوانها ومحتواها.'); } },
+    { id: 'dup-slide', ar: 'تكرار الشريحة', en: 'Duplicate slide', run: () => { if (!editor) return status('افتح محاضرة أولًا.'); editor.duplicateSlide(currentSlideEl()); status('تم تكرار الشريحة.'); } },
     { id: 'del-slide', ar: 'حذف الشريحة', en: 'Delete slide', run: slideDeleteAction },
     { id: 'next-slide', ar: 'الشريحة التالية', en: 'Next slide', run: () => gotoSlide(1) },
     { id: 'prev-slide', ar: 'الشريحة السابقة', en: 'Previous slide', run: () => gotoSlide(-1) },
     { id: 'undo', ar: 'تراجع', en: 'Undo', run: () => editor && editor.undo() },
     { id: 'redo', ar: 'إعادة', en: 'Redo', run: () => editor && editor.redo() },
     { id: 'doctor', ar: 'فحص الشرائح', en: 'Run doctor', run: () => { if (window.SlideDoctor) toggleDoctor(); } },
-    { id: 'brand', ar: 'تبديل هوية MiM', en: 'Toggle brand theme', run: () => btnBrand.click() },
+    { id: 'brand', ar: 'تبديل هوية MiM', en: 'تبديل ثيم الهوية', run: () => btnBrand.click() },
     { id: 'numerals', ar: 'تبديل الأرقام عربي لاتيني', en: 'Toggle numerals', run: () => $('#btn-numerals').click() },
     { id: 'date-hijri', ar: 'إدراج تاريخ هجري', en: 'Insert Hijri date', run: () => $('#btn-date-hijri').click() },
     { id: 'date-greg', ar: 'إدراج تاريخ ميلادي', en: 'Insert Gregorian date', run: () => $('#btn-date-greg').click() },
@@ -980,7 +980,7 @@
     if (cmdkEl) return cmdkEl;
     cmdkEl = document.createElement('div');
     cmdkEl.id = 'cmdk';
-    cmdkEl.innerHTML = '<div class="cmdk-box"><input class="cmdk-input" placeholder="اكتب أمرًا… (Type a command…)"><ul class="cmdk-list"></ul></div>';
+    cmdkEl.innerHTML = '<div class="cmdk-box"><input class="cmdk-input" placeholder="اكتب أمرًا…"><ul class="cmdk-list"></ul></div>';
     cmdkEl.addEventListener('mousedown', (e) => { if (e.target === cmdkEl) closeCmdk(); });
     const input = cmdkEl.querySelector('.cmdk-input');
     input.addEventListener('input', () => { cmdkIndex = 0; renderCmdk(input.value); });
@@ -1002,7 +1002,7 @@
     cmdkFiltered.forEach((a, i) => {
       const li = document.createElement('li');
       li.className = 'cmdk-row' + (i === cmdkIndex ? ' on' : '');
-      li.textContent = `${a.ar} — ${a.en}`;
+      li.textContent = a.ar; // English stays searchable (filter above), not shown
       li.addEventListener('mousedown', (e) => { e.preventDefault(); runCmdk(i); });
       list.appendChild(li);
     });
@@ -1036,7 +1036,7 @@
 
   // ---------- Lecture Studio (docked AI enrichment panel) ----------
   $('#btn-enrich').addEventListener('click', () => {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     if (window.Studio) window.Studio.toggle();
   });
 
@@ -1384,7 +1384,7 @@
   }
 
   function toggleDoctor() {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     drOpen = !drOpen;
     ensureDoctorDock().classList.toggle('open', drOpen);
     if (drOpen) { runDoctor(); renderDoctor(); }
@@ -1392,34 +1392,34 @@
 
   // ---------- Brand Kit (custom fonts + palette) ----------
   $('#btn-brandkit').addEventListener('click', () => {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     if (window.BrandKit) window.BrandKit.open();
   });
 
   // ---------- Arabic-first pack (011): numeral toggle + date helper ----------
   $('#btn-numerals').addEventListener('click', () => {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     // Untouched decks carry plain Western digits, so an unset attribute means
     // 'latin' — the first click's default action is to convert TO Arabic-Indic.
     const cur = editor.doc.documentElement.getAttribute('data-ve-numerals') || 'latin';
     const next = cur === 'ar' ? 'latin' : 'ar';
     editor.setNumerals(next);
-    status(next === 'ar' ? 'تم التحويل إلى الأرقام العربية (١٢٣).' : 'Converted to Western numerals (123).');
+    status(next === 'ar' ? 'تم التحويل إلى الأرقام العربية (١٢٣).' : 'تحوّلت الأرقام إلى العربية الغربية (123).');
   });
   $('#btn-date-hijri').addEventListener('click', () => {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     editor.insertDate('hijri');
     status('تم إدراج التاريخ الهجري.');
   });
   $('#btn-date-greg').addEventListener('click', () => {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     editor.insertDate('greg');
     status('تم إدراج التاريخ الميلادي.');
   });
 
   // ---------- Present mode (014) ----------
   $('#btn-present').addEventListener('click', () => {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     if (window.Presenter) window.Presenter.start(editor);
   });
 
@@ -1433,25 +1433,25 @@
 
   // Slide operations act on the current slide (selected, else viewport-center).
   $('#btn-slide-add').addEventListener('click', () => {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     editor.addSlide(currentSlideEl());
-    status('New slide added. Edit its title and content.');
+    status('أُضيفت شريحة جديدة — عدّل عنوانها ومحتواها.');
   });
   $('#btn-slide-dup').addEventListener('click', () => {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     editor.duplicateSlide(currentSlideEl());
-    status('Slide duplicated.');
+    status('تم تكرار الشريحة.');
   });
   $('#btn-slide-import').addEventListener('click', importSlidesFlow);
   window.__importFlow = importSlidesFlow; // hook for automated tests
   $('#btn-slide-del').addEventListener('click', () => {
-    if (!editor) { status('Open a lecture first.'); return; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return; }
     const s = currentSlideEl();
-    if (!s) { status('No slide to delete.'); return; }
+    if (!s) { status('لا توجد شريحة لحذفها.'); return; }
     const n = editor.slides().length;
-    if (n <= 1) { status('Cannot delete the only slide.'); return; }
+    if (n <= 1) { status('لا يمكن حذف الشريحة الوحيدة.'); return; }
     editor.deleteSlide(s);
-    status('Slide deleted.');
+    status('تم حذف الشريحة.');
   });
 
   // Zoom controls.
@@ -1479,8 +1479,8 @@
     else if (e.key === 'Delete' && !e.ctrlKey && !e.metaKey && editor.selected) { editor.deleteSelected(); }
     // ---- 009 slide hotkeys: skip entirely while typing text elsewhere ----
     else if (typingElsewhere()) { /* no-op */ }
-    else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); editor.addSlide(currentSlideEl()); status('New slide added. Edit its title and content.'); }
-    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); editor.duplicateSlide(currentSlideEl()); status('Slide duplicated.'); }
+    else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); editor.addSlide(currentSlideEl()); status('أُضيفت شريحة جديدة — عدّل عنوانها ومحتواها.'); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); editor.duplicateSlide(currentSlideEl()); status('تم تكرار الشريحة.'); }
     else if ((e.ctrlKey || e.metaKey) && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); slideDeleteAction(); }
     else if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); gotoSlide(1); }
     else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); gotoSlide(-1); }
@@ -1502,7 +1502,7 @@
     if (last) {
       const name = last.filePath.split(/[\\/]/).pop();
       const btn = document.createElement('button');
-      btn.textContent = '↩ Reopen ' + name;
+      btn.textContent = '↩ إعادة فتح ' + name;
       btn.title = last.filePath;
       btn.addEventListener('click', () => {
         currentFile = last;
@@ -1542,16 +1542,16 @@
     const heading = document.createElement('div');
     heading.className = 'fidelity-report-summary';
     heading.textContent = failures.length
-      ? `Editable PPTX export failed at ${report.stage}. No PPTX was written.`
+      ? `تعذّر تصدير PowerPoint عند مرحلة ${report.stage}. لم يُكتب أي ملف.`
       : warnings.length
-        ? `Editable PPTX completed with ${warnings.length} OCR/visual fidelity notes.`
-        : 'Editable PPTX completed with no reported fidelity differences.';
+        ? `اكتمل ملف PowerPoint القابل للتحرير مع ${warnings.length} ملاحظة في التعرّف الضوئي أو المطابقة البصرية.`
+        : 'اكتمل ملف PowerPoint القابل للتحرير دون فروق مسجّلة في المطابقة.';
     container.appendChild(heading);
     (report.slides || []).forEach((slide, index) => {
       const card = document.createElement('section');
       card.className = 'preview-slide fidelity-report-slide';
       const title = document.createElement('h3');
-      title.textContent = `Slide ${slide.slideNumber || index + 1}`;
+      title.textContent = `شريحة ${slide.slideNumber || index + 1}`;
       card.appendChild(title);
       const info = document.createElement('p');
       const issuesForSlide = [
@@ -1560,7 +1560,7 @@
       ];
       info.textContent = issuesForSlide.length
         ? issuesForSlide.map(issue => `${issue.kind}: ${issue.stage}: ${issue.message || issue.reason || issue.code}`).join('\n')
-        : 'No slide-specific issue recorded.';
+        : 'لا توجد ملاحظة خاصة بهذه الشريحة.';
       card.appendChild(info);
       const evidence = document.createElement('dl');
       [
@@ -1709,7 +1709,7 @@
     const errorBox = document.getElementById('preview-error');
     const emptyBox = document.getElementById('preview-empty');
     const advisory = document.getElementById('preview-advisory');
-    if (!container) { status('Preview not available.'); return; }
+    if (!container) { status('المعاينة غير متاحة.'); return; }
 
     const show = (element, visible) => { if (element) element.hidden = !visible; };
     show(errorBox, false);
@@ -1759,7 +1759,7 @@
       applyPreviewHeatmap();
       status(summaryText);
     } catch (error) {
-      console.error('PPTX preview failed', error);
+      console.error('تعذّرت معاينة PowerPoint', error);
       container.innerHTML = '';
       if (summaryEl) summaryEl.textContent = '';
       const text = document.getElementById('preview-error-text');
@@ -1780,11 +1780,11 @@
 
   // Doctor: validate the PPTX export plan
   function runPptxDoctor({ showModal = true } = {}) {
-    if (!editor) { status('Open a lecture first.'); return []; }
+    if (!editor) { status('افتح محاضرة أولًا.'); return []; }
     const plan = editor.serializeForPptx();
     const issues = [];
     const slides = plan.slides || [];
-    if (!slides.length) issues.push({ level: 'err', text: 'No slides found in the lecture.' });
+    if (!slides.length) issues.push({ level: 'err', text: 'لا توجد شرائح في المحاضرة.' });
     // The exporter consumes the scene graph directly. Surface its exact
     // slide/node/property diagnostics here; never pre-rasterise unsupported
     // content as a way around a fidelity failure.
@@ -1792,25 +1792,25 @@
       const index = Number.isInteger(error.slideIndex)
         ? error.slideIndex
         : (Number.isInteger(error.slide) ? Math.max(0, error.slide - 1) : null);
-      const where = index == null ? '' : `Slide ${index + 1}: `;
+      const where = index == null ? '' : `شريحة ${index + 1}: `;
       const property = error.property ? ` (${error.property})` : '';
       issues.push({
         level: 'err',
-        text: `${where}${error.message || error.code || 'Unsupported editable-PPTX feature'}${property}`,
+        text: `${where}${error.message || error.code || 'ميزة غير مدعومة في PowerPoint القابل للتحرير'}${property}`,
         slide: index
       });
     });
     const container = document.getElementById('doctor-results');
     if (container) {
       if (!issues.length) {
-          container.innerHTML = `<div class="doctor-issue ok"><div class="doctor-icon">✅</div><div class="doctor-text"><b>Scene graph supported.</b> ${slides.length} slides are ready for the required PowerPoint, OCR, visual, and structure checks.</div></div>`;
+          container.innerHTML = `<div class="doctor-issue ok"><div class="doctor-icon">✅</div><div class="doctor-text"><b>بنية الشرائح مدعومة.</b> ${slides.length} شريحة جاهزة لفحوص PowerPoint والتعرّف الضوئي والمطابقة البصرية والبنية.</div></div>`;
       } else {
         container.innerHTML = issues.map(issue => `
           <div class="doctor-issue ${issue.level}">
             <div class="doctor-icon">${issue.level === 'err' ? '❌' : '⚠️'}</div>
             <div class="doctor-text">
               <b>${issue.text}</b>
-              ${issue.slide != null ? `<div class="doctor-actions"><button class="doctor-btn" data-goto="${issue.slide}">Go to slide ${issue.slide + 1}</button></div>` : ''}
+              ${issue.slide != null ? `<div class="doctor-actions"><button class="doctor-btn" data-goto="${issue.slide}">انتقل إلى الشريحة ${issue.slide + 1}</button></div>` : ''}
             </div>
           </div>
         `).join('');

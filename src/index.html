@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>Lecture Visual Editor</title>
+  <title>محرر المحاضرات</title>
   <link rel="stylesheet" href="fonts/fonts.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -50,86 +50,96 @@
   </svg>
 
   <div id="toolbar">
-    <span class="brand"><svg class="mark"><use href="#i-star8g"/></svg><span class="lbl">Lecture&nbsp;Editor</span></span>
+    <div class="tb-row">
+      <span class="brand"><svg class="mark"><use href="#i-star8g"/></svg><span class="lbl keep">محرر المحاضرات</span></span>
 
-    <div class="group">
-      <button id="btn-open" title="Open a lecture HTML file"><svg class="ic"><use href="#i-open"/></svg><span class="lbl">Open</span></button>
-      <button id="btn-import-docx" title="استيراد ملف Word (.docx) وتحويله تلقائيًا إلى شرائح"><svg class="ic"><use href="#i-doc"/></svg><span class="lbl">Word</span></button>
-      <button id="btn-import-pdf" title="استيراد ملف PDF وإعادة بنائه إلى شرائح قابلة للتحرير"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">Import PDF</span></button>
-      <button id="btn-save" title="Save HTML (Ctrl+S)"><svg class="ic"><use href="#i-save"/></svg><span class="lbl">Save</span></button>
-      <button id="btn-preview" title="Quick PDF preview — check everything before exporting"><svg class="ic"><use href="#i-eye"/></svg><span class="lbl">Preview</span></button>
-      <button id="btn-doctor" title="فحص الشرائح — نص كثيف، تباين، خطوط، صور مشوّهة، تسمية الأشكال"><svg class="ic"><use href="#i-pulse"/></svg><span class="lbl">الفحص</span><span class="ct" hidden></span></button>
-      <button id="btn-export-pptx" class="primary" title="Export verified editable PPTX"><svg class="ic"><use href="#i-pptx"/></svg><span class="lbl">PPTX</span></button>
-      <button id="btn-preview-pptx" title="Verify editable PPTX before export"><svg class="ic"><use href="#i-pptx"/></svg><span class="lbl">PPTX Preview</span></button>
-      <button id="btn-export" class="primary" title="Export to PDF"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">PDF</span></button>
+      <div class="group">
+        <button id="btn-open" title="فتح ملف محاضرة HTML"><svg class="ic"><use href="#i-open"/></svg><span class="lbl keep">فتح</span></button>
+        <button id="btn-import-docx" title="استيراد ملف Word (.docx) وتحويله تلقائيًا إلى شرائح"><svg class="ic"><use href="#i-doc"/></svg><span class="lbl keep">Word</span></button>
+        <button id="btn-import-pdf" title="استيراد ملف PDF وإعادة بنائه إلى شرائح قابلة للتحرير"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl keep">استيراد PDF</span></button>
+        <button id="btn-save" title="حفظ HTML (Ctrl+S)"><svg class="ic"><use href="#i-save"/></svg><span class="lbl keep">حفظ</span></button>
+      </div>
+
+      <span class="spacer"></span>
+
+      <div class="group">
+        <button id="btn-doctor" title="فحص الشرائح — نص كثيف، تباين، خطوط، صور مشوّهة، تسمية الأشكال"><svg class="ic"><use href="#i-pulse"/></svg><span class="lbl keep">الفحص</span><span class="ct" hidden></span></button>
+        <button id="btn-preview" title="معاينة PDF سريعة — راجع كل شيء قبل التصدير"><svg class="ic"><use href="#i-eye"/></svg><span class="lbl keep">معاينة</span></button>
+        <button id="btn-present" title="عرض الشرائح ملء الشاشة مع نافذة الملقّن"><svg class="ic"><use href="#i-present"/></svg><span class="lbl keep">عرض</span></button>
+      </div>
+
+      <div class="group">
+        <span class="glabel">تصدير</span>
+        <button id="btn-preview-pptx" title="تحقّق من ملف PowerPoint القابل للتحرير قبل تصديره"><svg class="ic"><use href="#i-eye"/></svg><span class="lbl keep">مطابقة PowerPoint</span></button>
+        <button id="btn-export-pptx" class="primary" title="تصدير ملف PowerPoint قابل للتحرير ومُتحقَّق منه"><svg class="ic"><use href="#i-pptx"/></svg><span class="lbl keep">PowerPoint</span></button>
+        <button id="btn-export" class="primary" title="تصدير PDF"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl keep">PDF</span></button>
+      </div>
     </div>
 
-    <div class="group">
-      <span class="glabel">Insert</span>
-      <button id="btn-add-text" title="Insert a text block (uses the lecture's own fonts)"><svg class="ic"><use href="#i-text"/></svg><span class="lbl">Text</span></button>
-      <button id="btn-add-line" title="Insert a divider line"><svg class="ic"><use href="#i-line"/></svg></button>
-      <button id="btn-add-table" title="Insert a table"><svg class="ic"><use href="#i-table"/></svg></button>
-      <button id="btn-add-images" title="Load images into the panel"><svg class="ic"><use href="#i-image"/></svg></button>
-    </div>
+    <div class="tb-row">
+      <div class="group">
+        <span class="glabel">إدراج</span>
+        <button id="btn-add-text" title="إدراج كتلة نص (بخطوط المحاضرة نفسها)"><svg class="ic"><use href="#i-text"/></svg><span class="lbl">نص</span></button>
+        <button id="btn-add-line" title="إدراج خط فاصل" aria-label="خط فاصل"><svg class="ic"><use href="#i-line"/></svg></button>
+        <button id="btn-add-table" title="إدراج جدول" aria-label="جدول"><svg class="ic"><use href="#i-table"/></svg></button>
+        <button id="btn-add-images" title="تحميل صور إلى اللوحة الجانبية" aria-label="صور"><svg class="ic"><use href="#i-image"/></svg></button>
+      </div>
 
-    <div class="group">
-      <span class="glabel">Brand</span>
-      <button id="btn-brand" title="Apply the full MiM identity — real ministry fonts + official color palette. Click again to revert."><svg class="ic"><use href="#i-sparkles"/></svg><span class="lbl">MiM Identity</span></button>
-      <button id="btn-brandkit" title="Bring your own brand: upload fonts and recolor this lecture's palette, save it as a reusable kit."><svg class="ic"><use href="#i-palette"/></svg><span class="lbl">Brand Kit</span></button>
-    </div>
+      <div class="group">
+        <span class="glabel">شريحة</span>
+        <button id="btn-slide-add" title="إضافة شريحة فارغة بعد الحالية" aria-label="شريحة جديدة"><svg class="ic"><use href="#i-slideplus"/></svg></button>
+        <button id="btn-slide-dup" title="تكرار الشريحة الحالية" aria-label="تكرار الشريحة"><svg class="ic"><use href="#i-copy"/></svg></button>
+        <button id="btn-slide-import" title="استيراد شرائح من محاضرة HTML أخرى ودمجها" aria-label="استيراد شرائح"><svg class="ic"><use href="#i-inbox"/></svg></button>
+        <button id="btn-slide-del" class="danger-outline" title="حذف الشريحة الحالية" aria-label="حذف الشريحة"><svg class="ic"><use href="#i-trash"/></svg></button>
+      </div>
 
-    <div class="group">
-      <span class="glabel">عربي</span>
-      <button id="btn-numerals" title="تبديل نظام الأرقام في الشرائح: عربي ⇄ لاتيني"><span class="lbl">١٢٣ ⇄ 123</span></button>
-      <button id="btn-date-hijri" title="إدراج التاريخ الهجري" aria-label="التاريخ الهجري"><svg class="ic"><use href="#i-moon"/></svg></button>
-      <button id="btn-date-greg" title="إدراج التاريخ الميلادي" aria-label="التاريخ الميلادي"><svg class="ic"><use href="#i-cal"/></svg></button>
-    </div>
+      <div class="group">
+        <button id="btn-undo" title="تراجع (Ctrl+Z)" aria-label="تراجع" disabled><svg class="ic"><use href="#i-undo"/></svg></button>
+        <button id="btn-redo" title="إعادة (Ctrl+Y)" aria-label="إعادة" disabled><svg class="ic"><use href="#i-redo"/></svg></button>
+      </div>
 
-    <div class="group">
-      <button id="btn-present" title="Fullscreen present + speaker view"><svg class="ic"><use href="#i-present"/></svg><span class="lbl">Present</span></button>
-    </div>
+      <div class="group">
+        <span class="glabel">الهوية</span>
+        <button id="btn-brand" title="تطبيق هوية MiM كاملة — خطوط الوزارة الحقيقية وألوانها الرسمية. انقر مرة أخرى للعودة."><svg class="ic"><use href="#i-sparkles"/></svg><span class="lbl">هوية MiM</span></button>
+        <button id="btn-brandkit" title="هويتك الخاصة: ارفع خطوطك وأعد تلوين المحاضرة واحفظها حزمة قابلة لإعادة الاستخدام."><svg class="ic"><use href="#i-palette"/></svg><span class="lbl">حزمة الهوية</span></button>
+      </div>
 
-    <div class="group">
-      <span class="glabel">AI</span>
-      <button id="btn-enrich" title="Lecture Studio — scan the lecture, review AI suggestions, and generate only what you approve."><svg class="ic"><use href="#i-clapper"/></svg><span class="lbl">Studio</span></button>
-      <button id="btn-settings" title="API keys &amp; settings" aria-label="Settings"><svg class="ic"><use href="#i-gear"/></svg></button>
-    </div>
+      <div class="group">
+        <span class="glabel">عربي</span>
+        <button id="btn-numerals" title="تبديل نظام الأرقام في الشرائح: هندية ⇄ عربية غربية"><span class="lbl keep">١٢٣ ⇄ 123</span></button>
+        <button id="btn-date-hijri" title="إدراج التاريخ الهجري" aria-label="التاريخ الهجري"><svg class="ic"><use href="#i-moon"/></svg></button>
+        <button id="btn-date-greg" title="إدراج التاريخ الميلادي" aria-label="التاريخ الميلادي"><svg class="ic"><use href="#i-cal"/></svg></button>
+      </div>
 
-    <div class="group">
-      <span class="glabel">Slide</span>
-      <button id="btn-slide-add" title="Add a new blank slide after the current one"><svg class="ic"><use href="#i-slideplus"/></svg></button>
-      <button id="btn-slide-dup" title="Duplicate the current slide"><svg class="ic"><use href="#i-copy"/></svg></button>
-      <button id="btn-slide-import" title="Import slides from another HTML lecture and merge them in"><svg class="ic"><use href="#i-inbox"/></svg></button>
-      <button id="btn-slide-del" class="danger-outline" title="Delete the current slide"><svg class="ic"><use href="#i-trash"/></svg></button>
-    </div>
+      <div class="group">
+        <span class="glabel">الذكاء</span>
+        <button id="btn-enrich" title="استوديو المحاضرة — يفحص المحاضرة ويقترح إضافات، ولا يولّد إلا ما توافق عليه."><svg class="ic"><use href="#i-clapper"/></svg><span class="lbl">الاستوديو</span></button>
+        <button id="btn-settings" title="مفاتيح API والإعدادات" aria-label="الإعدادات"><svg class="ic"><use href="#i-gear"/></svg></button>
+      </div>
 
-    <div class="group">
-      <button id="btn-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg class="ic"><use href="#i-undo"/></svg></button>
-      <button id="btn-redo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><svg class="ic"><use href="#i-redo"/></svg></button>
-    </div>
+      <span class="spacer"></span>
 
-    <span class="spacer"></span>
-
-    <div class="group zoom">
-      <button id="btn-zoom-out" title="Zoom out" aria-label="Zoom out"><svg class="ic"><use href="#i-minus"/></svg></button>
-      <button id="btn-zoom-label" title="Reset to 100%">100%</button>
-      <button id="btn-zoom-in" title="Zoom in" aria-label="Zoom in"><svg class="ic"><use href="#i-plus"/></svg></button>
-      <button id="btn-zoom-fit" title="Fit to width" aria-label="Fit to width"><svg class="ic"><use href="#i-fit"/></svg></button>
+      <div class="group zoom">
+        <button id="btn-zoom-out" title="تصغير" aria-label="تصغير"><svg class="ic"><use href="#i-minus"/></svg></button>
+        <button id="btn-zoom-label" title="العودة إلى 100%">100%</button>
+        <button id="btn-zoom-in" title="تكبير" aria-label="تكبير"><svg class="ic"><use href="#i-plus"/></svg></button>
+        <button id="btn-zoom-fit" title="ملاءمة العرض" aria-label="ملاءمة العرض"><svg class="ic"><use href="#i-fit"/></svg></button>
+      </div>
     </div>
   </div>
 
   <div id="body">
     <aside id="panel">
       <div class="panel-section slides-section">
-        <div class="panel-header"><svg class="ic"><use href="#i-layers"/></svg> Slides <span id="slide-count" class="count"></span></div>
+        <div class="panel-header"><svg class="ic"><use href="#i-layers"/></svg> الشرائح <span id="slide-count" class="count"></span></div>
         <div id="slide-list">
-          <p class="hint">Open a lecture to see its slides here.</p>
+          <p class="hint">افتح محاضرة لتظهر شرائحها هنا.</p>
         </div>
       </div>
       <div class="panel-section images-section">
-        <div class="panel-header"><svg class="ic"><use href="#i-image"/></svg> Images</div>
+        <div class="panel-header"><svg class="ic"><use href="#i-image"/></svg> الصور</div>
         <div id="asset-list">
-          <p class="hint">Click the <b>image</b> button to load pictures, then drag them onto the page.</p>
+          <p class="hint">اضغط زر <b>الصور</b> لتحميل صورك، ثم اسحبها إلى الصفحة.</p>
         </div>
       </div>
     </aside>
@@ -143,42 +153,41 @@
         <div class="empty-inner home">
           <header class="home-head">
             <svg class="orn"><use href="#i-star8g"/></svg>
-            <h1>What are we making?</h1>
+            <h1>ماذا نصنع اليوم؟</h1>
             <p class="home-sub">
               <span>افتح أي ملف · عدّله بصريًا · صدّره بأي صيغة</span>
-              <span class="home-en">Open anything. Fix it visually. Export it anywhere.</span>
             </p>
           </header>
 
           <div class="home-grid">
             <button class="home-card" data-flow="pdf-pptx">
               <span class="hc-ico"><svg class="ic"><use href="#i-pptx"/></svg></span>
-              <span class="hc-title">PDF → PowerPoint</span>
-              <span class="hc-desc">Rebuild a PDF into real editable slides, then export a verified <code>.pptx</code>.</span>
-              <span class="hc-flow"><em>PDF</em><i>→</i><em>PPTX</em></span>
+              <span class="hc-title">من PDF إلى PowerPoint</span>
+              <span class="hc-desc">أعد بناء ملف PDF إلى شرائح حقيقية قابلة للتحرير، ثم صدّرها ملف <code>.pptx</code> مُتحقَّقًا منه.</span>
+              <span class="hc-flow"><em>PDF</em><i>←</i><em>PPTX</em></span>
             </button>
 
             <button class="home-card" data-flow="html-edit">
               <span class="hc-ico"><svg class="ic"><use href="#i-text"/></svg></span>
-              <span class="hc-title">HTML Editor</span>
-              <span class="hc-desc">Open a lecture and change anything — text, images, tables, theme.</span>
-              <span class="hc-flow"><em>HTML</em><i>→</i><em>edit</em></span>
+              <span class="hc-title">محرر HTML</span>
+              <span class="hc-desc">افتح محاضرة وغيّر فيها ما تشاء — النصوص، والصور، والجداول، والثيم.</span>
+              <span class="hc-flow"><em>HTML</em><i>←</i><em>تحرير</em></span>
             </button>
 
             <button class="home-card" data-flow="html-pdf">
               <span class="hc-ico"><svg class="ic"><use href="#i-pdf"/></svg></span>
-              <span class="hc-title">HTML → PDF</span>
-              <span class="hc-desc">Open a lecture and export a pixel-perfect PDF, rendered by Chromium.</span>
-              <span class="hc-flow"><em>HTML</em><i>→</i><em>PDF</em></span>
+              <span class="hc-title">من HTML إلى PDF</span>
+              <span class="hc-desc">افتح محاضرة وصدّرها PDF مطابقًا تمامًا بمقاس صفحاتها الأصلي.</span>
+              <span class="hc-flow"><em>HTML</em><i>←</i><em>PDF</em></span>
             </button>
           </div>
 
           <div class="home-more">
             <button class="home-mini" data-flow="pdf-pdf">
-              <svg class="ic"><use href="#i-pdf"/></svg><span>PDF → cleaner PDF</span>
+              <svg class="ic"><use href="#i-pdf"/></svg><span>PDF ← PDF أنظف</span>
             </button>
             <button class="home-mini" data-flow="word">
-              <svg class="ic"><use href="#i-doc"/></svg><span>Word → slides</span>
+              <svg class="ic"><use href="#i-doc"/></svg><span>Word ← شرائح</span>
             </button>
             <span id="home-recent"></span>
           </div>
@@ -192,7 +201,7 @@
        the current slide counter. Both were missing, so every status() call
        threw "Cannot set properties of null" and broke every button handler. -->
   <div id="statusbar">
-    <span id="status">Open a lecture to begin.</span>
+    <span id="status">افتح محاضرة للبدء.</span>
     <span class="spacer"></span>
     <span id="slide-info"></span>
   </div>
@@ -231,15 +240,15 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content doctor-content">
       <div class="modal-header">
-        <h2>PPTX Doctor Check</h2>
-        <button class="modal-close" data-close="doctor-modal">&times;</button>
+        <h2>فحص ملف PowerPoint</h2>
+        <button class="modal-close" data-close="doctor-modal" title="إغلاق">&times;</button>
       </div>
       <div class="modal-body">
         <div id="doctor-results"></div>
       </div>
       <div class="modal-footer">
-        <button id="btn-doctor-close" class="secondary">Close</button>
-        <button id="btn-doctor-fix" class="primary">Export verified PPTX</button>
+        <button id="btn-doctor-close" class="secondary">إغلاق</button>
+        <button id="btn-doctor-fix" class="primary">تصدير PowerPoint مُتحقَّق منه</button>
       </div>
     </div>
   </div>

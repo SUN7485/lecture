@@ -71,7 +71,7 @@
       speakerWin = window.open('', 'lve-speaker', 'width=520,height=680');
       if (!speakerWin) return;
       const d = speakerWin.document;
-      d.title = 'Speaker view';
+      d.title = 'نافذة الملقّن'; d.documentElement.dir = 'rtl';
       d.body.style.cssText = 'margin:0;font:15px/1.7 \'IBM Plex Sans Arabic\',\'Segoe UI\',system-ui,sans-serif;background:#080d1e;color:#eef3ff;display:flex;flex-direction:column;height:100vh;';
       d.body.innerHTML =
         '<div id="sp-timer" style="padding:10px 16px;font-size:24px;font-weight:700;background:#0a1024;color:#2ee6c8;font-variant-numeric:tabular-nums;letter-spacing:.5px;border-bottom:1px solid #1d2a51;">00:00</div>' +

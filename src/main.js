@@ -32,7 +32,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    title: 'Lecture Visual Editor',
+    title: 'محرر المحاضرات',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -81,7 +81,7 @@ app.on('window-all-closed', () => {
 // ---- File open ----
 ipcMain.handle('open-html', async () => {
   const res = await dialog.showOpenDialog(mainWindow, {
-    title: 'Open lecture HTML',
+    title: 'فتح محاضرة HTML',
     filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
     properties: ['openFile']
   });
@@ -96,7 +96,7 @@ ipcMain.handle('open-html', async () => {
 // (renderer converts with the same vendored mammoth the web port uses).
 ipcMain.handle('open-docx', async () => {
   const res = await dialog.showOpenDialog(mainWindow, {
-    title: 'Import Word document',
+    title: 'استيراد مستند Word',
     filters: [{ name: 'Word', extensions: ['docx'] }],
     properties: ['openFile']
   });
@@ -135,7 +135,7 @@ ipcMain.handle('pick-pdf', async () => {
   const hook = process.env.LVE_OPEN_PDF; // test hook: skip the dialog
   if (hook && fs.existsSync(hook)) return { filePath: hook };
   const res = await dialog.showOpenDialog(mainWindow, {
-    title: 'Import a PDF lecture',
+    title: 'استيراد محاضرة PDF',
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
     properties: ['openFile']
   });
@@ -144,7 +144,7 @@ ipcMain.handle('pick-pdf', async () => {
 });
 
 ipcMain.handle('import-pdf', async (_e, { filePath } = {}) => {
-  if (!filePath || !fs.existsSync(filePath)) return { error: 'That PDF could not be found.' };
+  if (!filePath || !fs.existsSync(filePath)) return { error: 'تعذّر العثور على ملف PDF هذا.' };
   try {
     const started = Date.now();
     const { modelFromPdf, modelToDeckHtml } = await pdfEngine();
@@ -192,7 +192,7 @@ ipcMain.handle('import-html', async () => {
   let filePath = process.env.LVE_IMPORT; // test hook: skip the dialog
   if (!filePath || !fs.existsSync(filePath)) {
     const res = await dialog.showOpenDialog(mainWindow, {
-      title: 'Import slides from another lecture',
+      title: 'استيراد شرائح من محاضرة أخرى',
       filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
       properties: ['openFile']
     });
@@ -225,8 +225,8 @@ ipcMain.handle('get-fonts', () => {
 // ---- Pick images for the asset panel ----
 ipcMain.handle('pick-images', async () => {
   const res = await dialog.showOpenDialog(mainWindow, {
-    title: 'Add images to library',
-    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }],
+    title: 'إضافة صور إلى المكتبة',
+    filters: [{ name: 'صور', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }],
     properties: ['openFile', 'multiSelections']
   });
   if (res.canceled) return [];
@@ -240,7 +240,7 @@ ipcMain.handle('pick-images', async () => {
 // ---- Save edited HTML ----
 ipcMain.handle('save-html', async (_e, { html, suggestedName }) => {
   const res = await dialog.showSaveDialog(mainWindow, {
-    title: 'Save edited HTML',
+    title: 'حفظ ملف HTML المعدّل',
     defaultPath: suggestedName || 'lecture-edited.html',
     filters: [{ name: 'HTML', extensions: ['html'] }]
   });
@@ -255,7 +255,7 @@ ipcMain.handle('save-html', async (_e, { html, suggestedName }) => {
 ipcMain.handle('save-text-file', async (_e, { content, suggestedName, extension, filterName }) => {
   const ext = extension || 'txt';
   const res = await dialog.showSaveDialog(mainWindow, {
-    title: 'Save file',
+    title: 'حفظ الملف',
     defaultPath: suggestedName || ('file.' + ext),
     filters: [{ name: filterName || ext.toUpperCase(), extensions: [ext] }]
   });
@@ -266,7 +266,7 @@ ipcMain.handle('save-text-file', async (_e, { content, suggestedName, extension,
 ipcMain.handle('open-text-file', async (_e, { extension, filterName }) => {
   const ext = extension || 'txt';
   const res = await dialog.showOpenDialog(mainWindow, {
-    title: 'Open file',
+    title: 'فتح ملف',
     filters: [{ name: filterName || ext.toUpperCase(), extensions: [ext] }],
     properties: ['openFile']
   });
@@ -296,8 +296,8 @@ ipcMain.handle('settings-save', (_e, next) => {
 // ---- Brand kits: upload fonts + palette, saved in userData for reuse ----
 ipcMain.handle('pick-fonts', async () => {
   const res = await dialog.showOpenDialog(mainWindow, {
-    title: 'Add font files',
-    filters: [{ name: 'Fonts', extensions: ['otf', 'ttf', 'woff', 'woff2'] }],
+    title: 'إضافة ملفات خطوط',
+    filters: [{ name: 'خطوط', extensions: ['otf', 'ttf', 'woff', 'woff2'] }],
     properties: ['openFile', 'multiSelections']
   });
   if (res.canceled) return [];
@@ -403,7 +403,7 @@ ipcMain.handle('export-pdf', async (_e, { html, suggestedName, pageSize }) => {
   let filePath = process.env.LVE_EXPORT_PATH; // test hook: skip the dialog
   if (!filePath) {
     const res = await dialog.showSaveDialog(mainWindow, {
-      title: 'Export PDF',
+      title: 'تصدير PDF',
       defaultPath: suggestedName || 'lecture.pdf',
       filters: [{ name: 'PDF', extensions: ['pdf'] }]
     });
@@ -915,7 +915,7 @@ ipcMain.handle('export-pptx', async (_e, payload) => {
   let destinationPath = process.env.LVE_EXPORT_PATH;
   if (!destinationPath) {
     const choice = await dialog.showSaveDialog(mainWindow, {
-      title: 'Export editable PPTX (best-effort fidelity)',
+      title: 'تصدير PowerPoint قابل للتحرير',
       defaultPath: suggestedName || 'lecture.pptx',
       filters: [{ name: 'PowerPoint', extensions: ['pptx'] }]
     });
@@ -959,7 +959,7 @@ ipcMain.handle('preview-pdf', async (_e, { html, pageSize }) => {
     const viewer = new BrowserWindow({
       width: 1000,
       height: 800,
-      title: 'PDF Preview',
+      title: 'معاينة PDF',
       webPreferences: { plugins: true }
     });
     viewer.setMenuBarVisibility(false);

@@ -107,8 +107,8 @@
     editor.applyThemeKit({ name: kit.name || editor.activeThemeKit() || 'custom', fonts: dedupeFonts((kit.fonts || []).concat(faces)), varsCss: varsToCss(kit.vars) + '\n' + typoCss(p) });
     refreshActive();
     setStatus(faces.length
-      ? `Applied "${p.label}" typography — fonts embedded (offline & PDF safe).`
-      : `Applied "${p.label}" roles only — fonts couldn't be downloaded (offline?); text falls back to system fonts.`);
+      ? `طُبّق تنسيق خطوط «${p.label}» — الخطوط مضمّنة (تعمل دون إنترنت وفي PDF).`
+      : `طُبّقت أدوار «${p.label}» فقط — تعذّر تنزيل الخطوط (هل الجهاز غير متصل؟)، فيُعرض النص بخطوط النظام.`);
   }
 
   // ---------- Theme files (.theme.json) + built-in presets (012) ----------
@@ -139,8 +139,8 @@
     kit = { name: kitName, vars: {}, fonts: [] };
     refreshActive();
     setStatus(kitName === 'MiM-print'
-      ? 'Applied MiM PRINT preset (official Pantone sheet — print-accurate).'
-      : 'Applied MiM preset (screen palette).');
+      ? 'طُبّق ثيم MiM للطباعة (ألوان Pantone الرسمية — دقيقة للطباعة).'
+      : 'طُبّق ثيم MiM (ألوان الشاشة).');
   }
   async function applyNeutralPreset(name) {
     const editor = getEditor();
@@ -157,8 +157,8 @@
     kit = { name, vars: Object.assign({}, p.vars), fonts: [] };
     refreshActive();
     setStatus(faces.length
-      ? `Applied "${name}" preset — fonts embedded (offline & PDF safe).`
-      : `Applied "${name}" colors only — fonts couldn't be downloaded (offline?).`);
+      ? `طُبّق ثيم «${name}» — الخطوط مضمّنة (تعمل دون إنترنت وفي PDF).`
+      : `طُبّقت ألوان «${name}» فقط — تعذّر تنزيل الخطوط (هل الجهاز غير متصل؟).`);
   }
   function applyBuiltinPreset(name) {
     if (name === 'MiM' || name === 'MiM-print') applyMiMPreset(name); else applyNeutralPreset(name);
@@ -193,31 +193,31 @@
   }
   async function exportTheme() {
     const editor = getEditor();
-    if (!editor) { setStatus('Open a lecture first.'); return; }
+    if (!editor) { setStatus('افتح محاضرة أولًا.'); return; }
     const liveKit = buildLiveKit();
     const json = window.ThemeIO.toJson(liveKit);
     const suggested = (liveKit.name || 'theme').replace(/[^\w-]+/g, '-') + '.theme.json';
     const res = await api.saveTextFile({ content: json, suggestedName: suggested, extension: 'json', filterName: 'Theme JSON' });
-    if (res && res.ok) setStatus(`Exported "${liveKit.name}" theme to ${res.filePath}.`);
+    if (res && res.ok) setStatus(`صُدّر ثيم «${liveKit.name}» إلى ${res.filePath}.`);
   }
   async function importThemeFile() {
     const editor = getEditor();
-    if (!editor) { setStatus('Open a lecture first.'); return; }
+    if (!editor) { setStatus('افتح محاضرة أولًا.'); return; }
     const res = await api.openTextFile({ extension: 'json', filterName: 'Theme JSON' });
     if (!res) return;
     let parsed;
     try { parsed = window.ThemeIO.parse(res.content); }
-    catch (e) { setStatus('Theme import failed: ' + e.message); return; }
+    catch (e) { setStatus('تعذّر استيراد الثيم: ' + e.message); return; }
     editor.applyThemeKit(parsed);
     kit = { name: parsed.name, vars: window.ThemeIO.parseVarsCss(parsed.varsCss), fonts: parsed.fonts };
     refreshActive();
     if (modal) { modal.querySelector('#kit-name').value = kit.name; renderColors(); renderFonts(); }
-    setStatus(`Imported theme "${parsed.name}".`);
+    setStatus(`استُورد الثيم «${parsed.name}».`);
   }
 
   async function open() {
     const editor = getEditor();
-    if (!editor) { setStatus('Open a lecture first.'); return; }
+    if (!editor) { setStatus('افتح محاضرة أولًا.'); return; }
     try { savedKits = ((await api.brandKitsGet()) || {}).kits || []; } catch (_) { savedKits = []; }
     // Seed a fresh kit from the lecture's own detected palette.
     kit = freshKit(editor);
@@ -240,33 +240,33 @@
     backdrop.className = 'modal-backdrop';
     backdrop.innerHTML =
       `<div class="modal kit-modal">` +
-        `<div class="modal-head">🎨 Brand Kit ${editor.activeThemeKit() ? `<span class="kit-active">active: ${escapeHtml(editor.activeThemeKit())}</span>` : ''}</div>` +
+        `<div class="modal-head">🎨 حزمة الهوية ${editor.activeThemeKit() ? `<span class="kit-active">المفعّلة: ${escapeHtml(editor.activeThemeKit())}</span>` : ''}</div>` +
         `<div class="modal-body">` +
           `<div class="kit-bar">` +
-            `<label>Load kit <select id="kit-select"></select></label>` +
-            `<button data-new title="Start a new kit from this lecture's colors">＋ New</button>` +
-            `<button data-del class="danger-outline" title="Delete the selected saved kit">🗑</button>` +
+            `<label>فتح حزمة <select id="kit-select"></select></label>` +
+            `<button data-new title="ابدأ حزمة جديدة من ألوان هذه المحاضرة">＋ جديدة</button>` +
+            `<button data-del class="danger-outline" title="حذف الحزمة المحفوظة المحددة">🗑</button>` +
           `</div>` +
 
-          `<div class="kit-sec"><div class="kit-stitle">🎨 Colors <span class="kit-hint">— from this lecture's own variables</span></div>` +
+          `<div class="kit-sec"><div class="kit-stitle">🎨 الألوان <span class="kit-hint">— من متغيرات هذه المحاضرة نفسها</span></div>` +
             `<div class="kit-colors" id="kit-colors"></div></div>` +
 
-          `<div class="kit-sec"><div class="kit-stitle">🔤 Fonts <span class="kit-hint">— upload, then name each to match a lecture font</span></div>` +
+          `<div class="kit-sec"><div class="kit-stitle">🔤 الخطوط <span class="kit-hint">— ارفع خطوطك ثم سمِّ كل خط باسم خط في المحاضرة</span></div>` +
             `<div class="kit-fonts" id="kit-fonts"></div>` +
-            `<button data-addfont>＋ Upload fonts…</button>` +
-            (detectedFams.length ? `<div class="kit-fams" id="kit-fams"><span class="kit-hint">Lecture fonts (click to alias the last font):</span></div>` : '') +
+            `<button data-addfont>＋ رفع خطوط…</button>` +
+            (detectedFams.length ? `<div class="kit-fams" id="kit-fams"><span class="kit-hint">خطوط المحاضرة (انقر لربط آخر خط مرفوع بها):</span></div>` : '') +
           `</div>` +
 
-          `<div class="kit-sec"><div class="kit-stitle">🅰 خطوط عربية جاهزة <span class="kit-hint">— Arabic typography presets</span></div>` +
+          `<div class="kit-sec"><div class="kit-stitle">🅰 خطوط عربية جاهزة <span class="kit-hint">— تنسيقات خطوط جاهزة</span></div>` +
             `<div class="kit-fams" id="kit-typo">${TYPO_PRESETS.map(p => `<button class="kit-chip" data-typo="${p.id}">${escapeHtml(p.label)}</button>`).join('')}</div>` +
           `</div>` +
 
-          `<div class="kit-sec"><div class="kit-stitle">🧩 ملف الثيم <span class="kit-hint">— presets, export &amp; import a .theme.json</span></div>` +
+          `<div class="kit-sec"><div class="kit-stitle">🧩 ملف الثيم <span class="kit-hint">— ثيمات جاهزة، وتصدير واستيراد ملف ‎.theme.json</span></div>` +
             `<div class="kit-fams" id="kit-presets">` +
               `<button class="kit-chip" data-preset="MiM">✨ MiM</button>` +
-              `<button class="kit-chip" data-preset="MiM-print">🖨 MiM Print</button>` +
-              `<button class="kit-chip" data-preset="Slate">🩶 Slate</button>` +
-              `<button class="kit-chip" data-preset="Warm">🟤 Warm</button>` +
+              `<button class="kit-chip" data-preset="MiM-print">🖨 MiM طباعة</button>` +
+              `<button class="kit-chip" data-preset="Slate">🩶 رمادي</button>` +
+              `<button class="kit-chip" data-preset="Warm">🟤 دافئ</button>` +
             `</div>` +
             `<div class="kit-fams">` +
               `<button data-export-theme>⬇ تصدير الثيم</button>` +
@@ -275,12 +275,12 @@
           `</div>` +
         `</div>` +
         `<div class="modal-foot kit-foot">` +
-          `<input id="kit-name" placeholder="Kit name (e.g. Acme Corp)" spellcheck="false">` +
+          `<input id="kit-name" placeholder="اسم الحزمة (مثل: كلية الهندسة)" spellcheck="false">` +
           `<span class="spacer"></span>` +
-          `<button data-revert>Revert</button>` +
-          `<button data-apply>Apply</button>` +
-          `<button class="primary" data-save>Save &amp; Apply</button>` +
-          `<button data-close>Close</button>` +
+          `<button data-revert>تراجع عن الهوية</button>` +
+          `<button data-apply>تطبيق</button>` +
+          `<button class="primary" data-save>حفظ وتطبيق</button>` +
+          `<button data-close>إغلاق</button>` +
         `</div>` +
       `</div>`;
     document.body.appendChild(backdrop);
@@ -313,7 +313,7 @@
     backdrop.querySelector('[data-del]').addEventListener('click', deleteSelected);
     backdrop.querySelector('[data-addfont]').addEventListener('click', addFonts);
     backdrop.querySelector('[data-apply]').addEventListener('click', () => applyNow());
-    backdrop.querySelector('[data-revert]').addEventListener('click', () => { getEditor().removeThemeKit(); setStatus('Reverted to the lecture\'s original theme.'); refreshActive(); });
+    backdrop.querySelector('[data-revert]').addEventListener('click', () => { getEditor().removeThemeKit(); setStatus('عاد ثيم المحاضرة الأصلي.'); refreshActive(); });
     backdrop.querySelector('[data-save]').addEventListener('click', saveKit);
     backdrop.querySelector('[data-close]').addEventListener('click', close);
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
@@ -337,7 +337,7 @@
   function renderColors() {
     const box = modal.querySelector('#kit-colors');
     const names = Object.keys(kit.vars);
-    if (!names.length) { box.innerHTML = `<p class="kit-hint">This lecture declares no CSS color variables — colors can't be recolored automatically.</p>`; return; }
+    if (!names.length) { box.innerHTML = `<p class="kit-hint">لا تعرّف هذه المحاضرة متغيرات ألوان CSS — لا يمكن إعادة تلوينها تلقائيًا.</p>`; return; }
     box.innerHTML = '';
     names.forEach(name => {
       const row = document.createElement('div');
@@ -357,16 +357,16 @@
 
   function renderFonts() {
     const box = modal.querySelector('#kit-fonts');
-    if (!kit.fonts.length) { box.innerHTML = `<p class="kit-hint">No fonts uploaded. Charts, diagrams and text will use the lecture's current fonts.</p>`; return; }
+    if (!kit.fonts.length) { box.innerHTML = `<p class="kit-hint">لم تُرفع خطوط. ستستخدم الرسوم والمخططات والنصوص خطوط المحاضرة الحالية.</p>`; return; }
     box.innerHTML = '';
     kit.fonts.forEach((f, i) => {
       const row = document.createElement('div');
       row.className = 'kit-font';
       row.innerHTML =
         `<span class="kit-file" title="${escapeAttr(f.fileName || '')}">${escapeHtml(f.fileName || f.family)}</span>` +
-        `<input type="text" class="kit-fam" value="${escapeAttr(f.family)}" placeholder="Family name" spellcheck="false">` +
+        `<input type="text" class="kit-fam" value="${escapeAttr(f.family)}" placeholder="اسم عائلة الخط" spellcheck="false">` +
         `<select class="kit-weight">${[100,200,300,400,500,600,700,800,900].map(w => `<option value="${w}"${+f.weight === w ? ' selected' : ''}>${w}</option>`).join('')}</select>` +
-        `<button class="kit-fdel danger-outline" title="Remove">×</button>`;
+        `<button class="kit-fdel danger-outline" title="إزالة">×</button>`;
       const fam = row.querySelector('.kit-fam');
       fam.addEventListener('focus', () => { lastFontFamilyInput = { i, el: fam }; });
       fam.addEventListener('change', () => { kit.fonts[i].family = fam.value.trim(); });
@@ -382,11 +382,11 @@
     if (!picked || !picked.length) return;
     picked.forEach(f => kit.fonts.push(f));
     renderFonts();
-    setStatus(`Added ${picked.length} font file(s). Name each to match a lecture font, then Apply.`);
+    setStatus(`أُضيف ${picked.length} ملف خط. سمِّ كل خط باسم خط في المحاضرة، ثم اضغط «تطبيق».`);
   }
 
   function aliasLastFont(family) {
-    if (!kit.fonts.length) { setStatus('Upload a font first, then click a lecture font to alias it.'); return; }
+    if (!kit.fonts.length) { setStatus('ارفع خطًا أولًا، ثم انقر على خط من خطوط المحاضرة لربطه به.'); return; }
     const idx = lastFontFamilyInput ? lastFontFamilyInput.i : kit.fonts.length - 1;
     kit.fonts[idx].family = family;
     renderFonts();
@@ -411,7 +411,7 @@
       const lostN = audit.lost ? audit.lost.length : 0;
       const colorMsg = `${audit.recolored.length}/${audit.recolored.length + audit.missed.length + lostN} colors remapped`;
       const lostMsg = lostN ? ` ⚠ ${lostN} blocked by the deck's own CSS — run 🩺.` : '';
-      setStatus(`Brand kit applied — ${fontMsg}, ${colorMsg}.${lostMsg}`);
+      setStatus(`طُبّقت حزمة الهوية — ${fontMsg}، ${colorMsg}.${lostMsg}`);
     }
   }
   function liveApply() {
@@ -428,7 +428,7 @@
 
   async function saveKit() {
     const name = collectName();
-    if (!name) { setStatus('Give the kit a name first.'); modal.querySelector('#kit-name').focus(); return; }
+    if (!name) { setStatus('سمِّ الحزمة أولًا.'); modal.querySelector('#kit-name').focus(); return; }
     applyNow();
     let res;
     try { res = await api.brandKitsSave(kit); } catch (e) { res = { ok: false, error: String(e) }; }
@@ -436,7 +436,7 @@
       const i = savedKits.findIndex(k => k.name === name);
       if (i >= 0) savedKits[i] = JSON.parse(JSON.stringify(kit)); else savedKits.push(JSON.parse(JSON.stringify(kit)));
       renderKitSelect();
-      setStatus(`Saved brand kit "${name}" and applied it.`);
+      setStatus(`حُفظت حزمة الهوية «${name}» وطُبّقت.`);
     } else {
       setStatus('Save failed: ' + ((res && res.error) || 'unknown'));
     }
@@ -445,11 +445,11 @@
   async function deleteSelected() {
     const sel = modal.querySelector('#kit-select');
     const name = sel.value;
-    if (!name) { setStatus('Pick a saved kit to delete.'); return; }
+    if (!name) { setStatus('اختر حزمة محفوظة لحذفها.'); return; }
     try { await api.brandKitsDelete(name); } catch (_) {}
     savedKits = savedKits.filter(k => k.name !== name);
     renderKitSelect();
-    setStatus(`Deleted brand kit "${name}".`);
+    setStatus(`حُذفت حزمة الهوية «${name}».`);
   }
 
   // --- helpers ---

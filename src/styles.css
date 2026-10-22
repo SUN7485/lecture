@@ -63,17 +63,26 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   outline: none; box-shadow: var(--ring); }
 
 /* ---------- Toolbar ---------- */
+/* Two deliberate rows (file + export / editing tools) instead of one row
+   that wrapped wherever the window happened to cut it. */
 #toolbar {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   padding: 8px 12px;
   background: linear-gradient(180deg, #16224a, var(--panel));
   border-bottom: 1px solid #04070f;
   box-shadow: 0 1px 0 rgba(111, 242, 220, .06), 0 6px 24px rgba(0, 0, 0, .4);
   z-index: 5;
-  flex-wrap: wrap;
 }
+.tb-row { display: flex; align-items: center; gap: 8px; min-width: 0;
+          overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tb-row::-webkit-scrollbar { display: none; }
+.tb-row > * { flex: 0 0 auto; }
+/* undo/redo arrows point the way time runs in an RTL interface */
+#btn-undo .ic, #btn-redo .ic { transform: scaleX(-1); }
+@media (max-width: 1250px) { .tb-row .lbl:not(.keep) { display: none; } .group .glabel { display: none; } }
 #toolbar .brand {
   display: inline-flex; align-items: center; gap: 8px;
   font-family: var(--font-display); font-weight: 600; white-space: nowrap; color: var(--text);
@@ -88,8 +97,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   border-radius: 10px;
 }
 .group .glabel {
-  font-size: 9.5px; font-weight: 700; text-transform: uppercase;
-  color: var(--faint); letter-spacing: .6px; margin: 0 4px 0 2px;
+  font-size: 10.5px; font-weight: 700;
+  color: var(--faint); margin: 0 4px 0 2px;
 }
 
 button {
@@ -151,7 +160,7 @@ button.big { padding: 11px 24px; font-size: 15px; margin-top: 18px; border-radiu
 #panel {
   width: 220px; flex: 0 0 220px;
   background: var(--panel);
-  border-right: 1px solid #04070f;
+  border-inline-end: 1px solid #04070f;
   display: flex; flex-direction: column; overflow: hidden;
 }
 .panel-section { display: flex; flex-direction: column; min-height: 0; }
@@ -245,7 +254,7 @@ button.big { padding: 11px 24px; font-size: 15px; margin-top: 18px; border-radiu
 .asset:hover { border-color: var(--line); }
 .asset:active { cursor: grabbing; }
 .asset-del {
-  position: absolute; top: 2px; right: 2px; z-index: 2;
+  position: absolute; top: 2px; inset-inline-end: 2px; z-index: 2;
   width: 20px; height: 20px; min-width: 0; padding: 0;
   line-height: 1; font-size: 15px; font-weight: 700;
   border-radius: 50%; border: 1px solid rgba(255, 95, 109, .5);
@@ -260,6 +269,10 @@ button.big { padding: 11px 24px; font-size: 15px; margin-top: 18px; border-radiu
 .asset .name { font-size: 10px; color: var(--faint); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- Stage ---------- */
+/* The desk is geometry: zoom scales from the top-left corner, so it lays out
+   LTR inside the RTL app (or the slide is pushed past the right edge). */
+#stage { direction: ltr; }
+#empty-state, #slide-list, #asset-list { direction: rtl; }
 #stage { flex: 1; position: relative; overflow: auto;
   background:
     radial-gradient(1100px 460px at 50% -10%, rgba(46, 230, 200, .05), transparent 65%),
@@ -573,7 +586,7 @@ button.big { padding: 11px 24px; font-size: 15px; margin-top: 18px; border-radiu
 
 /* ---------- Brand Kit modal ---------- */
 .kit-modal { width: 580px; }
-.kit-active { font-size: 11px; font-weight: 600; color: var(--ai); margin-left: 8px; }
+.kit-active { font-size: 11px; font-weight: 600; color: var(--ai); margin-inline-start: 8px; }
 .kit-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12.5px; }
 .kit-bar select { font: inherit; font-size: 12.5px; padding: 4px 6px; border: 1px solid var(--line);
                   border-radius: 6px; background: var(--bg); color: var(--text); }
