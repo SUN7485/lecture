@@ -59,45 +59,9 @@
   }
   async function clearAutosave() { try { await idbPut('autosave', 'cur', null); } catch (_) {} }
 
-  // ---------- Arabic-first pack (011E): RTL + Arabic UI when the browser asks for it ----------
-  // Simple lookup, no i18n framework — English is the default/fallback.
-  const AR_LABELS = {
-    // texts land in each button's .lbl span — icons (SVG) survive the swap.
-    brand: { text: 'محرر الشرائح' },
-    'btn-open': { text: 'فتح', title: 'فتح ملف HTML' },
-    'btn-add-text': { text: 'نص', title: 'إدراج كتلة نص' },
-    'btn-add-image': { text: 'صورة', title: 'إدراج صورة (تُضمَّن داخل الملف)' },
-    'btn-undo': { title: 'تراجع (Ctrl+Z)' },
-    'btn-redo': { title: 'إعادة (Ctrl+Y)' },
-    'btn-zoom-label': { title: 'ملء النافذة' },
-    'btn-export': { text: 'PDF', title: "تصدير PDF — اختر «Save as PDF» في نافذة الطباعة" },
-    'btn-save': { text: 'حفظ HTML', title: 'تنزيل ملف HTML المعدّل (Ctrl+S)' },
-    'btn-open-2': { text: 'اختر ملف HTML' },
-    'btn-theme': { text: 'الثيم', title: 'الثيمات الجاهزة، تصدير واستيراد .theme.json' },
-    'btn-fonts': { title: 'مكتبة الخطوط — عناوين، نص، أو العنصر المحدد' },
-    'btn-present': { text: 'عرض', title: 'عرض الشرائح ملء الشاشة + نافذة الملقّن' },
-  };
-  function applyArabicUi() {
-    document.documentElement.setAttribute('dir', 'rtl');
-    document.documentElement.setAttribute('lang', 'ar');
-    Object.keys(AR_LABELS).forEach((id) => {
-      const el = id === 'brand' ? document.querySelector('.toolbar .brand, #toolbar .brand') : document.getElementById(id);
-      if (!el) return;
-      const l = AR_LABELS[id];
-      if (l.text) { const lbl = el.querySelector('.lbl'); (lbl || el).textContent = l.text; }
-      if (l.title) el.title = l.title;
-    });
-    const h1 = document.querySelector('#empty-state h1');
-    if (h1) h1.textContent = 'حرّر أي صفحة HTML وكأنها عرض شرائح';
-    const p1 = document.querySelector('#empty-state p');
-    if (p1) p1.innerHTML = 'أفلت ملف .html هنا — من ChatGPT أو Claude أو Gemini؟ عدّل النص، وحرّك أي عنصر أو غيّر حجمه، ثم نزّل الملف أو صدّره PDF.';
-    const p2 = document.querySelector('#empty-state p + p');
-    if (p2) p2.innerHTML = '<strong>لا يُرفع شيء لأي خادم.</strong> كل شيء يعمل داخل متصفحك.';
-    const alt = document.querySelector('#empty-state .alt');
-    if (alt) { const icon = alt.querySelector('svg'); alt.textContent = 'أو ابدأ من قالب عربي جاهز ←'; if (icon) alt.prepend(icon); }
-    status('افتح ملف HTML للبدء.');
-  }
-  if (navigator.language && navigator.language.toLowerCase().startsWith('ar')) applyArabicUi();
+  // Arabic-first: index.html ships in Arabic and RTL. (Until 2026-10 it shipped
+  // English and swapped labels only when navigator.language was Arabic, so most
+  // visitors met an English editor behind an Arabic landing page.)
 
   // ---------- open ----------
   async function openFile(file) {
@@ -107,13 +71,13 @@
     saveName = file.name.replace(/\.html?$/i, '') + '-edited.html';
     const html = await file.text();
     loadIntoIframe(html);
-    status('Opened: ' + file.name);
+    status('تم فتح: ' + file.name);
   }
 
   // ---------- Word import (010B): .docx -> mammoth -> DeckImporter -> deck ----------
   async function openDocx(file) {
-    if (!window.mammoth || !window.DeckImporter) { status('Word import is unavailable (mammoth failed to load).'); return; }
-    status('Converting ' + file.name + '…');
+    if (!window.mammoth || !window.DeckImporter) { status('استيراد Word غير متاح الآن (تعذّر تحميل مكتبة mammoth).'); return; }
+    status('جارٍ تحويل ' + file.name + '…');
     try {
       const arrayBuffer = await file.arrayBuffer();
       const result = await window.mammoth.convertToHtml({ arrayBuffer });
@@ -121,9 +85,9 @@
       const deckHtml = window.DeckImporter.fromWordHtml(result.value, { title });
       saveName = title + '-edited.html';
       loadIntoIframe(deckHtml);
-      status('Imported from Word: ' + file.name + (result.messages.length ? ' (' + result.messages.length + ' mammoth notice(s))' : ''));
+      status('تم الاستيراد من Word: ' + file.name + (result.messages.length ? ' (' + result.messages.length + ' ملاحظة)' : ''));
     } catch (e) {
-      status('Word import failed: ' + e.message);
+      status('تعذّر استيراد ملف Word: ' + e.message);
     }
   }
 
@@ -153,7 +117,7 @@
       };
       editor.onReplaceRequest = () => { imgMode = 'replace'; imgInput.click(); };
       editor.onPlaced = (type) => {
-        status(type ? 'Inserted. Click it to style or move it.' : 'Insert cancelled.');
+        status(type ? 'تم الإدراج. انقر عليه لتنسيقه أو تحريكه.' : 'أُلغي الإدراج.');
       };
       editor.onSaveRequest = () => saveHtml();
       editor.onContentResize = () => applyZoom();
@@ -164,7 +128,7 @@
       if (window.SlideDoctor) runDoctor(); // seed the 🩺 badge count for this deck
       fitZoom();
       saveRecent(); // 019: remember this deck for the empty-state recents list
-      status('Ready. Double-click any text to edit it; drag any element to move it.');
+      status('جاهز. انقر مرتين على أي نص لتحريره، واسحب أي عنصر لتحريكه.');
       // Consumed here, not at click time: the deck has to be on screen before
       // pointing at the button that acts on it.
       if (pendingIntent) { applyIntent(pendingIntent); pendingIntent = null; }
@@ -503,7 +467,7 @@
   }
 
   function toggleDoctor() {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     drOpen = !drOpen;
     ensureDoctorDock().classList.toggle('open', drOpen);
     if (drOpen) { runDoctor(); renderDoctor(); }
@@ -530,7 +494,7 @@
   // ---------- save (019): save-in-place via File System Access, download fallback ----------
   const HAS_FS = 'showSaveFilePicker' in window;
   async function saveHtml() {
-    if (!editor) { status('Nothing to save.'); return; }
+    if (!editor) { status('لا يوجد ما يُحفظ.'); return; }
     const html = editor.getCleanHtml();
     if (HAS_FS) {
       try {
@@ -545,10 +509,10 @@
         await w.close();
         dirty = false;
         await clearAutosave();
-        status('Saved: ' + fileHandle.name);
+        status('تم الحفظ: ' + fileHandle.name);
         return;
       } catch (e) {
-        if (e && e.name === 'AbortError') { status('Save cancelled.'); return; }
+        if (e && e.name === 'AbortError') { status('أُلغي الحفظ.'); return; }
         // any other FS error (permission, disk) → fall through to the download path
       }
     }
@@ -560,7 +524,7 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     dirty = false;
     await clearAutosave();
-    status('Downloaded: ' + saveName);
+    status('تم التنزيل: ' + saveName);
   }
 
   // ---------- open via File System Access so save-in-place has a handle (019) ----------
@@ -615,7 +579,7 @@
   function openRecent(rec) {
     fileHandle = null; saveName = rec.name || saveName;
     loadIntoIframe(rec.html);
-    status('Opened recent: ' + saveName);
+    status('تم فتح: ' + saveName);
   }
   function offerRecovery(rec) {
     const bar = document.createElement('div');
@@ -667,7 +631,7 @@
     const list = Array.from(files);
     if (imgMode === 'replace') {
       const rd = new FileReader();
-      rd.onload = () => { editor.replaceSelected(rd.result); status('Replaced image.'); };
+      rd.onload = () => { editor.replaceSelected(rd.result); status('تم استبدال الصورة.'); };
       rd.readAsDataURL(list[0]);
       return;
     }
@@ -677,7 +641,7 @@
       rd.onload = () => editor.insertImageInto(rd.result, f.name, slide);
       rd.readAsDataURL(f);
     });
-    status('Image added — drag it where you want it.');
+    status('أُضيفت الصورة — اسحبها إلى المكان الذي تريده.');
   }
 
   // ---------- export PDF (browser print dialog → "Save as PDF") ----------
@@ -808,8 +772,8 @@
 
   let printFrame = null;
   async function exportPdf() {
-    if (!editor) { status('Open a file first.'); return; }
-    status('Preparing PDF — pick "Save as PDF" in the print dialog.');
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
+    status('جارٍ تجهيز PDF — اختر «Save as PDF» في نافذة الطباعة.');
     if (printFrame) printFrame.remove();
     // Real (off-screen) size: zero-size frames mis-evaluate media queries.
     printFrame = document.createElement('iframe');
@@ -849,21 +813,21 @@
     scrollToSlide(slides[idx]);
   }
   function slideDeleteAction() {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     const s = currentSlideEl();
-    if (!s) { status('No slide to delete.'); return; }
-    if (editor.slides().length <= 1) { status('Cannot delete the only slide.'); return; }
+    if (!s) { status('لا توجد شريحة لحذفها.'); return; }
+    if (editor.slides().length <= 1) { status('لا يمكن حذف الشريحة الوحيدة.'); return; }
     editor.deleteSlide(s);
-    status('Slide deleted.');
+    status('تم حذف الشريحة.');
   }
   const ACTIONS = [
     { id: 'open', ar: 'فتح ملف', en: 'Open file', run: () => fileInput.click() },
     { id: 'save', ar: 'حفظ', en: 'Save', run: saveHtml },
     { id: 'export-pdf', ar: 'تصدير PDF', en: 'Export PDF', run: exportPdf },
-    { id: 'insert-text', ar: 'إدراج نص', en: 'Insert text', run: () => { if (!editor) return status('Open a file first.'); editor.beginPlace('text'); status('Click on the page where the text should go… (Esc cancels)'); } },
-    { id: 'insert-image', ar: 'إدراج صورة', en: 'Insert image', run: () => { if (!editor) return status('Open a file first.'); imgMode = 'insert'; imgInput.click(); } },
-    { id: 'add-slide', ar: 'إضافة شريحة', en: 'Add slide', run: () => { if (!editor) return status('Open a file first.'); editor.addSlide(currentSlideEl()); status('New slide added. Edit its title and content.'); } },
-    { id: 'dup-slide', ar: 'تكرار الشريحة', en: 'Duplicate slide', run: () => { if (!editor) return status('Open a file first.'); editor.duplicateSlide(currentSlideEl()); status('Slide duplicated.'); } },
+    { id: 'insert-text', ar: 'إدراج نص', en: 'Insert text', run: () => { if (!editor) return status('افتح ملفًا أولًا.'); editor.beginPlace('text'); status('انقر في المكان الذي تريد وضع النص فيه… (Esc للإلغاء)'); } },
+    { id: 'insert-image', ar: 'إدراج صورة', en: 'Insert image', run: () => { if (!editor) return status('افتح ملفًا أولًا.'); imgMode = 'insert'; imgInput.click(); } },
+    { id: 'add-slide', ar: 'إضافة شريحة', en: 'Add slide', run: () => { if (!editor) return status('افتح ملفًا أولًا.'); editor.addSlide(currentSlideEl()); status('أُضيفت شريحة جديدة — عدّل عنوانها ومحتواها.'); } },
+    { id: 'dup-slide', ar: 'تكرار الشريحة', en: 'Duplicate slide', run: () => { if (!editor) return status('افتح ملفًا أولًا.'); editor.duplicateSlide(currentSlideEl()); status('تم تكرار الشريحة.'); } },
     { id: 'del-slide', ar: 'حذف الشريحة', en: 'Delete slide', run: slideDeleteAction },
     { id: 'next-slide', ar: 'الشريحة التالية', en: 'Next slide', run: () => gotoSlide(1) },
     { id: 'prev-slide', ar: 'الشريحة السابقة', en: 'Previous slide', run: () => gotoSlide(-1) },
@@ -884,7 +848,7 @@
     if (cmdkEl) return cmdkEl;
     cmdkEl = document.createElement('div');
     cmdkEl.id = 'cmdk';
-    cmdkEl.innerHTML = '<div class="cmdk-box"><input class="cmdk-input" placeholder="اكتب أمرًا… (Type a command…)"><ul class="cmdk-list"></ul></div>';
+    cmdkEl.innerHTML = '<div class="cmdk-box"><input class="cmdk-input" placeholder="اكتب أمرًا…"><ul class="cmdk-list"></ul></div>';
     cmdkEl.addEventListener('mousedown', (e) => { if (e.target === cmdkEl) closeCmdk(); });
     const input = cmdkEl.querySelector('.cmdk-input');
     input.addEventListener('input', () => { cmdkIndex = 0; renderCmdk(input.value); });
@@ -906,7 +870,7 @@
     cmdkFiltered.forEach((a, i) => {
       const li = document.createElement('li');
       li.className = 'cmdk-row' + (i === cmdkIndex ? ' on' : '');
-      li.textContent = `${a.ar} — ${a.en}`;
+      li.textContent = a.ar; // English stays searchable (filter above), not shown
       li.addEventListener('mousedown', (e) => { e.preventDefault(); runCmdk(i); });
       list.appendChild(li);
     });
@@ -970,7 +934,7 @@
   };
   let themeName = '';
   async function applyBuiltinPreset(name) {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     if (name === 'MiM') {
       // The licensed Lyon/Diodrum files stay desktop-only, but colors-alone
       // made this button look like it did nothing (decks authored on the MiM
@@ -1040,12 +1004,12 @@
     return fonts;
   }
   function exportTheme() {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     const vars = {};
     editor.detectVars().forEach(v => { vars[v.name] = v.declared || v.value; });
     const style = editor.doc.getElementById('ve-theme');
     const fonts = style ? extractLiveFonts(style.textContent) : [];
-    const name = themeName || editor.activeThemeKit() || 'Untitled';
+    const name = themeName || editor.activeThemeKit() || 'ثيم بلا اسم';
     const json = window.ThemeIO.toJson({ name, vars, fonts, typography: typoState });
     const blob = new Blob([json], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1053,20 +1017,20 @@
     a.download = name.replace(/[^\w-]+/g, '-') + '.theme.json';
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    status(`Exported "${name}" theme.`);
+    status(`تم تصدير الثيم «${name}».`);
     if (themePop) themePop.classList.remove('open');
   }
   async function importThemeFile(file) {
     if (!editor || !file) return;
     let parsed;
     try { parsed = window.ThemeIO.parse(await file.text()); }
-    catch (e) { status('Theme import failed: ' + e.message); return; }
+    catch (e) { status('تعذّر استيراد الثيم: ' + e.message); return; }
     editor.applyThemeKit(parsed);
     typoState = Object.assign({ heading: null, body: null }, parsed.typography || {});
     const st = editor.doc.getElementById('ve-theme');
     if (st) st.dataset.veTypo = JSON.stringify(typoState);
     themeName = parsed.name;
-    status(`Imported theme "${parsed.name}".`);
+    status(`تم استيراد الثيم «${parsed.name}».`);
     if (themePop) themePop.classList.remove('open');
   }
 
@@ -1076,10 +1040,10 @@
     themePop = document.createElement('div');
     themePop.id = 'theme-pop';
     themePop.innerHTML =
-      '<div class="tp-title">Presets</div>' +
-      '<div class="tp-row"><button data-preset="MiM">✨ MiM</button><button data-preset="Slate">🩶 Slate</button><button data-preset="Warm">🟤 Warm</button></div>' +
-      '<div class="tp-title">.theme.json</div>' +
-      '<div class="tp-row"><button data-export>⬇ Export</button><button data-import>⬆ Import</button></div>';
+      '<div class="tp-title">ثيمات جاهزة</div>' +
+      '<div class="tp-row"><button data-preset="MiM">✨ MiM</button><button data-preset="Slate">🩶 رمادي</button><button data-preset="Warm">🟤 دافئ</button></div>' +
+      '<div class="tp-title">ملف الثيم (‎.theme.json)</div>' +
+      '<div class="tp-row"><button data-export>⬇ تصدير</button><button data-import>⬆ استيراد</button></div>';
     themePop.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => applyBuiltinPreset(b.dataset.preset)));
     themePop.querySelector('[data-export]').addEventListener('click', exportTheme);
     themeFileInput = document.createElement('input');
@@ -1090,12 +1054,20 @@
     document.body.appendChild(themeFileInput);
     return themePop;
   }
+  // Under the button that opened it, its start edge aligned with the button's
+  // (the right edge, in RTL), and never past either side of the window.
+  function placePopover(pop, btn, width) {
+    const r = btn.getBoundingClientRect();
+    const rtl = document.documentElement.dir === 'rtl';
+    const want = rtl ? r.right - width : r.left;
+    pop.style.left = Math.max(4, Math.min(want, window.innerWidth - width - 4)) + 'px';
+    pop.style.top = (r.bottom + 8) + 'px';
+  }
   function toggleThemePop() {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     const pop = ensureThemePop();
     const btn = $('#btn-theme');
-    const r = btn.getBoundingClientRect();
-    pop.style.left = Math.max(4, r.left) + 'px';
+    placePopover(pop, btn, 236);
     pop.classList.toggle('open');
   }
   document.addEventListener('mousedown', (e) => {
@@ -1190,7 +1162,7 @@
 
   // role: 'heading' | 'body' | 'selection'. faces==null means already embedded.
   async function assignFont(role, family, getFaces) {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     if (role === 'selection' && !editor.selected) { status('اختر عنصرًا في الشريحة أولًا ثم طبّق الخط.'); return; }
     let faces = [];
     if (!embeddedFams.has(family)) {
@@ -1328,13 +1300,12 @@
   }
 
   function toggleFontsPop() {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     const pop = ensureFontsPop();
     loadFontPreviews();
     readTypoFromDeck();
     renderFontsPop();
-    const r = $('#btn-fonts').getBoundingClientRect();
-    pop.style.left = Math.max(4, Math.min(r.left, window.innerWidth - 336)) + 'px';
+    placePopover(pop, $('#btn-fonts'), 330);
     pop.classList.toggle('open');
   }
 
@@ -1355,12 +1326,12 @@
   fileInput.addEventListener('change', () => { openFile(fileInput.files[0]); fileInput.value = ''; });
   imgInput.addEventListener('change', () => { handleImages(imgInput.files); imgInput.value = ''; });
   $('#btn-add-text').addEventListener('click', () => {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     editor.beginPlace('text');
-    status('Click on the page where the text should go… (Esc cancels)');
+    status('انقر في المكان الذي تريد وضع النص فيه… (Esc للإلغاء)');
   });
   $('#btn-add-image').addEventListener('click', () => {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     imgMode = 'insert';
     imgInput.click();
   });
@@ -1368,28 +1339,28 @@
   $('#btn-redo').addEventListener('click', () => editor && editor.redo());
   $('#btn-doctor').addEventListener('click', toggleDoctor);
   $('#btn-numerals').addEventListener('click', () => {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     // Untouched decks carry plain Western digits, so an unset attribute means
     // 'latin' — the first click's default action is to convert TO Arabic-Indic.
     const cur = editor.doc.documentElement.getAttribute('data-ve-numerals') || 'latin';
     const next = cur === 'ar' ? 'latin' : 'ar';
     editor.setNumerals(next);
-    status(next === 'ar' ? 'Converted to Arabic-Indic numerals (١٢٣).' : 'Converted to Western numerals (123).');
+    status(next === 'ar' ? 'تحوّلت الأرقام إلى الهندية (١٢٣).' : 'تحوّلت الأرقام إلى العربية الغربية (123).');
   });
   $('#btn-date-hijri').addEventListener('click', () => {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     editor.insertDate('hijri');
-    status('Hijri date inserted.');
+    status('أُدرج التاريخ الهجري.');
   });
   $('#btn-date-greg').addEventListener('click', () => {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     editor.insertDate('greg');
-    status('Gregorian date inserted.');
+    status('أُدرج التاريخ الميلادي.');
   });
   $('#btn-theme').addEventListener('click', toggleThemePop);
   $('#btn-fonts').addEventListener('click', toggleFontsPop);
   $('#btn-present').addEventListener('click', () => {
-    if (!editor) { status('Open a file first.'); return; }
+    if (!editor) { status('افتح ملفًا أولًا.'); return; }
     if (window.Presenter) window.Presenter.start(editor);
   });
   $('#btn-zoom-in').addEventListener('click', () => setZoom(zoom * 1.2));
@@ -1406,8 +1377,8 @@
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveHtml(); }
     // ---- 009 slide hotkeys: skip entirely while typing text elsewhere ----
     else if (typingElsewhere()) { /* no-op */ }
-    else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); editor.addSlide(currentSlideEl()); status('New slide added. Edit its title and content.'); }
-    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); editor.duplicateSlide(currentSlideEl()); status('Slide duplicated.'); }
+    else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); editor.addSlide(currentSlideEl()); status('أُضيفت شريحة جديدة — عدّل عنوانها ومحتواها.'); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); editor.duplicateSlide(currentSlideEl()); status('تم تكرار الشريحة.'); }
     else if ((e.ctrlKey || e.metaKey) && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); slideDeleteAction(); }
     else if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); gotoSlide(1); }
     else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); gotoSlide(-1); }
@@ -1443,29 +1414,29 @@
   async function importPdfFile(file) {
     if (!file) return;
     if (file.size > 25 * 1024 * 1024) {
-      status('That PDF is larger than the 25 MB limit.');
+      status('حجم ملف PDF أكبر من الحد المسموح (25 ميغابايت).');
       return;
     }
-    status('Rebuilding ' + file.name + ' — this can take a few seconds…');
+    status('جارٍ إعادة بناء ' + file.name + ' — قد يستغرق ذلك بضع ثوانٍ…');
     try {
       const r = await window.StudioApi.convertPdf(file);
       currentModelId = r.modelId;
       saveName = r.name + '-edited.html';
       loadIntoIframe(r.html);
       const s = r.stats || {};
-      status('Rebuilt ' + file.name + ': ' + s.pages + ' slide(s), ' + s.objects +
-             ' objects in ' + ((s.ms || 0) / 1000).toFixed(1) + 's. Edit it, then export PDF or PPTX.');
+      status('تمت إعادة بناء ' + file.name + ': ' + s.pages + ' شريحة و' + s.objects +
+             ' عنصرًا في ' + ((s.ms || 0) / 1000).toFixed(1) + ' ث. عدّلها ثم صدّرها PDF أو PowerPoint.');
     } catch (e) {
-      status('PDF import failed: ' + e.message);
+      status('تعذّر استيراد ملف PDF: ' + e.message);
     }
   }
 
   async function exportPptxViaServer() {
     if (!currentModelId) {
-      status('PPTX export needs a deck rebuilt from a PDF — use Import PDF first.');
+      status('تصدير PowerPoint يحتاج عرضًا أُعيد بناؤه من PDF — استخدم «استيراد PDF» أولًا.');
       return;
     }
-    status('Building your PowerPoint file…');
+    status('جارٍ بناء ملف PowerPoint…');
     try {
       // Send the canvas, not just the handle: the model is authoritative, but
       // it must be told what the user changed or the export silently ships the
@@ -1473,24 +1444,24 @@
       // absent from the PPTX, same session.)
       const canvas = window.StudioApi.collectCanvas(iframe.contentDocument);
       await window.StudioApi.exportPptx(currentModelId, saveName.replace(/-edited\.html$/, ''), canvas);
-      status('PowerPoint file downloaded.');
+      status('تم تنزيل ملف PowerPoint.');
     } catch (e) {
       // 410: the server dropped the model after its TTL. Say what to do, not
       // just what failed.
       status(e.status === 410
-        ? 'That document expired on the server. Import the PDF again to export PPTX.'
-        : 'PPTX export failed: ' + e.message);
+        ? 'انتهت صلاحية هذا المستند على الخادم. استورد ملف PDF مرة أخرى لتصدير PowerPoint.'
+        : 'تعذّر تصدير PowerPoint: ' + e.message);
     }
   }
 
   async function exportPdfViaServer() {
-    if (!editor) { status('Open or import a lecture first.'); return; }
-    status('Rendering your PDF…');
+    if (!editor) { status('افتح محاضرة أو استوردها أولًا.'); return; }
+    status('جارٍ تجهيز ملف PDF…');
     try {
       await window.StudioApi.exportPdf(editor.getCleanHtml(), saveName.replace(/-edited\.html$/, ''));
-      status('PDF downloaded.');
+      status('تم تنزيل ملف PDF.');
     } catch (e) {
-      status('PDF export failed: ' + e.message);
+      status('تعذّر تصدير PDF: ' + e.message);
     }
   }
 
@@ -1511,6 +1482,10 @@
       const el = document.getElementById(id);
       if (el) el.hidden = false;
     }
+    // One primary on the start screen: rebuilding a PDF is the job only the
+    // hosted build can do, so it leads unless the landing page chose otherwise.
+    const ctaHtml = document.getElementById('btn-open-2');
+    if (ctaHtml) ctaHtml.classList.remove('primary');
     // The local-only promise stops being true the moment a backend exists.
     const localClaim = document.getElementById('privacy-local');
     if (localClaim) localClaim.hidden = true;
@@ -1530,8 +1505,11 @@
     if (wanted) {
       pendingIntent = wanted.intent ? { kind: wanted.intent, hint: null } : null;
       const cta = document.getElementById(wanted.cta);
+      for (const id of ['btn-open-pdf', 'btn-open-2']) {
+        const b = document.getElementById(id);
+        if (b) b.classList.toggle('primary', id === wanted.cta);
+      }
       if (cta) {
-        cta.classList.add('primary');
         try { cta.focus({ preventScroll: true }); } catch (_) { cta.focus(); }
       }
       status(wanted.say);
@@ -1548,7 +1526,7 @@
     if (be) {
       const fresh = be.cloneNode(true);   // drop the print-dialog handler
       be.parentNode.replaceChild(fresh, be);
-      fresh.title = 'Export a PDF at the deck\u2019s true page size';
+      fresh.title = 'تصدير PDF بمقاس صفحات العرض الأصلي';
       fresh.addEventListener('click', exportPdfViaServer);
     }
   })();
@@ -1565,9 +1543,9 @@
       const html = await res.text();
       saveName = name + '-edited.html';
       loadIntoIframe(html);
-      status('Template loaded: ' + name);
+      status('تم فتح القالب: ' + name);
     } catch (_) {
-      status('Could not load template "' + name + '".');
+      status('تعذّر فتح القالب «' + name + '».');
     }
   })();
 })();

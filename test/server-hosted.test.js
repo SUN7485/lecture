@@ -106,7 +106,9 @@ test('the filesystem is not addressable', async () => {
 test('sends the security headers a public service needs', async () => {
   const r = await fetch(`${BASE}/`);
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
-  assert.equal(r.headers.get('x-frame-options'), 'DENY');
+  // Same-origin framing is needed for template previews; foreign framing is not.
+  assert.equal(r.headers.get('x-frame-options'), 'SAMEORIGIN');
+  assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'self'(;|$)/);
   assert.match(r.headers.get('content-security-policy'), /object-src 'none'/);
   // Stale JS after a deploy is an invisible outage; assets must revalidate.
   assert.equal(r.headers.get('cache-control'), 'no-store');
@@ -425,7 +427,11 @@ test('the landing page does not claim files are never uploaded', async () => {
   // server. That stopped being true the moment PDF rebuilding existed, and a
   // false privacy claim is not a cosmetic bug.
   const html = await (await fetch(`${BASE}/`)).text();
-  assert.ok(!/لا\s*يُرفع\s*أي\s*ملف/.test(html),
-    'the landing page still promises that nothing is ever uploaded');
+  // Every phrasing of "nothing is uploaded" the page has used. The first
+  // version of this test checked only one, and a second section kept saying
+  // "your files never leave your device. Ever." with a "no uploads" badge.
+  for (const claim of [/لا\s*يُرفع\s*أي\s*ملف/, /لا\s*تغادر\s*جهازك/, /بلا\s*رفع/, /لا\s*رفع/]) {
+    assert.ok(!claim.test(html), `the landing page still promises that nothing is ever uploaded (${claim})`);
+  }
   assert.match(html, /\/source/, 'the AGPL source offer is not linked (section 13)');
 });

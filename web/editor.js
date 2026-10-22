@@ -477,6 +477,22 @@
       }
     }
 
+    // What the selection toolbar calls the element. A person sees "عنوان" or
+    // "صورة", never the CSS selector ("div.slide-title") the deck happens to use.
+    _kindLabel(el) {
+      const t = el.tagName;
+      if (/^H[1-6]$/.test(t)) return 'عنوان';
+      if (t === 'IMG' || t === 'SVG' || t === 'CANVAS') return 'صورة';
+      if (t === 'TD' || t === 'TH') return 'خلية';
+      if (t === 'TABLE' || t === 'TR' || t === 'TBODY' || t === 'THEAD') return 'جدول';
+      if (t === 'UL' || t === 'OL') return 'قائمة';
+      if (t === 'LI') return 'بند';
+      if (t === 'P' || t === 'BLOCKQUOTE' || t === 'PRE') return 'فقرة';
+      if (t === 'FIGURE' || t === 'FIGCAPTION') return 'شكل';
+      if (el.classList.contains('slide')) return 'شريحة';
+      return this._isTextEditable(el) ? 'نص' : 'إطار';
+    }
+
     // ---------- text editing (double-click, PowerPoint style) ----------
     // An element whose words can be edited in place: a real text block, a
     // table cell, or a "leaf" box that only holds text.
@@ -524,10 +540,10 @@
       const bar = this.doc.createElement('div');
       bar.className = 've-toolbar';
       bar.innerHTML = `
-        <button data-c="bold" title="Bold (Ctrl+B)"><b>B</b></button>
-        <button data-c="italic" title="Italic (Ctrl+I)"><i>I</i></button>
-        <button data-c="underline" title="Underline (Ctrl+U)"><u>U</u></button>
-        <button data-done="1" title="Finish editing (or click anywhere else)">✓ Done</button>`;
+        <button data-c="bold" title="عريض (Ctrl+B)"><b>B</b></button>
+        <button data-c="italic" title="مائل (Ctrl+I)"><i>I</i></button>
+        <button data-c="underline" title="تسطير (Ctrl+U)"><u>U</u></button>
+        <button data-done="1" title="إنهاء التحرير (أو انقر في أي مكان آخر)">✓ تم</button>`;
       bar.addEventListener('mousedown', (e) => e.preventDefault());
       bar.addEventListener('click', (e) => {
         const b = e.target.closest('button');
@@ -768,59 +784,58 @@
       this.toolbar = doc.createElement('div');
       this.toolbar.className = 've-toolbar';
       const inSlide = this._slideOf(this.selected);
-      const dupBtn = inSlide ? `<button data-act="dupslide" title="Duplicate this slide">⧉ Slide</button>` : '';
+      const dupBtn = inSlide ? `<button data-act="dupslide" title="تكرار هذه الشريحة">⧉ تكرار الشريحة</button>` : '';
       if (isImg) {
         // Once an image is free-floating it can overlap others, so offer layering.
         const floated = (this.selected.closest('.ve-slot') || this.selected).dataset.veFloat === '1';
         const zBtns = floated ? `
-          <button data-act="front" title="Bring to front">⤒ Front</button>
-          <button data-act="back" title="Send to back">⤓ Back</button>` : '';
+          <button data-act="front" title="إحضار إلى الأمام">⤒ للأمام</button>
+          <button data-act="back" title="إرسال إلى الخلف">⤓ للخلف</button>` : '';
         this.toolbar.innerHTML = `
-          <span class="ve-tag" title="Drag the image to move it anywhere on the slide (arrow keys nudge)">✥ drag to move</span>
-          <button data-act="left" title="Align left">⬅</button>
-          <button data-act="center" title="Center">⬍</button>
-          <button data-act="right" title="Align right">➡</button>
+          <span class="ve-tag" title="اسحب الصورة لتحريكها في أي مكان على الشريحة (الأسهم للتحريك الدقيق)">✥ اسحب للتحريك</span>
+          <button data-act="left" title="محاذاة لليسار">⬅</button>
+          <button data-act="center" title="توسيط">⬍</button>
+          <button data-act="right" title="محاذاة لليمين">➡</button>
           ${zBtns}
-          <button data-act="replace" title="Replace image">Replace</button>
-          <button data-act="parent" title="Select the box that contains this">⬆ Box</button>
+          <button data-act="replace" title="استبدال الصورة">استبدال</button>
+          <button data-act="parent" title="تحديد الإطار الذي يحتوي هذا العنصر">⬆ الإطار</button>
           ${dupBtn}
-          <button data-act="delete" class="danger" title="Delete">🗑 Delete</button>`;
+          <button data-act="delete" class="danger" title="حذف">🗑 حذف</button>`;
       } else {
-        const label = this.selected.tagName.toLowerCase() +
-          (this.selected.classList.length ? '.' + this.selected.classList[0] : '');
+        const label = this._kindLabel(this.selected);
         const isTable = !!this.selected.closest('table');
         const tableBtns = isTable ? `
-          <button data-act="rowadd" title="Add a row">+Row</button>
-          <button data-act="coladd" title="Add a column">+Col</button>
-          <button data-act="rowdel" title="Remove the last row">−Row</button>
-          <button data-act="coldel" title="Remove the last column">−Col</button>` : '';
+          <button data-act="rowadd" title="إضافة صف">+ صف</button>
+          <button data-act="coladd" title="إضافة عمود">+ عمود</button>
+          <button data-act="rowdel" title="حذف آخر صف">− صف</button>
+          <button data-act="coldel" title="حذف آخر عمود">− عمود</button>` : '';
         const editBtn = this._isTextEditable(this.selected)
-          ? `<button data-act="edit" class="primary" title="Edit the words (or double-click the text)">✏ Edit text</button>` : '';
+          ? `<button data-act="edit" class="primary" title="تحرير الكلمات (أو انقر مرتين على النص)">✏ تحرير النص</button>` : '';
         // ✨ point-of-work AI: only offer it when the wand module finds an
         // action for this selection (list→diagram, table→chart, formula, image).
         const wandBtn = (window.Wand && window.Wand.actionsFor(this.selected).length)
           ? `<button data-act="wand" class="wand" title="حوّل هذا العنصر بالذكاء (✨)">✨</button>` : '';
         const canFloat = this._canFloat(this.selected);
         const dragHint = canFloat
-          ? `<span class="ve-tag" title="Drag to move it anywhere on the slide (arrow keys nudge)">✥ move</span>` : '';
+          ? `<span class="ve-tag" title="اسحب لتحريكه في أي مكان على الشريحة (الأسهم للتحريك الدقيق)">✥ تحريك</span>` : '';
         const floated = this.selected.dataset.veFloat === '1';
         const zBtns = floated ? `
-          <button data-act="front" title="Bring to front">⤒ Front</button>
-          <button data-act="back" title="Send to back">⤓ Back</button>` : '';
+          <button data-act="front" title="إحضار إلى الأمام">⤒ للأمام</button>
+          <button data-act="back" title="إرسال إلى الخلف">⤓ للخلف</button>` : '';
         this.toolbar.innerHTML = `
           <span class="ve-tag">${label}</span>
           ${dragHint}
           ${wandBtn}
           ${editBtn}
-          <button data-act="fontup" title="Bigger text">A+</button>
-          <button data-act="fontdn" title="Smaller text">A−</button>
-          <button data-act="color" title="Text color">🎨</button>
-          <button data-act="fill" title="Fill / background color">🖌</button>
+          <button data-act="fontup" title="تكبير النص">A+</button>
+          <button data-act="fontdn" title="تصغير النص">A−</button>
+          <button data-act="color" title="لون النص">🎨</button>
+          <button data-act="fill" title="لون التعبئة / الخلفية">🖌</button>
           ${tableBtns}
           ${zBtns}
           ${dupBtn}
-          <button data-act="parent" title="Select the container of this element">⬆ Container</button>
-          <button data-act="delete" class="danger" title="Delete (or press Del)">🗑 Delete</button>`;
+          <button data-act="parent" title="تحديد العنصر الذي يحتوي هذا">⬆ الحاوية</button>
+          <button data-act="delete" class="danger" title="حذف (أو اضغط Del)">🗑 حذف</button>`;
       }
       this.toolbar.addEventListener('mousedown', (e) => e.preventDefault());
       this.toolbar.addEventListener('click', (e) => {
@@ -867,7 +882,7 @@
       });
       const custom = doc.createElement('input');
       custom.type = 'color';
-      custom.title = 'Custom color…';
+      custom.title = 'لون مخصص…';
       custom.addEventListener('change', () => this._applyColor(mode, custom.value));
       pal.appendChild(custom);
       pal.style.left = this.toolbar.style.left;

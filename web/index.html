@@ -1,13 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Slide HTML Editor — edit HTML pages & decks visually, export PDF</title>
-<meta name="description" content="Free online editor for HTML pages and slide decks. Edit text, move and resize anything like PowerPoint, then download the HTML or export a PDF. No signup, nothing uploaded.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Reem+Kufi:wght@500;600;700&display=swap" rel="stylesheet">
+<title>محرر الشرائح — حرّر محاضرتك وصدّرها PDF أو PowerPoint</title>
+<meta name="description" content="محرر عربي مجاني لشرائح HTML ومحاضرات PDF: عدّل النص، وحرّك أي عنصر كما في PowerPoint، ثم صدّر PDF أو PowerPoint. بلا تسجيل.">
+<!-- Self-hosted, not Google Fonts: the hosted CSP allows styles from 'self'
+     only, and the editor must look the same offline. -->
+<link rel="stylesheet" href="fonts/fonts.css">
 <style>
   /* ===== LAPIS & GOLD =====================================================
      Midnight-lapis chrome, luminous aqua as the interactive color, gold kept
@@ -23,7 +23,8 @@
     --ok:#3ddc84; --warn:#fbbf24; --err:#ff5f6d;
     --glow:0 0 22px rgba(46,230,200,.4);
     --ring:0 0 0 2px rgba(46,230,200,.7), 0 0 16px rgba(46,230,200,.35);
-    --tbh:52px;
+    --appbar-h:54px; --strip-h:46px;
+    --tbh:calc(var(--appbar-h) + var(--strip-h)); /* popovers + doctor dock sit below the whole header */
     --font-ui:'IBM Plex Sans Arabic','Segoe UI',system-ui,sans-serif;
     --font-display:'Reem Kufi','IBM Plex Sans Arabic',sans-serif;
   }
@@ -44,19 +45,45 @@
   .ic { width:16.5px; height:16.5px; flex:0 0 auto; stroke:currentColor; stroke-width:1.85;
         stroke-linecap:round; stroke-linejoin:round; fill:none; }
 
-  /* ---------- toolbar ---------- */
-  #toolbar { display:flex; gap:3px; align-items:center; min-height:var(--tbh); padding:8px 12px;
+  /* ---------- header: app bar (file + export) over a tool strip (editing) ----------
+     Two deliberate rows instead of one row that wraps by accident: the old
+     single bar spilled PPTX/Save onto a second line even at 1440px. */
+  #toolbar { flex:0 0 auto; position:relative; z-index:30;
              background:linear-gradient(180deg, #16224a, var(--panel));
-             border-bottom:1px solid #04070f; flex-wrap:wrap;
+             border-bottom:1px solid #04070f;
              box-shadow:0 1px 0 rgba(111,242,220,.06), 0 6px 24px rgba(0,0,0,.4); }
-  #toolbar .brand { display:inline-flex; align-items:center; gap:9px; margin-inline-end:10px;
-                    font-family:var(--font-display); font-weight:600; font-size:16.5px; letter-spacing:.2px; }
-  .brand .mark { width:23px; height:23px; filter:drop-shadow(0 0 9px rgba(245,192,79,.5)); }
+  .appbar { display:flex; align-items:center; gap:6px; height:var(--appbar-h); padding:0 14px; }
+  .toolstrip { display:flex; align-items:center; gap:8px; height:var(--strip-h); padding:0 14px;
+               background:rgba(8,13,30,.45); border-top:1px solid var(--line-soft);
+               overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+  .toolstrip::-webkit-scrollbar { display:none; }
+  #toolbar .brand { display:inline-flex; align-items:center; gap:9px; margin-inline-end:12px; color:var(--text);
+                    text-decoration:none; white-space:nowrap;
+                    font-family:var(--font-display); font-weight:600; font-size:18px; }
+  .brand .mark { width:24px; height:24px; filter:drop-shadow(0 0 9px rgba(245,192,79,.5)); }
   #toolbar .spacer { flex:1; }
-  .tb-sep { width:1px; height:20px; background:var(--line); margin:0 5px; }
-  #toolbar button { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 9px;
+  .tb-sep { width:1px; height:22px; background:var(--line); margin:0 4px; flex:0 0 auto; }
+  /* a group is one pill: related tools read as one control, like the desktop app */
+  .tb-group { display:inline-flex; align-items:center; gap:2px; padding:3px; flex:0 0 auto;
+              background:rgba(17,26,53,.75); border:1px solid var(--line-soft); border-radius:11px; }
+  .tb-group .g-name { font-size:10.5px; font-weight:700; color:var(--faint); padding:0 7px 0 4px; white-space:nowrap; }
+  #toolbar button { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 10px;
                     background:transparent; color:var(--text); border:1px solid transparent; border-radius:8px;
+                    white-space:nowrap; flex:0 0 auto;
                     transition:background .15s, border-color .15s; }
+  .tb-group button { height:30px !important; }
+  /* secondary actions in the app bar: visible as buttons, quieter than the one primary */
+  #toolbar button.ghost { border-color:var(--line); background:rgba(24,36,74,.55); }
+  #toolbar button.ghost:hover { border-color:var(--accent); }
+  .tb-export { display:inline-flex; align-items:center; gap:6px; }
+  /* undo/redo arrows point the way time runs in an RTL interface */
+  #btn-undo .ic, #btn-redo .ic { transform:scaleX(-1); }
+  @media (max-width: 1180px) { .toolstrip .lbl:not(.keep) { display:none; } .tb-group .g-name { display:none; } }
+  @media (max-width: 760px) {
+    .appbar { padding:0 8px; gap:4px; }
+    .appbar button:not(.primary) .lbl, #toolbar .brand .lbl { display:none; }
+    .toolstrip { padding:0 8px; gap:6px; }
+  }
   #toolbar button:hover { background:var(--panel-2); border-color:var(--line); }
   #toolbar button:active { background:var(--panel-3); }
   #toolbar button .ic { color:var(--icon); transition:color .15s, filter .15s; }
@@ -85,6 +112,11 @@
   #btn-doctor.has-issues .ic { color:var(--err); }
 
   /* ---------- stage: the lit desk ---------- */
+  /* The desk is geometry, not text: zoom scales from the top-left corner
+     (transform-origin 0 0), so it must lay out LTR even inside the RTL app or
+     the scaled slide is pushed past the right edge. Text inside stays RTL. */
+  #stage { direction:ltr; }
+  #empty-state { direction:rtl; }
   #stage { flex:1; overflow:auto; position:relative;
            background:
              radial-gradient(900px 420px at 50% -8%, rgba(58,169,245,.16), transparent 62%),
@@ -97,12 +129,18 @@
   /* ---------- empty state hero ---------- */
   #empty-state { margin:9vh auto 0; max-width:600px; text-align:center; padding:12px 32px 40px; position:relative; }
   #empty-state .orn { width:60px; height:60px; filter:drop-shadow(0 0 18px rgba(245,192,79,.45)); margin-bottom:6px; }
-  #empty-state h1 { font-family:var(--font-display); font-weight:700; color:var(--text);
-                    font-size:30px; line-height:1.6; margin:0 0 12px; }
-  #empty-state p { color:var(--muted); font-size:14.5px; line-height:1.9; margin:0 0 10px; }
+  /* Reem Kufi ships at 600 only (fonts/fonts.css); asking for 700 would fake-bold it */
+  #empty-state h1 { font-family:var(--font-display); font-weight:600; color:var(--text);
+                    font-size:32px; line-height:1.6; margin:0 0 12px; }
+  #empty-state p { color:var(--muted); font-size:15px; line-height:1.95; margin:0 0 10px; }
   #empty-state p strong { color:var(--text); }
-  #empty-state .cta { margin-top:18px; }
-  #empty-state .cta button { height:46px; padding:0 28px; font-size:15px; border-radius:12px; display:inline-flex; align-items:center; gap:9px; }
+  #empty-state .cta-row { display:flex; flex-wrap:wrap; justify-content:center; gap:12px; margin-top:22px; }
+  #empty-state .cta-row button { height:48px; padding:0 26px; font-size:15px; border-radius:12px; display:inline-flex; align-items:center; gap:9px;
+                                 background:var(--panel-2); color:var(--text); border:1px solid var(--line); }
+  #empty-state .cta-row button:hover { border-color:var(--accent); box-shadow:var(--glow); }
+  #empty-state .cta-row button.primary { background:linear-gradient(135deg, var(--accent-2), var(--accent) 60%, var(--accent-3));
+                                         color:var(--accent-ink); border-color:rgba(111,242,220,.55); font-weight:700; }
+  #empty-state .cta-row button.primary .ic { color:var(--accent-ink); }
   #empty-state .alt { display:inline-flex; align-items:center; gap:8px; margin-top:22px; padding:10px 18px;
                       border:1px solid var(--line); border-radius:10px; color:var(--accent); text-decoration:none;
                       font-size:13.5px; transition:border-color .15s, background .15s, box-shadow .15s; }
@@ -292,60 +330,75 @@
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v5h-5"/></symbol>
   </svg>
 
-  <div id="toolbar">
-    <span class="brand"><svg class="mark"><use href="#i-star8g"/></svg><span class="lbl">Slide Editor</span></span>
-    <button id="btn-open" title="Open an HTML file"><svg class="ic"><use href="#i-open"/></svg><span class="lbl">Open</span></button>
-    <button id="btn-import-pdf" hidden title="Rebuild a PDF into editable slides"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">Import PDF</span></button>
-    <span class="tb-sep"></span>
-    <button id="btn-add-text" title="Insert a text block"><svg class="ic"><use href="#i-text"/></svg><span class="lbl">Text</span></button>
-    <button id="btn-add-image" title="Insert an image (embedded into the file)"><svg class="ic"><use href="#i-image"/></svg><span class="lbl">Image</span></button>
-    <span class="tb-sep"></span>
-    <button id="btn-undo" disabled title="Undo (Ctrl+Z)" aria-label="Undo"><svg class="ic"><use href="#i-undo"/></svg></button>
-    <button id="btn-redo" disabled title="Redo (Ctrl+Y)" aria-label="Redo"><svg class="ic"><use href="#i-redo"/></svg></button>
-    <span class="tb-sep"></span>
-    <span class="tb-zoom">
-      <button id="btn-zoom-out" title="Zoom out" aria-label="Zoom out"><svg class="ic"><use href="#i-minus"/></svg></button>
-      <button id="btn-zoom-label" title="Fit to window">100%</button>
-      <button id="btn-zoom-in" title="Zoom in" aria-label="Zoom in"><svg class="ic"><use href="#i-plus"/></svg></button>
-    </span>
-    <span class="tb-sep"></span>
-    <button id="btn-doctor" title="فحص الشرائح — نص كثيف، تباين، خطوط، صور مشوّهة، تسمية الأشكال"><svg class="ic"><use href="#i-pulse"/></svg><span class="lbl">الفحص</span><span class="ct" hidden></span></button>
-    <span class="tb-sep"></span>
-    <button id="btn-numerals" title="Toggle numeral system: Arabic ⇄ Latin"><span class="lbl">١٢٣ ⇄ 123</span></button>
-    <button id="btn-date-hijri" title="Insert Hijri date" aria-label="Insert Hijri date"><svg class="ic"><use href="#i-moon"/></svg></button>
-    <button id="btn-date-greg" title="Insert Gregorian date" aria-label="Insert Gregorian date"><svg class="ic"><use href="#i-cal"/></svg></button>
-    <span class="tb-sep"></span>
-    <button id="btn-theme" title="Theme presets, export &amp; import a .theme.json"><svg class="ic"><use href="#i-palette"/></svg><span class="lbl">Theme</span></button>
-    <button id="btn-fonts" title="مكتبة الخطوط — عناوين، نص، أو العنصر المحدد"><svg class="ic"><use href="#i-type"/></svg><span class="lbl">الخطوط</span></button>
-    <span class="tb-sep"></span>
-    <button id="btn-present" title="Fullscreen present + speaker view"><svg class="ic"><use href="#i-present"/></svg><span class="lbl">Present</span></button>
-    <span class="spacer"></span>
-    <button id="btn-export" class="primary" title="Export to PDF — choose 'Save as PDF' in the print dialog"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">PDF</span></button>
-    <button id="btn-export-pptx" class="primary" hidden title="Export an editable PowerPoint file"><svg class="ic"><use href="#i-pptx"/></svg><span class="lbl">PPTX</span></button>
-    <button id="btn-save" class="primary" title="Download the edited HTML (Ctrl+S)"><svg class="ic"><use href="#i-save"/></svg><span class="lbl">Save HTML</span></button>
-  </div>
+  <header id="toolbar">
+    <div class="appbar">
+      <a class="brand" href="/" title="الصفحة الرئيسية"><svg class="mark"><use href="#i-star8g"/></svg><span class="lbl">محرر الشرائح</span></a>
+      <button id="btn-open" title="فتح ملف HTML أو Word"><svg class="ic"><use href="#i-open"/></svg><span class="lbl">فتح</span></button>
+      <button id="btn-import-pdf" hidden title="إعادة بناء ملف PDF إلى شرائح قابلة للتحرير"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">استيراد PDF</span></button>
+      <span class="spacer"></span>
+      <button id="btn-present" title="عرض الشرائح ملء الشاشة مع نافذة الملقّن"><svg class="ic"><use href="#i-present"/></svg><span class="lbl">عرض</span></button>
+      <span class="tb-sep"></span>
+      <div class="tb-export">
+        <button id="btn-save" class="ghost" title="تنزيل ملف HTML المعدّل (Ctrl+S)"><svg class="ic"><use href="#i-save"/></svg><span class="lbl">حفظ HTML</span></button>
+        <button id="btn-export-pptx" class="ghost" hidden title="تصدير ملف PowerPoint قابل للتحرير"><svg class="ic"><use href="#i-pptx"/></svg><span class="lbl">PowerPoint</span></button>
+        <button id="btn-export" class="primary" title="تصدير PDF — اختر «Save as PDF» في نافذة الطباعة"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">تصدير PDF</span></button>
+      </div>
+    </div>
+    <div class="toolstrip" role="toolbar" aria-label="أدوات التحرير">
+      <div class="tb-group">
+        <span class="g-name">إدراج</span>
+        <button id="btn-add-text" title="إدراج كتلة نص"><svg class="ic"><use href="#i-text"/></svg><span class="lbl">نص</span></button>
+        <button id="btn-add-image" title="إدراج صورة (تُضمَّن داخل الملف)"><svg class="ic"><use href="#i-image"/></svg><span class="lbl">صورة</span></button>
+      </div>
+      <div class="tb-group">
+        <button id="btn-undo" disabled title="تراجع (Ctrl+Z)" aria-label="تراجع"><svg class="ic"><use href="#i-undo"/></svg></button>
+        <button id="btn-redo" disabled title="إعادة (Ctrl+Y)" aria-label="إعادة"><svg class="ic"><use href="#i-redo"/></svg></button>
+      </div>
+      <span class="tb-zoom">
+        <button id="btn-zoom-out" title="تصغير" aria-label="تصغير"><svg class="ic"><use href="#i-minus"/></svg></button>
+        <button id="btn-zoom-label" title="ملء النافذة">100%</button>
+        <button id="btn-zoom-in" title="تكبير" aria-label="تكبير"><svg class="ic"><use href="#i-plus"/></svg></button>
+      </span>
+      <div class="tb-group">
+        <button id="btn-doctor" title="فحص الشرائح — نص كثيف، تباين، خطوط، صور مشوّهة، تسمية الأشكال"><svg class="ic"><use href="#i-pulse"/></svg><span class="lbl keep">الفحص</span><span class="ct" hidden></span></button>
+      </div>
+      <div class="tb-group">
+        <span class="g-name">التصميم</span>
+        <button id="btn-theme" title="الثيمات الجاهزة، وتصدير واستيراد ملف ‎.theme.json"><svg class="ic"><use href="#i-palette"/></svg><span class="lbl">الثيم</span></button>
+        <button id="btn-fonts" title="مكتبة الخطوط — للعناوين أو النص أو العنصر المحدد"><svg class="ic"><use href="#i-type"/></svg><span class="lbl">الخطوط</span></button>
+      </div>
+      <div class="tb-group">
+        <span class="g-name">عربي</span>
+        <button id="btn-numerals" title="تبديل الأرقام: هندية ⇄ عربية غربية"><span class="lbl keep">١٢٣ ⇄ 123</span></button>
+        <button id="btn-date-hijri" title="إدراج التاريخ الهجري" aria-label="إدراج التاريخ الهجري"><svg class="ic"><use href="#i-moon"/></svg></button>
+        <button id="btn-date-greg" title="إدراج التاريخ الميلادي" aria-label="إدراج التاريخ الميلادي"><svg class="ic"><use href="#i-cal"/></svg></button>
+      </div>
+    </div>
+  </header>
   <div id="stage">
     <div id="empty-state">
       <svg class="orn"><use href="#i-star8g"/></svg>
-      <h1>Edit any HTML page like a slide deck</h1>
-      <p>Drop an .html file here — got one from ChatGPT, Claude or Gemini? Edit the text, move and resize anything like PowerPoint, then download it or export a PDF. A Word (.docx) file works too — it's split into slides automatically.</p>
+      <h1>حرّر محاضرتك كأنها عرض شرائح</h1>
+      <p>افتح ملف HTML — حتى لو صنعه ChatGPT أو Claude أو Gemini — ثم عدّل النص، وحرّك أي عنصر أو غيّر حجمه كما في PowerPoint، وصدّره PDF. ملفات Word ‏(.docx) تُقسَّم إلى شرائح تلقائيًا.</p>
       <!-- Two claims, because there are now two paths and only one of them is
            local. Saying "nothing is uploaded" on the hosted build would be a
            false privacy claim the moment anyone clicks Import PDF. -->
-      <p id="privacy-local"><strong>Nothing is uploaded.</strong> Everything runs in your browser.</p>
-      <p id="privacy-hosted" hidden><strong>HTML and Word files never leave your browser.</strong>
-        Rebuilding a PDF sends it to this server, which deletes the file as soon as it has
-        been rebuilt and keeps the result for 30 minutes so you can export PowerPoint.</p>
-      <div class="cta"><button id="btn-open-2" class="primary"><svg class="ic"><use href="#i-open"/></svg><span class="lbl">Choose HTML file</span></button></div>
-      <div class="cta" id="cta-pdf" hidden><button id="btn-open-pdf" class="primary"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">Rebuild a PDF into slides</span></button></div>
+      <p id="privacy-local"><strong>لا يُرفع أي شيء.</strong> كل شيء يعمل داخل متصفحك.</p>
+      <p id="privacy-hosted" hidden><strong>ملفات HTML وWord لا تغادر متصفحك.</strong>
+        أما إعادة بناء PDF فترسل الملف إلى هذا الخادم، فيحذفه فور الانتهاء ويحتفظ
+        بالنتيجة 30 دقيقة لتتمكن من تصديرها PowerPoint.</p>
+      <div class="cta-row">
+        <span id="cta-pdf" hidden><button id="btn-open-pdf" class="primary"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">أعد بناء ملف PDF</span></button></span>
+        <button id="btn-open-2" class="primary"><svg class="ic"><use href="#i-open"/></svg><span class="lbl">اختر ملف HTML أو Word</span></button>
+      </div>
       <p class="src-offer" hidden id="src-offer" style="margin-top:26px;font-size:12px;color:var(--faint)">
-        Free software under the <a href="/source" style="color:var(--muted)">AGPL-3.0</a> — this service offers you its complete source.
+        برنامج حر بترخيص <a href="/source" style="color:var(--muted)">AGPL-3.0</a> — هذه الخدمة تتيح لك شيفرتها المصدرية كاملة.
       </p>
-      <a class="alt" href="templates.html"><svg class="ic"><use href="#i-star8"/></svg>Or start from a ready-made Arabic template →</a>
+      <a class="alt" href="templates.html"><svg class="ic"><use href="#i-star8"/></svg>أو ابدأ من قالب عربي جاهز ←</a>
     </div>
-    <div id="zoom-wrap" hidden><iframe id="canvas"></iframe></div>
+    <div id="zoom-wrap" hidden><iframe id="canvas" title="الشرائح"></iframe></div>
   </div>
-  <div id="status">Open an HTML file to start.</div>
+  <div id="status">افتح ملفًا للبدء.</div>
   <input type="file" id="file-input" accept=".html,.htm,.docx" hidden>
   <input type="file" id="pdf-input" accept="application/pdf,.pdf" hidden>
   <input type="file" id="img-input" accept="image/*" multiple hidden>

@@ -84,7 +84,11 @@ export function originAllowed(req) {
 
 export const SECURITY_HEADERS = {
   'x-content-type-options': 'nosniff',
-  'x-frame-options': 'DENY',
+  // SAMEORIGIN, not DENY: the landing page and the template gallery preview
+  // decks in same-origin iframes, and DENY blanked every one of them. Another
+  // origin still cannot frame us (frame-ancestors below says the same thing to
+  // browsers that read CSP).
+  'x-frame-options': 'SAMEORIGIN',
   'referrer-policy': 'no-referrer',
   'cross-origin-opener-policy': 'same-origin',
   // The editor renders reconstructed decks in an iframe from a srcdoc/blob and
@@ -93,11 +97,15 @@ export const SECURITY_HEADERS = {
   'content-security-policy': [
     "default-src 'self'",
     "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
+    // Google Fonts is the font library: theme presets and the fonts panel fetch
+    // faces from it and embed them into the deck as data: URLs, and the panel
+    // previews them with its stylesheet. 'self' alone made both fail silently.
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "img-src 'self' data: blob:",
-    "font-src 'self' data:",
-    "connect-src 'self'",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
     "frame-src 'self' blob: data:",
+    "frame-ancestors 'self'",
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'none'"
