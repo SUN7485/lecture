@@ -18,64 +18,64 @@
 
   const EDITOR_CSS = `
     html, body { height: auto !important; min-height: 0 !important; }
-    .ve-selected { outline: 2px solid #2f6df6 !important; outline-offset: 1px; cursor: move; }
+    .ve-selected { outline: 2px solid #2b6fd6 !important; outline-offset: 1px; cursor: move; }
     .ve-editing { outline: 2px dashed #8b5cf6 !important; outline-offset: 2px; cursor: text; }
     /* Alignment / snap guides shown while free-dragging an image. */
     .ve-guide { position: absolute; background: #f5288f; pointer-events: none; z-index: 2147483001; }
     .ve-guide.v { width: 1px; }
     .ve-guide.h { height: 1px; }
     .ve-insert-line {
-      position: absolute; height: 3px; background: #2f6df6; border-radius: 2px;
-      pointer-events: none; z-index: 2147483000; box-shadow: 0 0 6px rgba(47,109,246,.6);
+      position: absolute; height: 3px; background: #2b6fd6; border-radius: 2px;
+      pointer-events: none; z-index: 2147483000;
     }
     .ve-overlay { position: absolute; pointer-events: none; z-index: 2147483001; }
     .ve-handle {
       position: absolute; width: 14px; height: 14px; background: #fff;
-      border: 2px solid #2f6df6; border-radius: 50%; pointer-events: auto;
+      border: 2px solid #2b6fd6; border-radius: 50%; pointer-events: auto;
       transform: translate(-50%, -50%); touch-action: none;
     }
     .ve-handle.nw, .ve-handle.se { cursor: nwse-resize; }
     .ve-handle.ne, .ve-handle.sw { cursor: nesw-resize; }
     .ve-handle.n, .ve-handle.s { cursor: ns-resize; }
     .ve-handle.e, .ve-handle.w { cursor: ew-resize; }
-    .ve-tag { padding: 4px 6px; color: #9aa4b8; }
+    .ve-tag { padding: 4px 6px; color: #aeb3c7; }
     .ve-palette {
       position: absolute; z-index: 2147483003; display: grid;
-      grid-template-columns: repeat(6, 24px); gap: 6px; background: #1f2430;
-      padding: 10px; border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.35);
+      grid-template-columns: repeat(6, 24px); gap: 6px; background: #1a1f36;
+      padding: 10px; border-radius: 8px; box-shadow: 0 10px 24px -8px rgba(26,31,54,.5);
     }
     .ve-swatch { width: 24px; height: 24px; border-radius: 5px; cursor: pointer; border: 2px solid rgba(255,255,255,.25); }
     .ve-swatch:hover { border-color: #fff; }
     .ve-palette input[type="color"] { grid-column: span 3; width: 100%; height: 26px; padding: 0; border: none; background: none; cursor: pointer; }
     .ve-toolbar {
-      position: absolute; display: flex; gap: 4px; background: #1f2430; color: #fff;
-      padding: 4px 6px; border-radius: 8px; font: 12px -apple-system, "Segoe UI", sans-serif;
-      pointer-events: auto; z-index: 2147483002; box-shadow: 0 4px 12px rgba(0,0,0,.3);
+      position: absolute; display: flex; gap: 4px; background: #1a1f36; color: #fff;
+      padding: 4px 6px; border-radius: 6px; font: 12.5px 'IBM Plex Sans Arabic', "Segoe UI", sans-serif;
+      pointer-events: auto; z-index: 2147483002; box-shadow: 0 8px 20px -6px rgba(26,31,54,.5);
       white-space: nowrap;
     }
     .ve-toolbar button {
-      background: #333a49; color: #fff; border: none; border-radius: 5px;
+      background: #2c3354; color: #fff; border: none; border-radius: 4px;
       padding: 4px 8px; cursor: pointer; font: inherit;
     }
-    .ve-toolbar button:hover { background: #45506a; }
-    .ve-toolbar button.primary { background: #2f6df6; }
-    .ve-toolbar button.primary:hover { background: #4a82ff; }
-    .ve-toolbar button.danger:hover { background: #c0392b; }
+    .ve-toolbar button:hover { background: #3c4469; }
+    .ve-toolbar button.primary { background: #2b6fd6; }
+    .ve-toolbar button.primary:hover { background: #3d7fe3; }
+    .ve-toolbar button.danger:hover { background: #c8302c; }
     .ve-toolbar button.wand { background: #6d4bd6; }
     .ve-toolbar button.wand:hover { background: #855ff0; }
     /* Wand menu: point-of-work AI actions, styled like the color palette. */
     .ve-wandmenu {
       position: absolute; z-index: 2147483003; display: flex; flex-direction: column;
-      gap: 4px; background: #1f2430; color: #fff; padding: 6px; border-radius: 10px;
-      box-shadow: 0 6px 18px rgba(0,0,0,.35); min-width: 180px;
-      font: 12px -apple-system, "Segoe UI", sans-serif;
+      gap: 4px; background: #1a1f36; color: #fff; padding: 6px; border-radius: 8px;
+      box-shadow: 0 10px 24px -8px rgba(26,31,54,.5); min-width: 180px;
+      font: 12.5px 'IBM Plex Sans Arabic', "Segoe UI", sans-serif;
     }
     .ve-wandmenu button {
-      background: #333a49; color: #fff; border: none; border-radius: 6px;
+      background: #2c3354; color: #fff; border: none; border-radius: 4px;
       padding: 7px 9px; cursor: pointer; font: inherit; text-align: start;
       display: flex; justify-content: space-between; gap: 10px; align-items: center;
     }
-    .ve-wandmenu button:hover { background: #45506a; }
+    .ve-wandmenu button:hover { background: #3c4469; }
     .ve-wandmenu .ve-wcost { font-size: 10px; color: #9aa4b8; }
     .ve-wandmenu .ve-wcost.paid { color: #e0b060; }
     /* Studio ghost preview: a live, in-place preview of a generated visual. */

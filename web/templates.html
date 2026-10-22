@@ -3,97 +3,105 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>قوالب شرائح تعليمية عربية جاهزة — مجانية</title>
-<meta name="description" content="خمسة قوالب شرائح تعليمية عربية جاهزة للاستخدام: مقدمة درس، مراجعة اختبار، خطة فصل دراسي، درس مقارنة، واختبار قصير. افتحها مباشرة في محرر الشرائح المجاني وعدّلها كأنها PowerPoint.">
+<title>قوالب شرائح تعليمية عربية — محرر الشرائح</title>
+<meta name="description" content="خمسة قوالب شرائح تعليمية عربية: مقدمة درس، مراجعة اختبار، خطة فصل دراسي، درس مقارنة، واختبار قصير. افتحها في محرر الشرائح المجاني وعدّلها كما في PowerPoint.">
 <link rel="stylesheet" href="fonts/fonts.css">
 <style>
+  /* Same paper-and-ink identity as the landing page. The cards are plain
+     markup on purpose: the hosted CSP blocks inline scripts, and the old
+     script-built grid rendered as an empty page there. */
   :root {
-    --bg:#080d1e; --panel:#111a35; --panel-2:#18244a; --line:#2b3c6e; --line-soft:#1d2a51;
-    --text:#eef3ff; --muted:#9db0dc; --faint:#6a7cae;
-    --accent:#2ee6c8; --accent-2:#6ff2dc; --accent-ink:#00201c;
-    --font-ui:'IBM Plex Sans Arabic','Segoe UI',system-ui,sans-serif;
-    --font-display:'Reem Kufi','IBM Plex Sans Arabic',sans-serif;
+    --paper:#ffffff; --ink:#1a1f36; --graphite:#5b6075; --rule:#e3e4ea;
+    --font-head:'Amiri','IBM Plex Sans Arabic',serif;
+    --font-body:'IBM Plex Sans Arabic','Segoe UI',system-ui,sans-serif;
   }
   * { box-sizing:border-box; }
-  body { margin:0; font:14px/1.6 var(--font-ui); background:var(--bg); color:var(--text); direction:rtl;
-         background-image:radial-gradient(1100px 420px at 50% -8%, rgba(46,230,200,.06), transparent 65%),
-                          radial-gradient(rgba(157,176,220,.04) 1px, transparent 1.2px);
-         background-size:auto, 24px 24px; }
-  a:focus-visible { outline:none; box-shadow:0 0 0 2px rgba(46,230,200,.55); border-radius:8px; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.85 var(--font-body); }
+  a { color:inherit; }
+  :focus-visible { outline:2px solid var(--ink); outline-offset:3px; border-radius:2px; }
+  .wrap { max-width:1140px; margin:0 auto; padding:0 28px; }
+  nav { display:flex; align-items:center; gap:28px; padding:22px 0; }
+  .wordmark { font-family:var(--font-head); font-weight:700; font-size:25px; text-decoration:none; line-height:1; }
+  nav .spacer { flex:1; }
+  .btn { display:inline-flex; align-items:center; height:40px; padding:0 18px; border-radius:6px;
+         background:var(--ink); color:#fff; font:600 14.5px/1 var(--font-body); text-decoration:none; }
+  .btn:hover { background:#2c3354; }
 
-  header { padding:44px 24px 10px; text-align:center; max-width:760px; margin:0 auto; }
-  header .orn { width:46px; height:46px; filter:drop-shadow(0 0 14px rgba(245,192,79,.45)); }
-  header h1 { font-family:var(--font-display); font-weight:700; font-size:30px; line-height:1.5; margin:8px 0 12px; }
-  header p { color:var(--muted); font-size:14.5px; line-height:1.9; margin:0; }
+  header { padding:40px 0 48px; border-bottom:1px solid var(--rule); }
+  header h1 { font-family:var(--font-head); font-weight:700; font-size:clamp(32px,4.4vw,50px); line-height:1.35; margin:0 0 12px; }
+  header p { color:var(--graphite); max-width:36em; margin:0; font-size:17px; }
 
-  .grid { display:grid; grid-template-columns:repeat(auto-fill, 300px); justify-content:center; gap:22px;
-          max-width:1080px; margin:32px auto 64px; padding:0 24px; }
-  .card { background:var(--panel); border:1px solid var(--line-soft); border-radius:16px; overflow:hidden;
-          display:flex; flex-direction:column; transition:transform .18s ease, border-color .18s, box-shadow .18s; }
-  .card:hover { transform:translateY(-4px); border-color:var(--accent);
-                box-shadow:0 18px 44px rgba(0,0,0,.45), 0 0 0 1px rgba(46,230,200,.25); }
-  /* 950×650 slide scaled to exactly fit the fixed 298px inner width: 298/950 */
-  .thumb { position:relative; width:100%; padding-top:68.42%; background:#080d1e; overflow:hidden;
-           border-bottom:1px solid var(--line-soft); }
+  .grid { list-style:none; margin:0; padding:48px 0 80px; display:grid;
+          grid-template-columns:repeat(3,minmax(0,1fr)); gap:44px 32px; }
+  .tpl a { display:block; text-decoration:none; }
+  .thumb { position:relative; aspect-ratio:950/650; border:1px solid #d9dbe3; border-radius:3px; overflow:hidden;
+           background:#fff; container-type:inline-size; }
   .thumb iframe { position:absolute; top:0; right:0; width:950px; height:650px; border:0; pointer-events:none;
-                  transform:scale(0.3137); transform-origin:top right; background:#fff; }
-  .card-body { padding:15px 17px 17px; display:flex; flex-direction:column; gap:8px; flex:1; }
-  .card-body h2 { font-family:var(--font-display); font-weight:600; font-size:17px; margin:0; }
-  .card-body p { font-size:13px; color:var(--muted); line-height:1.75; margin:0; flex:1; }
-  .card-body a.use { margin-top:8px; display:block; text-align:center;
-                     background:linear-gradient(180deg, var(--accent-2), var(--accent)); color:var(--accent-ink);
-                     text-decoration:none; padding:10px 14px; border-radius:10px; font-weight:700; font-size:14px;
-                     border:1px solid #2ee6c8; transition:box-shadow .15s, background .15s; }
-  .card-body a.use:hover { background:linear-gradient(180deg, #9dfced, var(--accent-2));
-                           box-shadow:0 2px 16px rgba(46,230,200,.3); }
+                  transform-origin:top right; transform:scale(calc(100cqw / 950px)); }
+  @supports not (width: 1cqw) { .thumb iframe { transform:scale(.36); } }
+  .tpl h2 { font-family:var(--font-head); font-weight:700; font-size:23px; line-height:1.4; margin:16px 0 4px; }
+  .tpl p { color:var(--graphite); margin:0 0 10px; font-size:15px; }
+  .tpl .use { font-weight:600; font-size:15px; text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:7px; }
+  .tpl a:hover .use { text-decoration-thickness:2px; }
+  .tpl a:hover h2 { text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:9px; }
 
-  footer { text-align:center; color:var(--faint); font-size:13px; padding:0 24px 48px; }
-  footer a { color:var(--accent-2); }
+  footer { border-top:1px solid var(--rule); padding:32px 0 44px; color:var(--graphite); font-size:14.5px; }
 
-  .card { animation:rise .5s cubic-bezier(.2,.7,.2,1) both; }
-  .card:nth-child(2) { animation-delay:.06s; } .card:nth-child(3) { animation-delay:.12s; }
-  .card:nth-child(4) { animation-delay:.18s; } .card:nth-child(5) { animation-delay:.24s; }
-  @keyframes rise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
-  @media (prefers-reduced-motion: reduce) { .card { animation:none; } .card:hover { transform:none; } }
-  @media (max-width:420px) { .grid { grid-template-columns:1fr; } .thumb iframe { transform:scale(0.36); } }
+  @media (max-width:900px) { .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  @media (max-width:600px) { .wrap { padding:0 18px; } .grid { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
 
-<header>
-  <svg class="orn" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-    <defs><linearGradient id="g-gold" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#ffd97a"/><stop offset="55%" stop-color="#f5c04f"/><stop offset="100%" stop-color="#2ee6c8"/>
-    </linearGradient></defs>
-    <path d="M12 1.6 14.6 7l5.8-1.4L17 10.7l4.4 4-5.7 1.5.9 5.9-4.6-3.7-4.6 3.7.9-5.9L2.6 14.7l4.4-4L4.6 5.6 10.4 7Z" fill="url(#g-gold)"/></svg>
-  <h1>قوالب شرائح تعليمية عربية جاهزة</h1>
-  <p>خمسة قوالب واقعية جاهزة للاستخدام مباشرة — مقدمة درس، مراجعة اختبار، خطة فصل دراسي، درس مقارنة، واختبار قصير.
-     اضغط «استخدم القالب» ليُفتح فورًا في محرر الشرائح المجاني، حيث يمكنك تعديل كل نص وصورة كأنها PowerPoint، ثم تنزيله أو تصديره PDF. لا حاجة لحساب.</p>
-</header>
+<div class="wrap">
+  <nav>
+    <a class="wordmark" href="/">محرر الشرائح</a>
+    <span class="spacer"></span>
+    <a class="btn" href="/editor">افتح المحرر</a>
+  </nav>
 
-<div class="grid" id="grid"></div>
+  <header>
+    <h1>قوالب لدروس حقيقية</h1>
+    <p>خمسة قوالب عربية جاهزة. اختر واحدًا فيُفتح في المحرر، وعدّل كل نص وصورة فيه كما في PowerPoint، ثم صدّره PDF. لا حاجة إلى حساب.</p>
+  </header>
 
-<footer>القوالب مبنية على نفس بنية الشرائح التي يفهمها <a href="index.html">محرر الشرائح</a> — لا حاجة لأي إعداد إضافي.</footer>
+  <ul class="grid">
+    <li class="tpl"><a href="/editor?template=lesson-intro">
+      <div class="thumb"><iframe src="templates/lesson-intro.html" tabindex="-1" loading="lazy" title="قالب مقدمة درس"></iframe></div>
+      <h2>مقدمة درس</h2>
+      <p>غلاف، وأهداف الدرس، وجدول الأعمال، والمصطلحات الأساسية، وملخص.</p>
+      <span class="use">استخدم القالب</span>
+    </a></li>
+    <li class="tpl"><a href="/editor?template=exam-review">
+      <div class="thumb"><iframe src="templates/exam-review.html" tabindex="-1" loading="lazy" title="قالب مراجعة اختبار"></iframe></div>
+      <h2>مراجعة اختبار</h2>
+      <p>مواضيع الاختبار، ونموذج سؤال وجواب، والأخطاء الشائعة، وقائمة تحقق قبل الدخول.</p>
+      <span class="use">استخدم القالب</span>
+    </a></li>
+    <li class="tpl"><a href="/editor?template=semester-plan">
+      <div class="thumb"><iframe src="templates/semester-plan.html" tabindex="-1" loading="lazy" title="قالب خطة فصل دراسي"></iframe></div>
+      <h2>خطة فصل دراسي</h2>
+      <p>خطة أسبوعية في جدول، وأهم المحطات والتواريخ، وتوزيع الدرجات.</p>
+      <span class="use">استخدم القالب</span>
+    </a></li>
+    <li class="tpl"><a href="/editor?template=comparison-lesson">
+      <div class="thumb"><iframe src="templates/comparison-lesson.html" tabindex="-1" loading="lazy" title="قالب درس مقارنة"></iframe></div>
+      <h2>درس مقارنة</h2>
+      <p>مقارنة بين مفهومين في عمودين، والإيجابيات والسلبيات، وخلاصة.</p>
+      <span class="use">استخدم القالب</span>
+    </a></li>
+    <li class="tpl"><a href="/editor?template=quiz-deck">
+      <div class="thumb"><iframe src="templates/quiz-deck.html" tabindex="-1" loading="lazy" title="قالب اختبار قصير"></iframe></div>
+      <h2>اختبار قصير</h2>
+      <p>أربعة أسئلة اختيار من متعدد بإجابات تُكشف عند الطلب، وشريحة ملخص للإجابات.</p>
+      <span class="use">استخدم القالب</span>
+    </a></li>
+  </ul>
+</div>
 
-<script>
-  const TEMPLATES = [
-    { id: 'lesson-intro', name: 'مقدمة درس', desc: 'غلاف، أهداف الدرس، جدول الأعمال، المصطلحات الأساسية، وملخص — لبداية أي حصة دراسية.' },
-    { id: 'exam-review', name: 'مراجعة اختبار', desc: 'مواضيع الاختبار، نموذج سؤال وجواب، الأخطاء الشائعة، وقائمة تحقق قبل الدخول للاختبار.' },
-    { id: 'semester-plan', name: 'خطة فصل دراسي', desc: 'خطة أسبوعية بجدول، أهم المحطات والتواريخ، وتوزيع الدرجات النهائي.' },
-    { id: 'comparison-lesson', name: 'درس مقارنة', desc: 'شرائح مقارنة عمودية بين مفهومين، إيجابيات وسلبيات، وخلاصة نهائية.' },
-    { id: 'quiz-deck', name: 'اختبار قصير', desc: 'أربعة أسئلة اختيار من متعدد بإجابات قابلة للكشف، وشريحة ملخص إجابات.' },
-  ];
-  const grid = document.getElementById('grid');
-  TEMPLATES.forEach(t => {
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML =
-      `<div class="thumb"><iframe src="templates/${t.id}.html" tabindex="-1" loading="lazy"></iframe></div>` +
-      `<div class="card-body"><h2>${t.name}</h2><p>${t.desc}</p>` +
-      `<a class="use" href="index.html?template=${t.id}">استخدم القالب</a></div>`;
-    grid.appendChild(card);
-  });
-</script>
+<footer>
+  <div class="wrap">القوالب مبنية بالبنية نفسها التي يفهمها <a href="/editor">محرر الشرائح</a>، فلا تحتاج إلى أي إعداد.</div>
+</footer>
 
 </body>
 </html>
