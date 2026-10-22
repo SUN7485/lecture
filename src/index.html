@@ -55,6 +55,7 @@
     <div class="group">
       <button id="btn-open" title="Open a lecture HTML file"><svg class="ic"><use href="#i-open"/></svg><span class="lbl">Open</span></button>
       <button id="btn-import-docx" title="استيراد ملف Word (.docx) وتحويله تلقائيًا إلى شرائح"><svg class="ic"><use href="#i-doc"/></svg><span class="lbl">Word</span></button>
+      <button id="btn-import-pdf" title="استيراد ملف PDF وإعادة بنائه إلى شرائح قابلة للتحرير"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">Import PDF</span></button>
       <button id="btn-save" title="Save HTML (Ctrl+S)"><svg class="ic"><use href="#i-save"/></svg><span class="lbl">Save</span></button>
       <button id="btn-preview" title="Quick PDF preview — check everything before exporting"><svg class="ic"><use href="#i-eye"/></svg><span class="lbl">Preview</span></button>
       <button id="btn-doctor" title="فحص الشرائح — نص كثيف، تباين، خطوط، صور مشوّهة، تسمية الأشكال"><svg class="ic"><use href="#i-pulse"/></svg><span class="lbl">الفحص</span><span class="ct" hidden></span></button>
@@ -134,12 +135,53 @@
     </aside>
 
     <main id="stage">
+      <!-- Home screen. Every card is a JOB, not a file type: it picks the right
+           source, opens the editor, and remembers what you said you were making
+           so the matching export button is waiting for you when you get there.
+           data-flow is read by renderer.js — keep the values in sync. -->
       <div id="empty-state">
-        <div class="empty-inner">
-          <svg class="orn"><use href="#i-star8g"/></svg>
-          <h1>Open a lecture to begin</h1>
-          <p>Your HTML renders exactly like the browser. Drag images in, edit text, add slides, and export a pixel-perfect PDF.</p>
-          <button id="btn-open-2" class="primary big"><svg class="ic"><use href="#i-open"/></svg><span class="lbl">Open HTML file</span></button>
+        <div class="empty-inner home">
+          <header class="home-head">
+            <svg class="orn"><use href="#i-star8g"/></svg>
+            <h1>What are we making?</h1>
+            <p class="home-sub">
+              <span>افتح أي ملف · عدّله بصريًا · صدّره بأي صيغة</span>
+              <span class="home-en">Open anything. Fix it visually. Export it anywhere.</span>
+            </p>
+          </header>
+
+          <div class="home-grid">
+            <button class="home-card" data-flow="pdf-pptx">
+              <span class="hc-ico"><svg class="ic"><use href="#i-pptx"/></svg></span>
+              <span class="hc-title">PDF → PowerPoint</span>
+              <span class="hc-desc">Rebuild a PDF into real editable slides, then export a verified <code>.pptx</code>.</span>
+              <span class="hc-flow"><em>PDF</em><i>→</i><em>PPTX</em></span>
+            </button>
+
+            <button class="home-card" data-flow="html-edit">
+              <span class="hc-ico"><svg class="ic"><use href="#i-text"/></svg></span>
+              <span class="hc-title">HTML Editor</span>
+              <span class="hc-desc">Open a lecture and change anything — text, images, tables, theme.</span>
+              <span class="hc-flow"><em>HTML</em><i>→</i><em>edit</em></span>
+            </button>
+
+            <button class="home-card" data-flow="html-pdf">
+              <span class="hc-ico"><svg class="ic"><use href="#i-pdf"/></svg></span>
+              <span class="hc-title">HTML → PDF</span>
+              <span class="hc-desc">Open a lecture and export a pixel-perfect PDF, rendered by Chromium.</span>
+              <span class="hc-flow"><em>HTML</em><i>→</i><em>PDF</em></span>
+            </button>
+          </div>
+
+          <div class="home-more">
+            <button class="home-mini" data-flow="pdf-pdf">
+              <svg class="ic"><use href="#i-pdf"/></svg><span>PDF → cleaner PDF</span>
+            </button>
+            <button class="home-mini" data-flow="word">
+              <svg class="ic"><use href="#i-doc"/></svg><span>Word → slides</span>
+            </button>
+            <span id="home-recent"></span>
+          </div>
         </div>
       </div>
       <div id="zoom-wrap" hidden><iframe id="canvas"></iframe></div>

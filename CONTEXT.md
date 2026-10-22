@@ -1,6 +1,14 @@
 # CONTEXT — what this project is (hard cap 500 words)
 <!-- The permanent orientation file. Update on big decisions, never let it bloat. -->
 
+## ⚠ THIS IS THE MERGED APP (2026-09-01)
+`D:\lecture-studio` = a copy of `D:\lectuer` with the PDF reconstruction engine
+from `D:\pdf=ppt` vendored into `engine/`. One UI now does **HTML or PDF in →
+edit → PDF or PPTX out**. Read **[MERGE.md](MERGE.md)** first — architecture,
+what was verified, and what is still open. Read **[LICENSING.md](LICENSING.md)**
+before distributing anything: MuPDF is AGPL-3.0-or-later and this app still
+declares MIT. Both source repos are untouched.
+
 ## What
 **Lecture Visual Editor (LVE)** — tool to visually enrich Arabic RTL HTML lectures and export PDF.
 Two shells, one engine:

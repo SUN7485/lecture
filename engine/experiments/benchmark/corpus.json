@@ -1,0 +1,86 @@
+{
+  "frozen": "2026-08-21",
+  "note": "Change this file only deliberately: every score in baseline.json describes exactly these bytes.",
+  "decks": [
+    {
+      "id": "chrome-lecture",
+      "path": "C:/Users/mosun/Downloads/final lecs/chp1/done/Chp1-Lec4-2.pdf",
+      "note": "the corpus generator, and the only entries with HTML ground truth",
+      "pages": 20,
+      "producer": "Skia/PDF m126",
+      "sha256": "3edb736e3c26decd"
+    },
+    {
+      "id": "chrome-lecture-2",
+      "path": "C:/Users/mosun/Downloads/final lecs/chp.4/done/Chp4-Lec31-1.pdf",
+      "note": "tables, charts, worked examples",
+      "pages": 21,
+      "producer": "Skia/PDF m126",
+      "sha256": "748c95c7e6a8ee1c"
+    },
+    {
+      "id": "ilovepdf-unit5",
+      "path": "C:/Users/mosun/Downloads/ﻫﻨﺪﺳﺔ اﻟﻌﻤﻠﻴﺎت واﻟﻠﻮﺟﺴﺘﻴﺎت اﻟﺼﻨﺎﻋﻴﺔ - الوحدة الخامسة.pdf",
+      "note": "118 pages, THREE physical page sizes, 31 tables",
+      "pages": 118,
+      "producer": "iLovePDF",
+      "sha256": "b9672b040561fc13"
+    },
+    {
+      "id": "indesign-brandguide",
+      "path": "C:/Users/mosun/Downloads/MiM Brand Guidelines- Short Version v1.1.pdf",
+      "note": "A4 landscape, 9619 images, clipped pictures",
+      "pages": 40,
+      "producer": "Adobe PDF Library 16.0",
+      "sha256": "9c0fe85511ef9b02"
+    },
+    {
+      "id": "powerpoint-2013",
+      "path": "C:/Users/mosun/OneDrive/Desktop/New folder (4)/Presentation 7 (MH).pdf",
+      "note": "a deck exported by PowerPoint itself",
+      "pages": 41,
+      "producer": "Microsoft® PowerPoint® 2013",
+      "sha256": "15647d76306380d4"
+    },
+    {
+      "id": "distiller-mac",
+      "path": "C:/Users/mosun/OneDrive/Desktop/New folder (4)/Feasibility.pdf",
+      "note": "drop shadows: every heading painted twice",
+      "pages": 15,
+      "producer": "Acrobat Distiller 5.0.5 for Macintosh",
+      "sha256": "ff63d7419c36cebe"
+    },
+    {
+      "id": "acrobat-pdfmaker",
+      "path": "C:/Users/mosun/OneDrive/Desktop/New folder (4)/The Feasibility Study.pdf",
+      "note": "Word via PDFMaker",
+      "pages": 16,
+      "producer": "Adobe PDF Library 21.1.187",
+      "sha256": "ca084a7a7a45ea1a"
+    },
+    {
+      "id": "word-arabic",
+      "path": "C:/Users/mosun/Videos/NCI/Daily Tasks - المهام اليومية.pdf",
+      "note": "Arabic from Word, DeviceGray",
+      "pages": 3,
+      "producer": "Microsoft® Word for Microsoft 365",
+      "sha256": "2853b271d4c85b28"
+    },
+    {
+      "id": "camscanner-scan",
+      "path": "C:/Users/mosun/OneDrive/Desktop/New folder (4)/Report(2).pdf",
+      "note": "image-only: no text semantics exist in the file",
+      "pages": 4,
+      "producer": "intsig.com pdf producer",
+      "sha256": "af560df4b12ecc53"
+    },
+    {
+      "id": "chrome-report",
+      "path": "C:/Users/mosun/Downloads/Valyze Credit Report.pdf",
+      "note": "A4 portrait business report, a newer Skia",
+      "pages": 16,
+      "producer": "Skia/PDF m149",
+      "sha256": "c370f8a720d98807"
+    }
+  ]
+}

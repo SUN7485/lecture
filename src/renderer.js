@@ -24,6 +24,19 @@
 
   function status(msg) { statusEl.textContent = msg; }
 
+  // Set by a home-screen card, consumed once the deck is on screen.
+  let pendingIntent = null;
+
+  /** Point the user at the export their chosen job was actually about. */
+  function applyIntent(intent) {
+    const btn = $(intent.kind === 'pptx' ? '#btn-export-pptx' : '#btn-export');
+    if (!btn) return;
+    btn.classList.add('suggest');
+    // Nudge once, then get out of the way.
+    btn.addEventListener('click', () => btn.classList.remove('suggest'), { once: true });
+    if (intent.hint) toast(intent.hint);
+  }
+
   // ---------- Open HTML ----------
   async function openHtml() {
     const res = await window.api.openHtml();
@@ -55,6 +68,39 @@
     }
   }
 
+  // ---------- PDF import: reconstruct a PDF into an editable deck ----------
+  // The reconstruction runs in the main process and blocks it, so the status is
+  // painted (and given two frames to actually reach the screen) BEFORE the call
+  // — otherwise a 2-second conversion looks like a dead button.
+  async function importPdf() {
+    const picked = await window.api.pickPdf();
+    if (!picked) return;
+    const name = picked.filePath.split(/[\\/]/).pop();
+    status('Reconstructing ' + name + ' — this can take a few seconds…');
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    let res;
+    try {
+      res = await window.api.importPdf({ filePath: picked.filePath });
+    } catch (e) {
+      status('PDF import failed: ' + e.message);
+      return;
+    }
+    if (!res) return;
+    if (res.error) { status('PDF import failed: ' + res.error); return; }
+
+    currentFile = { filePath: res.filePath, dir: res.dir, content: res.content };
+    window.__currentFile = currentFile;
+    loadIntoIframe(res.content, res.dir);
+    // AFTER the load: loadIntoIframe clears this, and it is what marks the open
+    // deck as PDF-sourced (test hook today, export routing tomorrow).
+    window.__importedPdf = res.sourcePdf;
+    status(
+      `Imported ${name}: ${res.stats.pages} page(s), ${res.stats.objects} objects ` +
+      `in ${(res.stats.ms / 1000).toFixed(1)}s. Edit it, then export PDF or PPTX.`
+    );
+  }
+
   // LLM chats hand users HTML wrapped in a markdown fence or with prose
   // before <!DOCTYPE>. Any text before the doctype forces quirks mode and
   // the parser hoists the deck's <style> into <body>, where it beats the
@@ -70,6 +116,11 @@
   }
 
   function loadIntoIframe(html, dir) {
+    // Whatever is being loaded, it is not a PDF import until importPdf() says
+    // so immediately after this call. Leaving a stale value here would make a
+    // plain HTML lecture look PDF-sourced to anything that routes on origin
+    // (the planned "PDF-in uses the reconstruction exporter" rule).
+    window.__importedPdf = null;
     html = sanitizeLlmHtml(html);
     const baseHref = 'file:///' + dir.replace(/\\/g, '/') + '/';
     const htmlWithBase = injectBase(html, baseHref);
@@ -111,6 +162,9 @@
       updateSlideInfo();
       updateBrandBtn(); // reflect whether the opened file already carries the theme
       status('Ready. Double-click any text (or select it and press ✏ Edit text) to change the words. Drag images in, add slides, zoom to work comfortably.');
+      // Consumed here rather than at click time: the deck has to be on screen
+      // before pointing at the button that acts on it.
+      if (pendingIntent) { applyIntent(pendingIntent); pendingIntent = null; }
     };
 
     emptyState.hidden = true;
@@ -783,8 +837,28 @@
 
   // ---------- Wire up ----------
   $('#btn-open').addEventListener('click', openHtml);
-  $('#btn-open-2').addEventListener('click', openHtml);
+
+  // ---------- home screen ----------
+  // Each card is a job. It picks the source, and remembers which export the
+  // user said they were heading for so that button is nudged once the deck is
+  // open — the job is not "open a file", it is "get a .pptx out of a PDF".
+  const FLOWS = {
+    'pdf-pptx':  { run: importPdf,  intent: 'pptx', hint: 'Deck ready — export your PowerPoint.' },
+    'pdf-pdf':   { run: importPdf,  intent: 'pdf',  hint: 'Deck ready — export your PDF.' },
+    'html-edit': { run: openHtml,   intent: null },
+    'html-pdf':  { run: openHtml,   intent: 'pdf',  hint: 'Lecture ready — export your PDF.' },
+    'word':      { run: importDocx, intent: null }
+  };
+  document.querySelectorAll('#empty-state [data-flow]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const flow = FLOWS[el.dataset.flow];
+      if (!flow) return;
+      pendingIntent = flow.intent ? { kind: flow.intent, hint: flow.hint } : null;
+      flow.run();
+    });
+  });
   $('#btn-import-docx').addEventListener('click', importDocx);
+  $('#btn-import-pdf').addEventListener('click', importPdf);
   $('#btn-add-images').addEventListener('click', addImages);
 
   function beginPlace(type, msg) {
@@ -878,6 +952,7 @@
   const ACTIONS = [
     { id: 'open', ar: 'فتح ملف', en: 'Open file', run: openHtml },
     { id: 'import-docx', ar: 'استيراد Word', en: 'Import Word document', run: importDocx },
+    { id: 'import-pdf', ar: 'استيراد PDF', en: 'Import PDF lecture', run: importPdf },
     { id: 'save', ar: 'حفظ', en: 'Save', run: saveHtml },
     { id: 'export-pdf', ar: 'تصدير PDF', en: 'Export PDF', run: exportPdf },
     { id: 'export-pptx', ar: 'تصدير PPTX', en: 'Export PPTX', run: exportPptx },
@@ -1427,8 +1502,6 @@
     if (last) {
       const name = last.filePath.split(/[\\/]/).pop();
       const btn = document.createElement('button');
-      btn.className = 'big';
-      btn.style.marginLeft = '10px';
       btn.textContent = '↩ Reopen ' + name;
       btn.title = last.filePath;
       btn.addEventListener('click', () => {
@@ -1437,7 +1510,9 @@
         loadIntoIframe(last.content, last.dir);
         status('Opened: ' + last.filePath);
       });
-      const holder = document.querySelector('.empty-inner');
+      // Its own slot in the home screen's secondary row — appending straight
+      // into .empty-inner would drop a stray button into the card grid.
+      const holder = document.querySelector('#home-recent');
       if (holder) holder.appendChild(btn);
     }
   })();

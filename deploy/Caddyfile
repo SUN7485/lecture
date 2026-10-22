@@ -1,0 +1,27 @@
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Uploads are PDFs and responses carry a whole deck inline; the default
+	# 100MB is fine, but the timeouts are not — a 100-page reconstruction
+	# legitimately takes minutes and must not be cut off at the proxy.
+	reverse_proxy app:8080 {
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	request_body {
+		max_size 30MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

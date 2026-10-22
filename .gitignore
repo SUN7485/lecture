@@ -30,3 +30,15 @@ verify-*.png
 .tmp-fidelity-fonts/
 # Scratch experiment deps (the scaffold itself is pruned in mission 033).
 bnb_html_match/node_modules/
+
+# Merge scratch: rendered deck previews and source-page rasters (regenerated).
+.preview/
+# The vendored PDF engine's image cache (content-hashed, rebuilt on import).
+engine/.cache/
+
+# Vendored engine: local commercial-engine build output and licenses
+# (same exclusions as D:\pdf=ppt — a 60MB Aspose DLL must never be committed).
+engine/experiments/vendors/aspose-runner/bin/
+engine/experiments/vendors/aspose-runner/obj/
+engine/experiments/vendors/**/*.lic
+engine/experiments/vendors/**/*license*

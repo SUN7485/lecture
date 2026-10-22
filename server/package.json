@@ -1,0 +1,6 @@
+{
+  "name": "lecture-studio-server",
+  "private": true,
+  "type": "module",
+  "description": "Hosted HTTP surface. Deliberately smaller than engine/src/server.js (the local studio): no filesystem browsing, no local-machine trust."
+}

@@ -1,0 +1,191 @@
+{
+  "ran": "2026-08-20T22:37:58",
+  "corpusFrozen": "2026-08-21",
+  "decksScored": 10,
+  "pagesScored": 294,
+  "visual": 0.8224629033288913,
+  "damageTotal": 621,
+  "pagesDamaged": 102,
+  "byClass": {
+    "FONT_DAMAGING": {
+      "regions": 3,
+      "pages": 0,
+      "decks": 3,
+      "samples": [
+        "ilovepdf-unit5 — MS PGothic",
+        "indesign-brandguide — Lyon Arabic Text Semibold, Lyon Arabic Text Regular",
+        "powerpoint-2013 — Calibri,Bold, Calibri,Bold Italic, Calibri,Italic, Arial,Bold"
+      ]
+    },
+    "TEXT_DAMAGED": {
+      "regions": 306,
+      "pages": 50,
+      "decks": 5,
+      "samples": [
+        "ilovepdf-unit5 p2 — characters-missing: 1 character(s) painted on this line did not reach the text",
+        "ilovepdf-unit5 p6 — characters-missing: 1 character(s) painted on this line did not reach the text",
+        "ilovepdf-unit5 p43 — characters-missing: 1 character(s) painted on this line did not reach the text"
+      ]
+    },
+    "OBJECT_OVERLAP": {
+      "regions": 222,
+      "pages": 54,
+      "decks": 5,
+      "samples": [
+        "ilovepdf-unit5 p28 — 9.9x4.5pt \"100\" / \"00) Z=50k\"",
+        "ilovepdf-unit5 p28 — 13.8x4.6pt \"C(150,0) Z=45k\" / \"2X₁+4X₂=400\"",
+        "ilovepdf-unit5 p46 — 14.4x11.6pt \"ثّ\" / \"التمثيل البياني \""
+      ]
+    },
+    "VECTOR_UNSUPPORTED": {
+      "regions": 1,
+      "pages": 0,
+      "decks": 1,
+      "samples": [
+        "indesign-brandguide — 2 path(s) no PowerPoint primitive can hold"
+      ]
+    },
+    "VISUAL_LOW": {
+      "regions": 46,
+      "pages": 46,
+      "decks": 3,
+      "samples": [
+        "indesign-brandguide p1 — ink IoU 0.499 against its own source page",
+        "indesign-brandguide p3 — ink IoU 0.673 against its own source page",
+        "indesign-brandguide p4 — ink IoU 0.645 against its own source page"
+      ]
+    },
+    "OFF_SLIDE": {
+      "regions": 43,
+      "pages": 36,
+      "decks": 1,
+      "samples": [
+        "powerpoint-2013 p1 — \"Mter Hadling\" ink leaves the slide",
+        "powerpoint-2013 p2 — \"Material handHadlg Deft\" ink leaves the slide",
+        "powerpoint-2013 p3 — \"In a typicalMter Hadlin\" ink leaves the slide"
+      ]
+    }
+  },
+  "decks": {
+    "chrome-lecture": {
+      "pages": 20,
+      "producer": "Skia/PDF m126",
+      "visual": 0.8868438675304775,
+      "converted": true,
+      "coverage": 1,
+      "nativeShapes": 580,
+      "images": 0,
+      "embeddedFonts": 2,
+      "pagesCompared": 20,
+      "elapsedMs": 52127
+    },
+    "chrome-lecture-2": {
+      "pages": 21,
+      "producer": "Skia/PDF m126",
+      "visual": 0.8866636610433946,
+      "converted": true,
+      "coverage": 1,
+      "nativeShapes": 437,
+      "images": 2,
+      "embeddedFonts": 2,
+      "pagesCompared": 21,
+      "elapsedMs": 49979
+    },
+    "ilovepdf-unit5": {
+      "pages": 118,
+      "producer": "iLovePDF",
+      "visual": 0.8987169065420265,
+      "converted": true,
+      "coverage": 1,
+      "nativeShapes": 4299,
+      "images": 251,
+      "embeddedFonts": 6,
+      "pagesCompared": 118,
+      "elapsedMs": 280674
+    },
+    "indesign-brandguide": {
+      "pages": 40,
+      "producer": "Adobe PDF Library 16.0",
+      "visual": 0.8296584978181851,
+      "converted": true,
+      "coverage": 0.9249499769124211,
+      "nativeShapes": 2884,
+      "images": 9619,
+      "embeddedFonts": 3,
+      "pagesCompared": 40,
+      "elapsedMs": 797484
+    },
+    "powerpoint-2013": {
+      "pages": 41,
+      "producer": "Microsoft® PowerPoint® 2013",
+      "visual": 0.43325925502241497,
+      "converted": true,
+      "coverage": 1,
+      "nativeShapes": 193,
+      "images": 447,
+      "embeddedFonts": 2,
+      "pagesCompared": 41,
+      "elapsedMs": 68399
+    },
+    "distiller-mac": {
+      "pages": 15,
+      "producer": "Acrobat Distiller 5.0.5 for Macintosh",
+      "visual": 0.7997053951979852,
+      "converted": true,
+      "coverage": 1,
+      "nativeShapes": 1859,
+      "images": 348,
+      "embeddedFonts": 1,
+      "pagesCompared": 15,
+      "elapsedMs": 99294
+    },
+    "acrobat-pdfmaker": {
+      "pages": 16,
+      "producer": "Adobe PDF Library 21.1.187",
+      "visual": 0.9121098290139714,
+      "converted": true,
+      "coverage": 1,
+      "nativeShapes": 649,
+      "images": 12,
+      "embeddedFonts": 1,
+      "pagesCompared": 16,
+      "elapsedMs": 56454
+    },
+    "word-arabic": {
+      "pages": 3,
+      "producer": "Microsoft® Word for Microsoft 365",
+      "visual": 0.8545089712264402,
+      "converted": true,
+      "coverage": 1,
+      "nativeShapes": 214,
+      "images": 3,
+      "embeddedFonts": 1,
+      "pagesCompared": 3,
+      "elapsedMs": 22304
+    },
+    "camscanner-scan": {
+      "pages": 4,
+      "producer": "intsig.com pdf producer",
+      "visual": 0.9730542347447918,
+      "converted": true,
+      "coverage": 1,
+      "nativeShapes": 0,
+      "images": 8,
+      "embeddedFonts": 0,
+      "pagesCompared": 4,
+      "elapsedMs": 14208
+    },
+    "chrome-report": {
+      "pages": 16,
+      "producer": "Skia/PDF m149",
+      "visual": 0.9627270600447402,
+      "converted": true,
+      "coverage": 1,
+      "nativeShapes": 763,
+      "images": 333,
+      "embeddedFonts": 2,
+      "pagesCompared": 16,
+      "elapsedMs": 101945
+    }
+  }
+}

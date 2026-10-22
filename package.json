@@ -7,7 +7,11 @@
     "start": "electron .",
     "test": "node --test --test-concurrency=1 test/fidelity-contract.test.js test/pptx-fidelity-service.test.js test/pptx-audit.test.js test/pptx-tesseract-ocr.test.js test/electron-scene-preview.test.js test/electron-source-render.test.js test/electron-visual-compare.test.js test/pptx-bake-capture.test.js test/pptx-gate-really-runs.test.js test/pptx-self-heal.test.js test/pptx-font-embed.test.js test/pptx-self-heal-really-runs.test.js test/pptx-e2e-mini.test.js",
     "dist": "electron-builder",
-    "pack": "electron-builder --dir"
+    "pack": "electron-builder --dir",
+    "serve": "node server/app.js",
+    "serve:local": "node server/dev.js",
+    "test:hosted": "node --test --test-concurrency=1 --expose-gc test/apply-edits.test.js test/store.test.js test/sync-law.test.js test/server-hosted.test.js",
+    "test:desktop": "node --test --test-concurrency=1 test/electron-home-screen.test.js test/electron-pdf-import.test.js test/electron-pdf-to-pptx.test.js"
   },
   "author": "SUN7485",
   "license": "MIT",
@@ -17,6 +21,7 @@
     "files": [
       "src/**/*",
       "tools/**/*",
+      "engine/**/*",
       "package.json"
     ],
     "asarUnpack": [
@@ -40,11 +45,15 @@
   },
   "devDependencies": {
     "electron": "^31.7.7",
-    "electron-builder": "^24.13.3",
-    "playwright-core": "^1.61.1",
-    "pptxgenjs": "^4.0.1"
+    "electron-builder": "^24.13.3"
   },
   "dependencies": {
-    "mathjax": "^3.2.2"
+    "mathjax": "^3.2.2",
+    "adm-zip": "^0.5.18",
+    "bidi-js": "^1.0.3",
+    "mupdf": "^1.28.0",
+    "pngjs": "^7.0.0",
+    "pptxgenjs": "^4.0.1",
+    "playwright-core": "^1.61.1"
   }
 }

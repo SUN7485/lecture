@@ -1,0 +1,500 @@
+/* Lecture Reconstruction Studio — editor chrome.
+   The slide canvas itself is deliberately unstyled: it must show the model and
+   nothing else, or the editor stops being a preview of the export. */
+
+:root {
+  --purple: #413258;
+  --cyan: #1AD9C7;
+  --gold: #C5A059;
+  --ink: #1A1A1A;
+  --bg: #F4F4F6;
+  --panel: #FFFFFF;
+  --line: #E3E3E8;
+  --muted: #6B6B78;
+  --sel: #1AD9C7;
+  --bar-h: 52px;
+  --status-h: 28px;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* ---------- top bar ---------- */
+.bar {
+  height: var(--bar-h);
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 14px;
+  background: var(--purple); color: #fff;
+  border-bottom: 1px solid rgba(0,0,0,.2);
+}
+.brand { font-size: 14px; letter-spacing: .2px; opacity: .95; white-space: nowrap; }
+.brand b { color: var(--cyan); font-weight: 700; }
+.build-id { font-size: 11px; opacity: .7; white-space: nowrap; }
+.spacer { flex: 1; }
+/* `min-width: 0` is load-bearing, not tidying. A flex item defaults to
+   `min-width: auto`, so `.open` refused to shrink below the 300px path field
+   plus the 240px chooser, the bar overflowed to 1580px, and Export PowerPoint —
+   the app's whole point — sat off-screen at any viewport under ~1600. MEASURED
+   at 1366x768, the second commonest laptop size: Export's right edge was 1580.
+   The bar cannot WRAP instead: the content area's height is
+   `calc(100% - var(--bar-h))`, so a second row would push the status bar out. */
+.open { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.open .btn { white-space: nowrap; }
+.chosen-pdf {
+  display: block; max-width: 220px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: rgba(255,255,255,.82);
+}
+/* The buttons are the thing being protected, so they yield only after the chrome
+   has — and `.ship` never yields at all. Splitting the primary action out of
+   `.tools` makes that intent STRUCTURAL: "Export PowerPoint" used to be simply
+   the last child of a `flex: none` row, so it was protected exactly as long as
+   the whole row fitted, and it was the first thing off-screen when it did not. */
+.tools { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; }
+.ship { display: flex; align-items: center; gap: 6px; flex: none; }
+.sep { width: 1px; height: 22px; background: rgba(255,255,255,.22); margin: 0 4px; }
+.zoom { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; opacity: .9; }
+
+input[type=text], select {
+  height: 30px; padding: 0 8px;
+  border: 1px solid rgba(255,255,255,.25); border-radius: 6px;
+  background: rgba(255,255,255,.1); color: #fff;
+  font: inherit; min-width: 120px;
+}
+input[type=text] { width: 300px; }
+select { max-width: 240px; }
+select option { color: #000; }
+.delivery-mode { min-width: 112px; max-width: 112px; }
+
+.btn {
+  height: 30px; padding: 0 11px;
+  border: 1px solid rgba(255,255,255,.25); border-radius: 6px;
+  background: rgba(255,255,255,.1); color: #fff;
+  font: inherit; cursor: pointer;
+  transition: background .12s ease, opacity .12s ease;
+}
+.btn:hover:not(:disabled) { background: rgba(255,255,255,.2); }
+.btn:active:not(:disabled) { background: rgba(255,255,255,.28); }
+.btn:disabled { opacity: .4; cursor: default; }
+.btn.icon { width: 30px; padding: 0; font-size: 15px; }
+.btn.icon svg {
+  width: 16px; height: 16px; fill: none; stroke: currentColor;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+  vertical-align: middle;
+}
+.btn.primary { background: var(--cyan); color: #06342f; border-color: transparent; font-weight: 600; }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn.on { background: var(--gold); color: #2a1e05; border-color: transparent; }
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible,
+[contenteditable="true"]:focus-visible {
+  outline: 3px solid #0a84ff; outline-offset: 2px;
+}
+
+/* ---------- layout ---------- */
+.app {
+  height: calc(100% - var(--bar-h) - var(--status-h));
+  display: grid; grid-template-columns: 168px minmax(0, 1fr) 390px;
+  min-height: 0;
+}
+
+.rail {
+  background: var(--panel); border-right: 1px solid var(--line);
+  overflow-y: auto; padding: 8px;
+}
+.thumb {
+  display: block; width: 100%; margin-bottom: 8px; padding: 6px;
+  border: 2px solid transparent; border-radius: 8px;
+  background: var(--bg); cursor: pointer; text-align: left;
+  font: inherit; color: var(--muted);
+}
+.thumb:hover { border-color: var(--line); }
+.thumb.active { border-color: var(--cyan); color: var(--ink); background: #fff; }
+.thumbtop { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+/* The slide number is the thing you scan the rail for, so it is the loudest
+   element in the thumb rather than a 11px caption above it. */
+.thumb .n {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 18px; padding: 0 5px;
+  border-radius: 5px; background: #dcdce4; color: #3a3a46;
+  font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.thumb.active .n { background: var(--purple); color: #fff; }
+.thumb .ct { font-size: 10px; opacity: .75; font-variant-numeric: tabular-nums; }
+.thumb .mini {
+  display: block; margin-top: 4px; height: 60px; border-radius: 4px;
+  background: #fff; border: 1px solid var(--line);
+  position: relative; overflow: hidden;
+}
+.thumb .mini i { position: absolute; display: block; background: #cfcfd8; }
+
+/* No `scroll-behavior: smooth` here on purpose: it animates EVERY programmatic
+   scroll, including the jump back to the top when a new deck opens. Smoothness
+   is asked for per call, in goToPage(). */
+.workspace { overflow: auto; padding: 24px; }
+.empty { height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; color: var(--muted); padding: 24px; }
+.empty-anchor {
+  width: 220px; height: 140px; margin-bottom: 18px;
+  background: linear-gradient(135deg, #413258 0%, #1AD9C7 100%);
+  border-radius: 18px; opacity: .85;
+}
+.empty h1 { font-size: 18px; font-weight: 600; color: var(--ink); margin: 0 0 6px; }
+.empty p { max-width: 420px; margin: 0 auto; line-height: 1.5; }
+/* No `opacity` here. MEASURED: --muted on --bg is 4.78:1, which clears WCAG AA;
+   the same colour at .75 composites to rgb(141,141,151) and falls to 2.99:1.
+   This particular line is the privacy promise — the one sentence telling the
+   user their lecture is not being uploaded anywhere — so it is the worst
+   sentence in the app to render as the faintest. Size carries the de-emphasis. */
+.empty-local { font-size: 12px; margin-top: 6px; }
+
+/* An author `display:` rule BEATS the [hidden] attribute, so both of these need
+   an explicit hidden case. Measured: without it the "Open a lecture PDF" panel
+   kept its full viewport height after a deck loaded, pushing slide 1 below the
+   fold and leaving the scroll position pinned at an empty screen. */
+.empty[hidden], .pages[hidden] { display: none; }
+
+/* ---------- the deck as one scrollable document ---------- */
+.pages { display: flex; flex-direction: column; align-items: flex-start; gap: 26px; }
+.slidepage { display: flex; flex-direction: column; gap: 6px; }
+.pagehead {
+  display: flex; align-items: baseline; gap: 7px;
+  /* Sticks to the top of the scroller so you always know which slide you are
+     looking at while scrolling through twenty of them. */
+  position: sticky; top: -24px; z-index: 5;
+  padding: 4px 0 4px; background: var(--bg); width: 100%;
+}
+.deliverybadge {
+  display: inline-flex; align-items: center; min-height: 20px; padding: 1px 7px;
+  border-radius: 999px; background: #e6e6eb; color: #555563;
+  font-size: 10.5px; font-weight: 650;
+}
+.deliverybadge.editable { background: #dff7ef; color: #17614d; }
+.deliverybadge.source-raster { background: #e8edf8; color: #354d79; }
+.deliverybadge.fallback-raster { background: #fff0d6; color: #775315; }
+.deliverybadge.failed { background: #fde5e5; color: #8f2c2c; }
+.deliveryoverride {
+  height: 24px; min-width: 112px; padding: 0 6px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: #fff; color: var(--ink); font-size: 10.5px;
+}
+.pagehead .deliveryoverride { margin-inline-start: auto; }
+.pagenum {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 24px; height: 22px; padding: 0 7px;
+  border-radius: 6px; background: var(--purple); color: #fff;
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.pagelabel { color: var(--muted); font-size: 11.5px; }
+.slidepage.current .pagenum { background: var(--cyan); color: #06342f; }
+
+.slidewrap { display: flex; gap: 20px; align-items: flex-start; }
+.slidewrap.overlay { position: relative; gap: 0; }
+.sourcepane { display: none; position: relative; flex: none; box-shadow: 0 6px 24px rgba(0,0,0,.14); background: #fff; }
+.source { display: block; }
+.slidewrap.compare .sourcepane { display: block; }
+.slidewrap.overlay .sourcepane { display: block; position: absolute; inset: 0; opacity: .45; z-index: 2; }
+.slidewrap.overlay .slide { position: relative; }
+.sourcecapture { position: absolute; inset: 0; pointer-events: none; }
+.sourcepane.picking .sourcecapture { pointer-events: auto; cursor: copy; }
+.sourcepane.capturing .sourcecapture { pointer-events: auto; cursor: crosshair; }
+.source-selection {
+  position: absolute; border: 2px solid #087e72; background: rgba(26,217,199,.18);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.9) inset; pointer-events: none;
+}
+
+.exportpanel {
+  padding: 12px; border-bottom: 1px solid var(--line); background: #fbfbfc;
+}
+.exportpanel[hidden] { display: none; }
+.exportpanel h2 { margin: 0 0 6px; font-size: 13px; }
+.exporttotals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.exporttotal { padding: 6px; border: 1px solid var(--line); border-radius: 6px; text-align: center; }
+.exporttotal b { display: block; font-size: 15px; }
+.exportnote { margin-top: 7px; color: var(--muted); font-size: 11px; }
+
+/* The slide surface. Objects are absolutely positioned in POINTS scaled by
+   --k, so the canvas is a direct, unopinionated view of the model. */
+.slide {
+  position: relative; flex: none;
+  background: #fff; transform-origin: top left;
+  box-shadow: 0 6px 24px rgba(0,0,0,.14);
+  overflow: hidden;
+}
+.obj { position: absolute; }
+.obj.text {
+  display: flex; align-items: center;
+  white-space: pre; line-height: 1.15;
+}
+.obj.text[data-align="right"] { justify-content: flex-end; }
+.obj.shape { pointer-events: auto; }
+.obj.sel { outline: 2px solid var(--sel); outline-offset: 1px; }
+.obj.editing { outline: 2px solid var(--gold); background: rgba(255,255,255,.6); }
+
+/* ---------- resize grips ----------
+   The slide is CSS-scaled by the zoom, so a fixed px grip would shrink with it
+   and become ungrabbable when zoomed out. Counter-scaling keeps a constant
+   on-screen size; --gk is set from the zoom in render(). */
+.grip {
+  position: absolute; width: 7px; height: 7px;
+  background: #fff; border: 1.5px solid var(--sel); border-radius: 2px;
+  transform: scale(calc(1 / var(--gk, 1))); z-index: 10;
+}
+.obj.editing .grip { display: none; }
+.grip-nw { left: 0;    top: 0;    margin: -4px 0 0 -4px; cursor: nwse-resize; }
+.grip-n  { left: 50%;  top: 0;    margin: -4px 0 0 -4px; cursor: ns-resize; }
+.grip-ne { left: 100%; top: 0;    margin: -4px 0 0 -4px; cursor: nesw-resize; }
+.grip-e  { left: 100%; top: 50%;  margin: -4px 0 0 -4px; cursor: ew-resize; }
+.grip-se { left: 100%; top: 100%; margin: -4px 0 0 -4px; cursor: nwse-resize; }
+.grip-s  { left: 50%;  top: 100%; margin: -4px 0 0 -4px; cursor: ns-resize; }
+.grip-sw { left: 0;    top: 100%; margin: -4px 0 0 -4px; cursor: nesw-resize; }
+.grip-w  { left: 0;    top: 50%;  margin: -4px 0 0 -4px; cursor: ew-resize; }
+.obj[contenteditable="true"] { cursor: text; }
+
+/* ---------- right column ----------
+   The doctor and the inspector are stacked here, both always visible when the
+   doctor is open. The doctor takes at most 62% of the height so the inspector
+   never collapses to nothing — clicking a finding is supposed to show you the
+   object it is about. */
+.side {
+  background: var(--panel); border-left: 1px solid var(--line);
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+}
+.sourcepanel {
+  padding: 10px 14px; border-bottom: 1px solid var(--line); background: #f8fafc;
+  flex: none;
+}
+.sourcepanel[hidden] { display: none; }
+.sourcepanel-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.sourcepanel-title strong { display: block; font-size: 14px; color: #19152a; }
+.sourcepanel-title span { display: block; margin-top: 1px; color: #536072; font-size: 12px; }
+.sourcebuttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 9px; }
+.sourcebuttons .btn {
+  height: 36px; border-color: #cfd5df; background: #fff; color: #231b36; font-weight: 600;
+}
+.sourcebuttons .btn:hover:not(:disabled) { background: #eef2f7; }
+.sourcebuttons .btn.on { border-color: #087e72; background: #d7f8f4; color: #075c54; }
+.sourcehelp { margin-top: 6px; color: #536072; font-size: 11.5px; line-height: 1.35; }
+.inspector {
+  flex: 1 1 auto; min-height: 140px;
+  overflow-y: auto; padding: 12px;
+}
+.hint { color: var(--muted); padding: 10px 4px; }
+.grp { margin-bottom: 14px; }
+.grp h3 {
+  margin: 0 0 7px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--muted); font-weight: 600;
+}
+.row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.row label { width: 62px; color: var(--muted); flex: none; }
+.row input, .row select {
+  flex: 1; height: 26px; min-width: 0; padding: 0 6px;
+  border: 1px solid var(--line); border-radius: 5px;
+  background: #fff; color: var(--ink); font: inherit;
+}
+.row input[type=color] { padding: 2px; height: 26px; cursor: pointer; }
+.row textarea {
+  width: 100%; min-height: 74px; padding: 6px;
+  border: 1px solid var(--line); border-radius: 5px;
+  font: inherit; resize: vertical;
+}
+.meta { color: var(--muted); font-size: 11px; word-break: break-all; }
+.badge {
+  display: inline-block; padding: 1px 6px; border-radius: 999px;
+  background: var(--bg); border: 1px solid var(--line);
+  font-size: 11px; color: var(--muted);
+}
+
+/* ---------- status ---------- */
+.status {
+  height: var(--status-h); display: flex; align-items: center; gap: 10px;
+  padding: 0 14px; background: var(--panel);
+  border-top: 1px solid var(--line); color: var(--muted); font-size: 12px;
+}
+.status .ok { color: #167d63; }
+.status .bad { color: #b3261e; }
+/* The export succeeded but the deck is not portable — neither green nor red. */
+.status .warn { color: #8a5a00; }
+.status a { color: var(--purple); font-weight: 600; }
+
+/* ---------- doctor ---------- */
+.pill {
+  display: inline-block; min-width: 20px; padding: 0 5px; margin-left: 4px;
+  border-radius: 999px; background: rgba(0,0,0,.25);
+  font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.doctorpanel {
+  flex: 1 1 66%; max-height: none; min-height: 260px;
+  background: var(--panel); border-bottom: 2px solid var(--line);
+  display: flex; flex-direction: column;
+}
+.doctorpanel[hidden] { display: none; }
+.dochead {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
+}
+.dochead > div:first-child {
+  display: grid; grid-template-columns: auto minmax(0,1fr); grid-template-areas: "score title" "score sub";
+  column-gap: 10px; align-items: center; min-width: 0;
+}
+.doctitle { grid-area: title; margin: 0; color: #4e5969; font-size: 12px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+.dochead-actions { display: flex; align-items: center; gap: 7px; }
+.dochead-actions .btn:not(.icon) {
+  height: 34px; border-color: #cfd5df; background: #fff; color: #231b36; font-weight: 600;
+}
+.dochead .btn.icon { border-color: var(--line); background: var(--bg); color: var(--ink); }
+.docscore { grid-area: score; font-size: 30px; font-weight: 700; line-height: 1; color: var(--purple); }
+.docsub { grid-area: sub; color: #4e5969; font-size: 12.5px; margin-top: 1px; line-height: 1.35; }
+.docactions {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; border-bottom: 1px solid var(--line); flex: none;
+}
+.docactions .btn.primary { background: var(--cyan); color: #06342f; border-color: transparent; }
+.docopt { color: #4e5969; font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.docopt input { width: 18px; height: 18px; }
+/* What the button will NOT touch, said before it is pressed rather than after. */
+.docremaining { flex-basis: 100%; color: #536072; font-size: 12.5px; line-height: 1.45; }
+.doctabs { display: grid; grid-template-columns: 1fr 1fr; padding: 8px 12px 0; border-bottom: 1px solid var(--line); }
+.doctab {
+  min-height: 38px; border: 0; border-bottom: 3px solid transparent; background: transparent;
+  color: #596577; font: 600 13px/1.2 inherit; cursor: pointer;
+}
+.doctab.active { border-bottom-color: var(--purple); color: #251b39; }
+.doctab span { display: inline-flex; min-width: 22px; justify-content: center; padding: 1px 6px; margin-left: 4px; border-radius: 999px; background: #e8eaf0; }
+#docList { overflow-y: auto; padding: 12px 14px; flex: 1 1 auto; min-height: 0; }
+
+/* ---------- identity ---------- */
+.docidentity {
+  padding: 8px 14px; border-bottom: 1px solid var(--line); flex: none;
+  font-size: 12.5px; color: #536072;
+}
+.docidentity .idhead {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  color: var(--ink); font-weight: 600; font-size: 12.5px;
+}
+.docidentity .idhead small { color: #647083; font-size: 11.5px; font-weight: 500; }
+.docidentity .idstate { padding: 1px 7px; border-radius: 999px; font-weight: 600; font-size: 11px; }
+.docidentity .idstate.ok { background: #e3f6f0; color: #106954; }
+.docidentity .idstate.off { background: #fbf0dd; color: #7a5510; }
+.swatches { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0; }
+.swatches i {
+  width: 15px; height: 15px; border-radius: 4px;
+  border: 1px solid rgba(0,0,0,.18); display: block;
+}
+.docidentity .idfaces { word-break: break-word; }
+.docidentity .idwarn { color: #7a5510; margin-top: 5px; }
+.iddetails { margin-top: 5px; }
+.iddetails summary { color: #536072; font-size: 11.5px; cursor: pointer; }
+.iddetails[open] summary { margin-bottom: 5px; }
+
+.card {
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px; margin-bottom: 12px; background: #fff;
+}
+.card.error { border-left: 3px solid #b3261e; }
+.card.warn  { border-left: 3px solid var(--gold); }
+.card.info  { border-left: 3px solid var(--cyan); }
+.card h4 { margin: 0 0 4px; font-size: 14px; font-weight: 700; display: flex; gap: 7px; align-items: center; color: #221b31; }
+.severity-label {
+  padding: 2px 6px; border-radius: 4px; background: #edf0f4; color: #4d5869;
+  font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+}
+.card.error .severity-label { background: #fde8e8; color: #8e211b; }
+.card.warn .severity-label { background: #fbf0dd; color: #73500e; }
+.card.info .severity-label { background: #ddf7f4; color: #126b62; }
+.card .cnt {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 999px;
+  padding: 0 6px; font-size: 11px; color: var(--muted); font-weight: 400;
+}
+.card .why { color: #536072; font-size: 13px; line-height: 1.48; margin: 5px 0 9px; }
+.card .hits { margin: 0 0 7px; padding: 0; list-style: none; }
+.card .hits li {
+  min-height: 48px; margin: 0 0 6px; border: 1px solid #e2e5eb; border-radius: 7px;
+  color: var(--ink); display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: stretch;
+}
+.finding-main {
+  display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 8px 9px;
+  border: 0; background: transparent; color: #202431; text-align: left; font: 13px/1.42 inherit; cursor: pointer;
+}
+.finding-main:hover { background: #f4f6f9; }
+.finding-main b { color: #4d5869; font-weight: 700; flex: none; }
+.finding-done, .finding-reopen {
+  min-width: 62px; padding: 0 9px; border: 0; border-left: 1px solid #e2e5eb;
+  background: #f7f9fb; color: #17614d; font: 700 12px/1 inherit; cursor: pointer;
+}
+.finding-done:hover, .finding-reopen:hover { background: #e1f5ee; }
+.card.resolved { border-left: 3px solid #4f806f; background: #fbfdfc; }
+.card.resolved h4 { color: #355e50; }
+.resolved-note { margin: 0 0 9px; color: #536072; font-size: 12.5px; }
+.card .more { color: var(--muted); font-size: 11px; padding: 2px 5px; }
+.card .btn {
+  height: 34px; padding: 0 11px; font-size: 12.5px;
+  border-color: var(--line); background: var(--bg); color: var(--ink);
+}
+.card .btn:hover:not(:disabled) { background: #ececf1; }
+.card .manual { color: #536072; font-size: 12.5px; }
+.docclean { text-align: center; color: #536072; padding: 30px 12px; font-size: 13.5px; line-height: 1.55; }
+
+/* THE SUPPORTED FLOOR HAS TO ACTUALLY HOLD. `.tools` is `flex: none` and
+   measures 872px, so below roughly 1266 the bar's fixed content stops fitting
+   and the first thing pushed off-screen is Export PowerPoint — the app's whole
+   point — with no way to reach it, because `.bar` cannot scroll or wrap (the
+   content area is `calc(100% - var(--bar-h))`, so a second row would push the
+   status bar out). This is the same defect the `.open { min-width: 0 }` note
+   above was written for, one screen size further down, and it was still live:
+   MEASURED at 1024 — the width the block below declares as supported — Export's
+   right edge was 1235, 211px past the viewport.
+
+   The chrome that NAMES the app is worth less than the button that ships the
+   deck, so it yields first. Build identity stays reachable under Review issues,
+   which is where a support conversation looks for it anyway. */
+@media (max-width: 1265px) {
+  .bar { gap: 8px; }
+  .build-id { display: none; }
+  /* `min-width: 0` again: without it a nowrap flex item refuses to shrink. */
+  .brand { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .chosen-pdf { max-width: 120px; }
+}
+
+@media (max-width: 1400px) {
+  .app { grid-template-columns: 148px minmax(0, 1fr) 370px; }
+  .rail { padding: 6px; }
+}
+
+/* ---------- width contracts ----------
+   The app is a desktop precision tool. Below 1024px we keep the workflow
+   readable and safe; we do not claim phone editing. */
+@media (max-width: 1023px) {
+  /* Under the supported floor the tool row is allowed to scroll INSIDE itself.
+     Every button stays reachable, the page still never scrolls sideways, and
+     Export stays put because it no longer lives in this box. Without it the
+     whole DOCUMENT scrolled: MEASURED at 768, Export sat 174px past the
+     viewport; at 375, 567px past it. */
+  .tools { overflow-x: auto; overscroll-behavior-x: contain; }
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .rail { display: none; }
+  .side { border-left: 0; border-top: 1px solid var(--line); max-height: 45vh; }
+  .empty-anchor { width: 160px; height: 100px; }
+}
+@media (min-width: 1024px) and (max-width: 1439px) {
+  .app { grid-template-columns: 56px minmax(0, 1fr) 280px; }
+  .rail { padding: 6px 4px; }
+  .thumb .ct, .thumb .mini { display: none; }
+  .tools { gap: 4px; }
+  .btn.icon { width: 30px; }
+}
+@media (min-width: 1440px) {
+  .app { grid-template-columns: 168px minmax(0, 1fr) 340px; }
+}
+
+/* ---------- motion ----------
+   Respect the user's system preference. The scroll spy and UI transitions are
+   the only animated things; the slide canvas itself never moves. */
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; transition-duration: 0s !important; }
+}

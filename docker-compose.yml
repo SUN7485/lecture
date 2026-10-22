@@ -1,0 +1,50 @@
+# Production topology: Caddy terminates TLS and proxies to the app.
+# Caddy is used instead of nginx purely because it obtains and renews
+# Let's Encrypt certificates on its own, which removes the single most common
+# way a small self-hosted deployment breaks 90 days after launch.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      # AGPL-3.0 s13: the app refuses to start without this. See LICENSING.md.
+      SOURCE_URL: ${SOURCE_URL:?set SOURCE_URL to your public repository}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      TRUST_PROXY: "1"
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-26214400}
+      # CPU-bound engine calls run in worker threads, never on the request
+      # thread. Roughly one worker per core, leaving headroom for Chromium.
+      WORKERS: ${WORKERS:-2}
+      MAX_PAGES: ${MAX_PAGES:-200}
+      MAX_OBJECTS_TOTAL: ${MAX_OBJECTS_TOTAL:-60000}
+      MAX_EDIT_ENTRIES: ${MAX_EDIT_ENTRIES:-20000}
+      NODE_OPTIONS: --max-old-space-size=1536
+    expose: ["8080"]
+    # Chromium needs more shared memory than Docker's 64MB default; the
+    # --disable-dev-shm-usage flag covers the rest.
+    shm_size: 256mb
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    deploy:
+      resources:
+        limits:
+          # Reconstruction holds a whole model in memory. A hard ceiling turns
+          # a hostile upload into one failed request instead of an OOM-killed VM.
+          memory: 2g
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN to your hostname}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [app]
+
+volumes:
+  caddy_data:
+  caddy_config:

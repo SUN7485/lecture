@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lecture Reconstruction Studio</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">Lecture Reconstruction&nbsp;<b>Studio</b></div>
+  <div class="build-id" id="buildId" title="Build identity"></div>
+
+  <div class="open">
+    <input id="pdfFile" type="file" accept=".pdf,application/pdf" hidden>
+    <button id="browse" class="btn primary">Choose PDF</button>
+    <span id="chosenPdf" class="chosen-pdf" title="No PDF selected">No PDF selected</span>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="tools" id="tools">
+    <button id="undo" class="btn icon" title="Undo (Ctrl+Z)" disabled>↶</button>
+    <button id="redo" class="btn icon" title="Redo (Ctrl+Shift+Z)" disabled>↷</button>
+    <span class="sep"></span>
+    <button id="addText" class="btn icon" title="Add a text box" disabled>T+</button>
+    <button id="addShape" class="btn icon" title="Add a rectangle" disabled>▭+</button>
+    <button id="deleteObj" class="btn icon" title="Delete the selected object (Del)" aria-label="Delete selected object" disabled>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v5m4-5v5"/></svg>
+    </button>
+    <span class="sep"></span>
+    <button id="zoomOut" class="btn icon" title="Zoom out">−</button>
+    <span id="zoomLabel" class="zoom">100%</span>
+    <button id="zoomIn" class="btn icon" title="Zoom in">+</button>
+    <span class="sep"></span>
+    <button id="compare" class="btn" title="Show the source page beside the slide">Compare</button>
+    <button id="overlay" class="btn" title="Overlay the source page">Overlay</button>
+    <span class="sep"></span>
+    <button id="doctor" class="btn" disabled>Review issues <span id="docScore" class="pill" hidden></span></button>
+  </div>
+
+  <!-- Shipping the deck lives OUTSIDE the scrolling tool group on purpose: it is
+       the one control that must never be the thing pushed off-screen. -->
+  <div class="ship">
+    <select id="deliveryMode" class="delivery-mode" title="PowerPoint delivery mode" disabled>
+      <option value="editable" selected>Editable (default)</option>
+      <option value="smart">Smart fidelity fallback</option>
+    </select>
+    <button id="export" class="btn primary" disabled>Export PowerPoint</button>
+  </div>
+</header>
+
+<main class="app">
+  <aside class="rail" id="rail" aria-label="Slides"></aside>
+
+  <section class="workspace" id="workspace">
+    <div class="empty" id="empty">
+      <div class="empty-anchor" aria-hidden="true"></div>
+      <h1>Open a lecture PDF</h1>
+      <p>It becomes an editable deck here. Fix anything you like, then export.</p>
+      <p class="empty-local">Processed on this computer · your file stays local</p>
+      <button id="browseEmpty" class="btn primary">Choose PDF</button>
+    </div>
+    <div class="pages" id="pages" hidden></div>
+  </section>
+
+  <aside class="side" id="side" aria-label="Inspector and review">
+    <section class="exportpanel" id="exportPanel" hidden aria-label="Export summary"></section>
+    <section class="sourcepanel" id="sourcePanel" hidden aria-label="Bring content from the source PDF">
+      <div class="sourcepanel-title">
+        <div><strong>Bring from PDF</strong><span>Copy source content into the editable slide.</span></div>
+      </div>
+      <div class="sourcebuttons">
+        <button id="sourcePick" class="btn" aria-pressed="false">Pick text / image</button>
+        <button id="sourceCapture" class="btn" aria-pressed="false">Capture area</button>
+      </div>
+      <div class="sourcehelp" id="sourceHelp">Pick extracted content, or capture any PDF area exactly.</div>
+    </section>
+    <section class="doctorpanel" id="doctorPanel" hidden aria-label="Review issues">
+      <div class="dochead">
+        <div>
+          <div class="doctitle">Review issues</div>
+          <div class="docscore" id="docScoreBig">—</div>
+          <div class="docsub" id="docSub">not run yet</div>
+        </div>
+        <div class="dochead-actions">
+          <button id="docRecheck" class="btn">Re-check</button>
+          <button id="docClose" class="btn icon" title="Close" aria-label="Close review">×</button>
+        </div>
+      </div>
+      <div class="docidentity" id="docIdentity" hidden></div>
+      <div class="docactions">
+        <button id="docFixAll" class="btn primary">Fix defects</button>
+        <label class="docopt"><input type="checkbox" id="docDesign"> include design changes</label>
+        <div class="docremaining" id="docRemaining"></div>
+      </div>
+      <div class="doctabs" role="tablist" aria-label="Review finding status">
+        <button id="docActiveTab" class="doctab active" role="tab" aria-selected="true">Active <span id="docActiveCount">0</span></button>
+        <button id="docDoneTab" class="doctab" role="tab" aria-selected="false">Done <span id="docDoneCount">0</span></button>
+      </div>
+      <div id="docList"></div>
+    </section>
+
+    <section class="inspector" id="inspector" aria-label="Inspector">
+      <div class="hint" id="inspectorHint">Select an object to edit it.</div>
+      <div id="inspectorBody" hidden></div>
+    </section>
+  </aside>
+</main>
+
+<footer class="status">
+  <span id="status" aria-live="polite">Ready.</span>
+  <span class="spacer"></span>
+  <span id="coverage"></span>
+</footer>
+
+<script type="module" src="/editor.js"></script>
+</body>
+</html>

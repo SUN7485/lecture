@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   openHtml: () => ipcRenderer.invoke('open-html'),
   openDocx: () => ipcRenderer.invoke('open-docx'),
+  // PDF import is two calls so the renderer can paint a progress status
+  // between the file dialog closing and the (blocking) reconstruction.
+  pickPdf: () => ipcRenderer.invoke('pick-pdf'),
+  importPdf: (payload) => ipcRenderer.invoke('import-pdf', payload),
   importHtml: () => ipcRenderer.invoke('import-html'),
   autoOpen: () => ipcRenderer.invoke('auto-open'),
   getLastFile: () => ipcRenderer.invoke('get-last-file'),

@@ -1,0 +1,7 @@
+{
+  "name": "lecture-studio-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PDF reconstruction engine (vendored from D:/pdf=ppt). ESM is scoped here so the Electron shell stays CommonJS."
+}

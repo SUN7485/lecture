@@ -247,6 +247,18 @@
   #recents .rc-card:hover { border-color:var(--accent); transform:translateY(-2px); box-shadow:0 8px 26px rgba(46,230,200,.18); }
   #recents .rc-card img, #recents .rc-noimg { width:100%; height:78px; object-fit:cover; border-radius:6px; background:var(--panel-3); }
   #recents .rc-name { font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
+
+  /* The export the landing page's chosen job pointed at. Pulses three times,
+     then stops — a nudge, not a nag. */
+  @keyframes suggestPulse {
+    0%,100% { box-shadow:0 0 0 0 rgba(46,230,200,.55); }
+    50%     { box-shadow:0 0 0 6px rgba(46,230,200,0); }
+  }
+  #toolbar button.suggest, button.suggest {
+    border-color:var(--accent) !important;
+    animation:suggestPulse 1.9s ease-out 3;
+  }
+  @media (prefers-reduced-motion: reduce){ button.suggest { animation:none; } }
 </style>
 </head>
 <body>
@@ -275,6 +287,7 @@
     <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V5h16v2M9 20h6M12 5v15"/></symbol>
     <symbol id="i-present" viewBox="0 0 24 24"><path d="M2 3h20M4 3v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3"/><path d="m9 21 3-3 3 3"/><path d="m10.5 8.5 3.5 2-3.5 2Z" fill="currentColor"/></symbol>
     <symbol id="i-pdf" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v5a1 1 0 0 0 1 1h5M12 11v6M9.5 14.5 12 17l2.5-2.5"/></symbol>
+    <symbol id="i-pptx" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><text x="9" y="17" font-size="10" font-weight="bold" fill="currentColor">P</text></symbol>
     <symbol id="i-save" viewBox="0 0 24 24"><path d="M15.2 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7.8a2 2 0 0 0-.6-1.4l-3.8-2.8A2 2 0 0 0 15.2 3Z"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/><rect x="7" y="13" width="10" height="8" rx="1"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v5h-5"/></symbol>
   </svg>
@@ -282,6 +295,7 @@
   <div id="toolbar">
     <span class="brand"><svg class="mark"><use href="#i-star8g"/></svg><span class="lbl">Slide Editor</span></span>
     <button id="btn-open" title="Open an HTML file"><svg class="ic"><use href="#i-open"/></svg><span class="lbl">Open</span></button>
+    <button id="btn-import-pdf" hidden title="Rebuild a PDF into editable slides"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">Import PDF</span></button>
     <span class="tb-sep"></span>
     <button id="btn-add-text" title="Insert a text block"><svg class="ic"><use href="#i-text"/></svg><span class="lbl">Text</span></button>
     <button id="btn-add-image" title="Insert an image (embedded into the file)"><svg class="ic"><use href="#i-image"/></svg><span class="lbl">Image</span></button>
@@ -307,6 +321,7 @@
     <button id="btn-present" title="Fullscreen present + speaker view"><svg class="ic"><use href="#i-present"/></svg><span class="lbl">Present</span></button>
     <span class="spacer"></span>
     <button id="btn-export" class="primary" title="Export to PDF — choose 'Save as PDF' in the print dialog"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">PDF</span></button>
+    <button id="btn-export-pptx" class="primary" hidden title="Export an editable PowerPoint file"><svg class="ic"><use href="#i-pptx"/></svg><span class="lbl">PPTX</span></button>
     <button id="btn-save" class="primary" title="Download the edited HTML (Ctrl+S)"><svg class="ic"><use href="#i-save"/></svg><span class="lbl">Save HTML</span></button>
   </div>
   <div id="stage">
@@ -314,14 +329,25 @@
       <svg class="orn"><use href="#i-star8g"/></svg>
       <h1>Edit any HTML page like a slide deck</h1>
       <p>Drop an .html file here — got one from ChatGPT, Claude or Gemini? Edit the text, move and resize anything like PowerPoint, then download it or export a PDF. A Word (.docx) file works too — it's split into slides automatically.</p>
-      <p><strong>Nothing is uploaded.</strong> Everything runs in your browser.</p>
+      <!-- Two claims, because there are now two paths and only one of them is
+           local. Saying "nothing is uploaded" on the hosted build would be a
+           false privacy claim the moment anyone clicks Import PDF. -->
+      <p id="privacy-local"><strong>Nothing is uploaded.</strong> Everything runs in your browser.</p>
+      <p id="privacy-hosted" hidden><strong>HTML and Word files never leave your browser.</strong>
+        Rebuilding a PDF sends it to this server, which deletes the file as soon as it has
+        been rebuilt and keeps the result for 30 minutes so you can export PowerPoint.</p>
       <div class="cta"><button id="btn-open-2" class="primary"><svg class="ic"><use href="#i-open"/></svg><span class="lbl">Choose HTML file</span></button></div>
+      <div class="cta" id="cta-pdf" hidden><button id="btn-open-pdf" class="primary"><svg class="ic"><use href="#i-pdf"/></svg><span class="lbl">Rebuild a PDF into slides</span></button></div>
+      <p class="src-offer" hidden id="src-offer" style="margin-top:26px;font-size:12px;color:var(--faint)">
+        Free software under the <a href="/source" style="color:var(--muted)">AGPL-3.0</a> — this service offers you its complete source.
+      </p>
       <a class="alt" href="templates.html"><svg class="ic"><use href="#i-star8"/></svg>Or start from a ready-made Arabic template →</a>
     </div>
     <div id="zoom-wrap" hidden><iframe id="canvas"></iframe></div>
   </div>
   <div id="status">Open an HTML file to start.</div>
   <input type="file" id="file-input" accept=".html,.htm,.docx" hidden>
+  <input type="file" id="pdf-input" accept="application/pdf,.pdf" hidden>
   <input type="file" id="img-input" accept="image/*" multiple hidden>
   <script src="editor.js"></script>
   <script src="doctor.js"></script>
@@ -329,6 +355,7 @@
   <script src="present.js"></script>
   <script src="vendor/mammoth.browser.min.js"></script>
   <script src="importer.js"></script>
+  <script src="api.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

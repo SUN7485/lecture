@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
+const { pathToFileURL } = require('url');
 const ai = require('./enrich/ai');
 const { verifyAndExport, preflightDesktopPowerPoint, renderHtmlSlides, renderPptxWithPowerPoint, captureBakes } = require('./pptxFidelity');
 
@@ -102,6 +103,73 @@ ipcMain.handle('open-docx', async () => {
   if (res.canceled || !res.filePaths.length) return null;
   const filePath = res.filePaths[0];
   return { filePath, base64: fs.readFileSync(filePath).toString('base64') };
+});
+
+// ---- PDF import ----------------------------------------------------------
+// A PDF is reconstructed into the SAME editable deck HTML the editor already
+// understands, which is what makes this a merge rather than a second app:
+// everything downstream — selection, the doctor, PDF export, PPTX export —
+// works on an imported PDF without knowing it came from one.
+//
+// The engine (vendored from the pdf=ppt reconstruction studio) is ESM and this
+// file is CommonJS, so it is pulled in with a dynamic import and cached: the
+// first call pays for MuPDF's WASM (~800ms), later calls do not.
+let _pdfEngine = null;
+async function pdfEngine() {
+  if (!_pdfEngine) {
+    const url = (rel) => pathToFileURL(path.join(__dirname, '..', 'engine', rel)).href;
+    const [normalize, toHtml] = await Promise.all([
+      import(url('src/model/normalize.js')),
+      import(url('model-to-html.js'))
+    ]);
+    _pdfEngine = { modelFromPdf: normalize.modelFromPdf, modelToDeckHtml: toHtml.modelToDeckHtml };
+  }
+  return _pdfEngine;
+}
+
+// Picking and converting are two calls on purpose. Conversion is synchronous
+// and blocks this process (measured 0.5-2.1s across a 9-lecture corpus, and it
+// scales with page count), so the renderer needs the chance to paint a
+// "reconstructing…" status between the dialog closing and the work starting.
+ipcMain.handle('pick-pdf', async () => {
+  const hook = process.env.LVE_OPEN_PDF; // test hook: skip the dialog
+  if (hook && fs.existsSync(hook)) return { filePath: hook };
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import a PDF lecture',
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    properties: ['openFile']
+  });
+  if (res.canceled || !res.filePaths.length) return null;
+  return { filePath: res.filePaths[0] };
+});
+
+ipcMain.handle('import-pdf', async (_e, { filePath } = {}) => {
+  if (!filePath || !fs.existsSync(filePath)) return { error: 'That PDF could not be found.' };
+  try {
+    const started = Date.now();
+    const { modelFromPdf, modelToDeckHtml } = await pdfEngine();
+    const model = modelFromPdf(filePath);
+    const name = path.basename(filePath).replace(/\.pdf$/i, '');
+    const content = modelToDeckHtml(model, { title: name });
+
+    // The deck is offered as an HTML sibling of the PDF, never as the PDF
+    // itself — Save must not be able to write deck markup over the source
+    // document. For the same reason the PDF is NOT passed to rememberFile():
+    // "reopen last file" reads its target as UTF-8 HTML.
+    return {
+      filePath: path.join(path.dirname(filePath), name + '.html'),
+      dir: path.dirname(filePath),
+      sourcePdf: filePath,
+      content,
+      stats: {
+        pages: model.pages.length,
+        objects: model.pages.reduce((n, p) => n + p.objects.length, 0),
+        ms: Date.now() - started
+      }
+    };
+  } catch (err) {
+    return { error: err && err.message ? err.message : String(err) };
+  }
 });
 
 // ---- Reopen the last lecture (offered on the empty screen) ----

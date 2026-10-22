@@ -1,0 +1,54 @@
+# The tests existed and passed, but nothing ran them except a human remembering
+# to. These are the suites that do not need Windows, Electron, or desktop
+# PowerPoint — everything that guards the HOSTED service, which is the part
+# strangers can reach.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --no-audit --no-fund
+
+      # render-pdf.js uses the SYSTEM chromium (Playwright ships no supported
+      # arm64 Linux build, and production runs on ARM), so CI installs the same
+      # thing the image does rather than a different browser.
+      - run: sudo apt-get update && sudo apt-get install -y chromium-browser fonts-noto-core fonts-liberation
+      - run: npm run test:hosted
+        env:
+          CHROMIUM_PATH: /usr/bin/chromium-browser
+
+  # The image has never been built anywhere. Building it in CI is the cheapest
+  # way to turn "reviewed and conventional" into "known to build", and to catch
+  # a package name that does not exist on the base image.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: lecture-studio:ci
+      - name: Boot it and prove it answers
+        run: |
+          docker run -d --name ls -p 8080:8080 \
+            -e SOURCE_URL=https://example.test/source lecture-studio:ci
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:8080/readyz; then echo "READY"; exit 0; fi
+            sleep 2
+          done
+          echo "--- container never became ready ---"
+          docker logs ls
+          exit 1

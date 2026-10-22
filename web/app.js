@@ -165,6 +165,9 @@
       fitZoom();
       saveRecent(); // 019: remember this deck for the empty-state recents list
       status('Ready. Double-click any text to edit it; drag any element to move it.');
+      // Consumed here, not at click time: the deck has to be on screen before
+      // pointing at the button that acts on it.
+      if (pendingIntent) { applyIntent(pendingIntent); pendingIntent = null; }
     };
     emptyState.hidden = true;
     zoomWrap.hidden = false;
@@ -1418,6 +1421,136 @@
       if (rec && rec.html && !editor) offerRecovery(rec);
     } catch (_) {}
     try { renderRecents(await idbAll('recents')); } catch (_) {}
+  })();
+
+
+  // ---------- hosted features (PDF import, server exports) -------------------
+  // The editor stays a working client-side page on its own; these three are the
+  // only jobs a browser cannot do alone. If no backend answers /readyz the
+  // buttons stay hidden and nothing below ever runs.
+  let currentModelId = null;   // handle to the server-side model, for PPTX
+  let pendingIntent = null;    // the export the chosen job was actually about
+
+  /** Point the user at the export their chosen job was about, once the deck is
+   *  on screen. Nudges once, then gets out of the way. */
+  function applyIntent(intent) {
+    const btn = document.getElementById(intent.kind === 'pptx' ? 'btn-export-pptx' : 'btn-export');
+    if (!btn) return;
+    btn.classList.add('suggest');
+    btn.addEventListener('click', function () { btn.classList.remove('suggest'); }, { once: true });
+  }
+
+  async function importPdfFile(file) {
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) {
+      status('That PDF is larger than the 25 MB limit.');
+      return;
+    }
+    status('Rebuilding ' + file.name + ' — this can take a few seconds…');
+    try {
+      const r = await window.StudioApi.convertPdf(file);
+      currentModelId = r.modelId;
+      saveName = r.name + '-edited.html';
+      loadIntoIframe(r.html);
+      const s = r.stats || {};
+      status('Rebuilt ' + file.name + ': ' + s.pages + ' slide(s), ' + s.objects +
+             ' objects in ' + ((s.ms || 0) / 1000).toFixed(1) + 's. Edit it, then export PDF or PPTX.');
+    } catch (e) {
+      status('PDF import failed: ' + e.message);
+    }
+  }
+
+  async function exportPptxViaServer() {
+    if (!currentModelId) {
+      status('PPTX export needs a deck rebuilt from a PDF — use Import PDF first.');
+      return;
+    }
+    status('Building your PowerPoint file…');
+    try {
+      // Send the canvas, not just the handle: the model is authoritative, but
+      // it must be told what the user changed or the export silently ships the
+      // ORIGINAL text. (Measured before this existed: edit present in the PDF,
+      // absent from the PPTX, same session.)
+      const canvas = window.StudioApi.collectCanvas(iframe.contentDocument);
+      await window.StudioApi.exportPptx(currentModelId, saveName.replace(/-edited\.html$/, ''), canvas);
+      status('PowerPoint file downloaded.');
+    } catch (e) {
+      // 410: the server dropped the model after its TTL. Say what to do, not
+      // just what failed.
+      status(e.status === 410
+        ? 'That document expired on the server. Import the PDF again to export PPTX.'
+        : 'PPTX export failed: ' + e.message);
+    }
+  }
+
+  async function exportPdfViaServer() {
+    if (!editor) { status('Open or import a lecture first.'); return; }
+    status('Rendering your PDF…');
+    try {
+      await window.StudioApi.exportPdf(editor.getCleanHtml(), saveName.replace(/-edited\.html$/, ''));
+      status('PDF downloaded.');
+    } catch (e) {
+      status('PDF export failed: ' + e.message);
+    }
+  }
+
+  (async () => {
+    const pdfInput = $('#pdf-input');
+    if (pdfInput) {
+      pdfInput.addEventListener('change', () => {
+        const f = pdfInput.files && pdfInput.files[0];
+        pdfInput.value = '';           // so re-picking the same file still fires
+        importPdfFile(f);
+      });
+    }
+
+    const ok = await window.StudioApi.probe();
+    if (!ok) return;                    // static/offline: leave the page as it was
+
+    for (const id of ['btn-import-pdf', 'btn-export-pptx', 'cta-pdf', 'src-offer', 'privacy-hosted']) {
+      const el = document.getElementById(id);
+      if (el) el.hidden = false;
+    }
+    // The local-only promise stops being true the moment a backend exists.
+    const localClaim = document.getElementById('privacy-local');
+    if (localClaim) localClaim.hidden = true;
+    const openPdf = () => pdfInput && pdfInput.click();
+
+    // The landing page hands the job over in the URL. It must NOT auto-open a
+    // file picker: browsers only allow that from a real user gesture, so an
+    // auto-click would be silently swallowed and look broken. Instead the
+    // chosen path is pre-selected and its button is the one the eye lands on.
+    const FLOW = {
+      'pdf-pptx':  { cta: 'btn-open-pdf', intent: 'pptx', say: 'اختر ملف PDF لإعادة بنائه — ثم صدّره PowerPoint.' },
+      'pdf-pdf':   { cta: 'btn-open-pdf', intent: 'pdf',  say: 'اختر ملف PDF لإعادة بنائه — ثم صدّره PDF من جديد.' },
+      'html-edit': { cta: 'btn-open-2',   intent: null,   say: 'اختر ملف HTML لتحريره.' },
+      'html-pdf':  { cta: 'btn-open-2',   intent: 'pdf',  say: 'اختر ملف HTML — ثم صدّره PDF.' }
+    };
+    const wanted = FLOW[new URLSearchParams(location.search).get('flow')];
+    if (wanted) {
+      pendingIntent = wanted.intent ? { kind: wanted.intent, hint: null } : null;
+      const cta = document.getElementById(wanted.cta);
+      if (cta) {
+        cta.classList.add('primary');
+        try { cta.focus({ preventScroll: true }); } catch (_) { cta.focus(); }
+      }
+      status(wanted.say);
+    }
+
+    const bi = $('#btn-import-pdf'); if (bi) bi.addEventListener('click', openPdf);
+    const b2 = $('#btn-open-pdf');   if (b2) b2.addEventListener('click', openPdf);
+    const bp = $('#btn-export-pptx'); if (bp) bp.addEventListener('click', exportPptxViaServer);
+
+    // With a server present, PDF export goes through headless Chromium at the
+    // deck's true page geometry instead of the browser print dialog — same
+    // output every time, and no "remember to pick Save as PDF".
+    const be = $('#btn-export');
+    if (be) {
+      const fresh = be.cloneNode(true);   // drop the print-dialog handler
+      be.parentNode.replaceChild(fresh, be);
+      fresh.title = 'Export a PDF at the deck\u2019s true page size';
+      fresh.addEventListener('click', exportPdfViaServer);
+    }
   })();
 
   // ---------- Template gallery route (013): ?template=<name> ----------

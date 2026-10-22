@@ -1,0 +1,33 @@
+# Everything the service does not load. Keeping the build context small also
+# keeps the Electron app's evidence directories out of a public image.
+.git
+.github
+node_modules
+.fidelity
+.preview
+.cache
+engine/.cache
+engine/out
+.tmp-fidelity-fonts
+dist
+out
+test
+src
+tools
+bnb_html_match
+*.log
+*.pdf
+*.pptx
+*.html
+!web/**/*.html
+
+# F3 — the LOCAL STUDIO server must not ship in a public image.
+# engine/src/server.js exposes /api/browse (arbitrary directory listing) and
+# accepts 256MB uploads. It is never started here, but shipping it means one
+# CMD change or one "let's reuse the studio server" away from being live. The
+# hosted surface was deliberately built as a separate, smaller entry point;
+# including the unsafe one anyway throws that away.
+engine/src/server.js
+engine/src/server-trust.js
+engine/web/
+engine/experiments/
