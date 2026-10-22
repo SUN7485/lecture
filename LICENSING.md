@@ -5,7 +5,7 @@ owner chose to publish the engine; the repository (`SUN7485/lecture`) is public,
 `LICENSE` is the AGPL text and `package.json` now says `AGPL-3.0-or-later`.
 A hosted instance must keep `SOURCE_URL` pointing at that repository.
 
-**Still open:** `src/fonts/` contains the commercial **Lyon** and **Diodrum**
+**Fonts (decided, risk accepted):** `src/fonts/` contains the commercial **Lyon** and **Diodrum**
 faces (MiM identity). They have been in the public repository since 2026-07-09
 and are not covered by the AGPL — their foundry licence decides whether they
 may be published at all. **The owner chose to keep them (2026-10-22)** because the MiM identity depends on them; the accepted risk is a foundry takedown request. See KNOWN_ISSUES.
