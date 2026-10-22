@@ -200,8 +200,29 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (route === '/api/export/pptx') {
-      // Large enough for the canvas state of a long deck (~100 bytes/object).
-      const body = await readJson(req, 8 * 1024 * 1024);
+      // Large enough for the canvas state of a long deck (~100 bytes/object),
+      // or a whole HTML deck with its images inlined.
+      const body = await readJson(req, CONFIG.maxUploadBytes);
+
+      // An HTML deck (opened, templated or AI-made — never a PDF) has no stored
+      // model. It goes the way a PDF would: Chromium prints it at its own
+      // page geometry, the engine rebuilds that PDF into a model, and the same
+      // writer + portable-font pass produce the PPTX. One pipeline, so an HTML
+      // deck and an imported PDF get identical text, RTL and font handling.
+      if (!body.modelId && typeof body.html === 'string' && body.html.length) {
+        const pdf = await renderPdf(body.html, { timeoutMs: CONFIG.exportTimeoutMs });
+        const rebuilt = await pool.run('convert', {
+          bytes: pdf, name: 'deck', maxPages: CONFIG.maxPages, maxObjectsTotal: CONFIG.maxObjectsTotal
+        });
+        if (rebuilt.error) return sendJson(res, rebuilt.status || 413, { error: rebuilt.error });
+        const { buffer } = await pool.run('pptx', { model: rebuilt.model, objects: [] });
+        const buf = Buffer.from(buffer);
+        log('info', 'export-pptx-html', { bytes: buf.length, pages: rebuilt.pages, ms: rebuilt.ms });
+        return sendBuffer(res, 200, buf,
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          (body.name || 'lecture') + '.pptx');
+      }
+
       const stored = store.get(String(body.modelId || ''), sid);
       if (!stored) {
         return sendJson(res, 410, { error: 'That document has expired. Import the PDF again to export.' });

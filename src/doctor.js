@@ -34,6 +34,14 @@
   var GREY_SPAN = 24;        // channel spread under which a color is neutral
   var OVERLOAD_FACTOR = 1.5;  // deck-relative overload: only slides >1.5x the deck's own median are outliers
   var SPLIT_MIN_WORDS = 10;  // don't split content thinner than this
+  // Arabic typography (Rules 22-26).
+  var RE_AR = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
+  var RE_AR_G = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/g;
+  var AR_MAX_TRACKING = 0.5; // px of letter-spacing Arabic tolerates before joins visibly break
+  var AR_MIN_LEADING = 1.35; // line-height/font-size under which harakat and dots collide
+  var AR_FIX_LEADING = 1.7;  // what the fix sets: comfortable for vocalised text
+  var DIR_MIN_WORDS = 4;     // Latin words before an RTL-laid paragraph counts as English
+  var DIR_MIN_AR_CHARS = 12; // Arabic letters before an LTR-laid paragraph counts as Arabic
   // Families safe without @font-face (CSS generics + fonts on effectively
   // every Windows/Office machine these decks are shown on).
   var GENERIC_FAMS = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-serif|ui-sans-serif|ui-monospace|math|emoji|arial|helvetica|helvetica neue|tahoma|verdana|segoe ui|calibri|cambria|georgia|times|times new roman|courier|courier new|trebuchet ms|impact)$/i;
@@ -162,6 +170,38 @@
       if (has) out.push(el);
     }
     return out;
+  }
+
+  // The text an element sets itself (its own text nodes, not its children's):
+  // typography rules judge the element whose style actually paints the words.
+  function _ownText(el) {
+    var s = '';
+    for (var c = 0; c < el.childNodes.length; c++) {
+      var n = el.childNodes[c];
+      if (n.nodeType === 3) s += n.nodeValue;
+    }
+    return s.replace(/\s+/g, ' ').trim();
+  }
+
+  // How many lines an element's own text actually breaks into: the distinct
+  // line boxes its text nodes occupy (height / line-height guesses wrong when
+  // the font's ascent exceeds the declared leading).
+  function _lineCount(el, doc) {
+    var tops = [];
+    for (var c = 0; c < el.childNodes.length; c++) {
+      var n = el.childNodes[c];
+      if (n.nodeType !== 3 || !/\S/.test(n.nodeValue)) continue;
+      var r = doc.createRange();
+      r.selectNodeContents(n);
+      var rects = r.getClientRects();
+      for (var k = 0; k < rects.length; k++) {
+        if (!rects[k].width) continue;
+        var t = rects[k].top, known = false;
+        for (var q = 0; q < tops.length; q++) { if (Math.abs(tops[q] - t) < 3) { known = true; break; } }
+        if (!known) tops.push(t);
+      }
+    }
+    return tops.length;
   }
 
   // A dismissed issue rides as a token in data-ve-dr-ignore on the element
@@ -349,6 +389,9 @@
   // Delete a whole slide (empty-slide / duplicate-slide fixes). Plain DOM
   // removal so the caller's single commit() records one undo step; deselect
   // first so the editor overlay never floats over a detached element.
+  // Deleting a slide is the one fix «إصلاح الكل» never applies on its own
+  // (issues carry destructive:true): a repeated agenda slide is often on
+  // purpose, and a 130-slide deck once lost 101 slides to a single click.
   function _removeSlideFix(editor, slide) {
     return function () {
       if (!slide.isConnected) return;
@@ -469,7 +512,10 @@
     }
     if (!urls.length) return Promise.reject(new Error('لا توجد روابط خطوط خارجية'));
     return Promise.all(urls.map(function (u) {
-      return fetch(u).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); });
+      // AI-written links often say `wght=400;700`; Google's syntax is
+      // `wght@400;700`, and the typo gets an error page with no CORS header —
+      // the deck never had its font. Repair it before fetching.
+      return fetch(u.replace(/(:(?:ital,)?wght)=/g, '$1@')).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); });
     })).then(function (cssTexts) {
       var faces = [];
       cssTexts.forEach(function (css) {
@@ -723,14 +769,21 @@
       }
       var spill3 = maxBottom3 === -Infinity ? 0 : Math.round(maxBottom3 - srect3.bottom);
       if (spill3 > OVERFLOW_TOL) {
+        // Shrink by what the slide actually needs, not a fixed 7% step: a
+        // stepwise fix never reduced the issue COUNT, so «إصلاح الكل» gave up
+        // after one pass with the text still spilling. Bounded both ways — at
+        // least one step, never more than 30% at once, never below TINY_FONT.
+        var contentH3 = maxBottom3 - srect3.top;
+        var need3 = contentH3 > 0 ? (srect3.height - OVERFLOW_TOL) / contentH3 : SHRINK_STEP;
+        var factor3 = Math.min(SHRINK_STEP, Math.max(0.7, need3 * 0.98));
         issues.push({ ruleId: 'overflow', severity: 'error', slideIndex: si, el: slide,
-          message: 'المحتوى أطول من الشريحة بـ ' + spill3 + 'px وسيُقصّ عند التصدير — الإصلاح يصغّر الخط درجة واحدة (كرّره أو قسّم الشريحة).',
-          fix: (function (els) { return function () {
+          message: 'المحتوى أطول من الشريحة بـ ' + spill3 + 'px وسيُقصّ عند التصدير — الإصلاح يصغّر الخط بالقدر اللازم ليتّسع (أو قسّم الشريحة).',
+          fix: (function (els, f) { return function () {
             els.forEach(function (el) {
               var fs = parseFloat(win.getComputedStyle(el).fontSize);
-              if (fs) el.style.fontSize = Math.max(TINY_FONT, Math.round(fs * SHRINK_STEP * 10) / 10) + 'px';
+              if (fs) el.style.fontSize = Math.max(TINY_FONT, Math.round(fs * f * 10) / 10) + 'px';
             });
-          }; })(texts.slice()) });
+          }; })(texts.slice(), factor3) });
       }
       // (b) escapee — a drag-floated unit (position:absolute + inline left/top,
       // exactly what editor drags produce) sticking out of the slide; the fix
@@ -797,6 +850,63 @@
           }; })(slide, arDigits >= latDigits) });
       }
 
+      // Rules 22-25 — Arabic typography. Each is a CSS habit that is harmless
+      // in Latin text and visibly wrong in Arabic, which is why AI-generated
+      // and translated decks are full of them.
+      var spaced = [], slanted = [], tight = [], wrongDir = [];
+      texts.forEach(function (el) {
+        var own = _ownText(el);
+        if (!own) return;
+        // A deck rebuilt from a PDF positions every run on purpose, with the
+        // direction the engine resolved; its runs are not authored paragraphs.
+        if (el.closest('.obj[data-id]')) return;
+        var cs4 = win.getComputedStyle(el);
+        var hasAr = RE_AR.test(own);
+        var fs4 = parseFloat(cs4.fontSize) || 16;
+        if (hasAr) {
+          // 22: tracking pulls the joined letters of a word apart.
+          var ls = cs4.letterSpacing === 'normal' ? 0 : parseFloat(cs4.letterSpacing) || 0;
+          if (ls > AR_MAX_TRACKING) spaced.push(el);
+          // 23: Arabic faces ship no italic, so the browser shears the glyphs.
+          if (cs4.fontStyle === 'italic' || cs4.fontStyle.indexOf('oblique') === 0) slanted.push(el);
+          // 24: diacritics and descenders need room between lines. Only an
+          // explicit line-height can be too tight — 'normal' uses the font's
+          // own ascent+descent, which already includes the marks — and only a
+          // block that really wraps onto two or more lines.
+          if (cs4.lineHeight !== 'normal') {
+            var lh4 = parseFloat(cs4.lineHeight);
+            if (lh4 && lh4 / fs4 < AR_MIN_LEADING && _lineCount(el, doc) >= 2) tight.push(el);
+          }
+        }
+        // 25: a paragraph in one script laid out in the other's direction puts
+        // its full stop, brackets and list marker at the wrong end.
+        if (el.getAttribute('dir') !== 'auto' && /^(P|LI|H[1-6]|TD|TH|DIV|SPAN|BLOCKQUOTE|FIGCAPTION|DD|DT)$/.test(el.tagName)) {
+          var latWords = (own.match(/[A-Za-z]{2,}/g) || []).length;
+          if (cs4.direction === 'rtl' && !hasAr && latWords >= DIR_MIN_WORDS) wrongDir.push(el);
+          else if (cs4.direction === 'ltr' && hasAr && (own.match(RE_AR_G) || []).length >= DIR_MIN_AR_CHARS && latWords < 2) wrongDir.push(el);
+        }
+      });
+      if (spaced.length) {
+        issues.push({ ruleId: 'arabic-letter-spacing', severity: 'warn', slideIndex: si, el: spaced[0],
+          message: 'تباعد بين الحروف في ' + spaced.length + ' نص عربي — يفصل الحروف المتصلة؛ الإصلاح يعيد التباعد الطبيعي.',
+          fix: (function (els) { return function () { els.forEach(function (e) { e.style.letterSpacing = 'normal'; }); }; })(spaced) });
+      }
+      if (slanted.length) {
+        issues.push({ ruleId: 'arabic-italic', severity: 'warn', slideIndex: si, el: slanted[0],
+          message: 'نص عربي مائل في ' + slanted.length + ' عنصر — الخطوط العربية بلا مائل فيُشوَّه الحرف؛ الإصلاح يعيده مستقيمًا (استعمل العريض للتأكيد).',
+          fix: (function (els) { return function () { els.forEach(function (e) { e.style.fontStyle = 'normal'; }); }; })(slanted) });
+      }
+      if (tight.length) {
+        issues.push({ ruleId: 'arabic-tight-lines', severity: 'warn', slideIndex: si, el: tight[0],
+          message: 'أسطر عربية متلاصقة في ' + tight.length + ' فقرة — قد تُقصّ الحركات والنقاط؛ الإصلاح يوسّع المسافة بين الأسطر.',
+          fix: (function (els) { return function () { els.forEach(function (e) { e.style.lineHeight = String(AR_FIX_LEADING); }); }; })(tight) });
+      }
+      if (wrongDir.length) {
+        issues.push({ ruleId: 'text-direction', severity: 'warn', slideIndex: si, el: wrongDir[0],
+          message: 'اتجاه الكتابة لا يناسب لغة ' + wrongDir.length + ' فقرة (نص إنجليزي من اليمين أو عربي من اليسار) — فتنقلب علامات الترقيم والأقواس؛ الإصلاح يجعل كل فقرة تتبع لغتها.',
+          fix: (function (els) { return function () { els.forEach(function (e) { e.setAttribute('dir', 'auto'); }); }; })(wrongDir) });
+      }
+
       // Rule 13 — off-palette text color (only when a theme kit is active:
       // the user chose an identity, the doctor enforces it). Neutrals pass;
       // the fix snaps to the nearest palette color that keeps WCAG contrast.
@@ -847,7 +957,7 @@
         if (words < 3 && !hasHead && !slide.querySelector('img, svg, table, canvas, video')) {
           issues.push({ ruleId: 'empty-slide', severity: 'warn', slideIndex: si, el: slide,
             message: 'شريحة شبه فارغة — الإصلاح يحذفها، أو املأها بالمحتوى.',
-            fix: _removeSlideFix(editor, slide) });
+            fix: _removeSlideFix(editor, slide), destructive: true });
         }
       }
     });
@@ -1056,6 +1166,32 @@
         }; })(smStyles, smFences) });
     }
 
+    // Rule 26 — the deck does not say which language it is in, or says the
+    // wrong one. lang/dir on <html> decide the default direction, screen-reader
+    // voice, hyphenation, font fallback and the language PowerPoint tags runs
+    // with. Judged on the deck's own letters, so an English deck is left alone.
+    var deckText = (doc.body.textContent || '');
+    var deckAr = (deckText.match(RE_AR_G) || []).length;
+    var deckLat = (deckText.match(/[A-Za-z]/g) || []).length;
+    var htmlEl = doc.documentElement;
+    var curLang = (htmlEl.getAttribute('lang') || '').toLowerCase();
+    var curDir = (htmlEl.getAttribute('dir') || '').toLowerCase();
+    var wantAr = deckAr > 40 && deckAr >= deckLat * 0.5;   // Arabic letters are ~1.6x denser per word than Latin
+    var wantEn = !wantAr && deckLat > 200 && deckAr < 20;
+    var langWrong = wantAr ? curLang.indexOf('ar') !== 0 : (wantEn ? curLang.indexOf('ar') === 0 || !curLang : false);
+    var dirWrong = wantAr ? curDir !== 'rtl' && win.getComputedStyle(doc.body).direction !== 'rtl'
+                          : (wantEn ? curDir === 'rtl' : false);
+    if ((langWrong || dirWrong) && slides.length) {
+      issues.push({ ruleId: 'deck-language', severity: 'warn', slideIndex: -1, el: slides[0],
+        message: wantAr
+          ? 'العرض عربي لكن الملف لا يعلن ذلك (lang/dir) — فيختار المتصفح وPowerPoint والقارئ الصوتي اتجاهًا ولغة خاطئين؛ الإصلاح يعلن العربية من اليمين إلى اليسار.'
+          : 'العرض إنجليزي لكن الملف يعلن العربية أو لا يعلن لغة — الإصلاح يعلن الإنجليزية من اليسار إلى اليمين.',
+        fix: (function (ar) { return function () {
+          htmlEl.setAttribute('lang', ar ? 'ar' : 'en');
+          htmlEl.setAttribute('dir', ar ? 'rtl' : 'ltr');
+        }; })(wantAr) });
+    }
+
     // Rule 21 — colors hardcoded past the reach of the theme kit. A kit
     // overrides CSS variables, so literal colors in the deck's rules, inline
     // styles and SVG fills stay exactly as authored: the user clicks the
@@ -1112,7 +1248,7 @@
       if (seenText[norm] != null) {
         issues.push({ ruleId: 'duplicate-slide', severity: 'warn', slideIndex: si, el: slide,
           message: 'الشريحة مطابقة تمامًا للشريحة ' + (seenText[norm] + 1) + ' — غالبًا نسخة منسيّة؛ الإصلاح يحذف النسخة.',
-          fix: _removeSlideFix(editor, slide) });
+          fix: _removeSlideFix(editor, slide), destructive: true });
       } else { seenText[norm] = si; }
     });
 

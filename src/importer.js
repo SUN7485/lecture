@@ -118,5 +118,100 @@
       '<style>' + TEMPLATE_CSS + '</style></head><body>' + slidesHtml + '</body></html>';
   }
 
-  window.DeckImporter = { fromWordHtml: fromWordHtml };
+  // ---- Deck-shape sniffer -------------------------------------------------
+  // The editor's slides are the large direct children of <body>. Decks from
+  // ChatGPT/Claude/Gemini rarely look like that: they are <section>s shown one
+  // at a time by a script (all but one display:none), or reveal.js
+  // (.reveal > .slides > section), sized in vw/vh. Opened as-is they arrive as
+  // ONE slide. This rewrites such a deck into the editor's shape: every slide
+  // a visible 16:9 page directly under <body>, nav chrome and the slideshow
+  // script removed. Decks that already have .slide elements are untouched.
+  var NAV_SEL = 'nav, .nav, .navigation, .controls, .progress, .slide-number, .slide-counter, .pagination, ' +
+    '[class*="nav-"], [id*="nav"], [id*="prev"], [id*="next"], [class*="prev"], [class*="next"]';
+  var SNIFF_CSS =
+    '.slide{display:block !important;position:relative !important;width:1280px !important;height:720px !important;' +
+    'min-height:0 !important;max-width:none !important;margin:24px auto !important;box-sizing:border-box;overflow:hidden;' +
+    'opacity:1 !important;visibility:visible !important;transform:none !important;left:auto !important;top:auto !important;}';
+
+  function candidateSlides(doc) {
+    var reveal = doc.querySelectorAll('.reveal .slides > section');
+    if (reveal.length >= 2) {
+      // vertical stacks: a section holding sections — each inner one is a slide
+      var flat = [];
+      Array.prototype.forEach.call(reveal, function (s) {
+        var inner = s.querySelectorAll(':scope > section');
+        if (inner.length) Array.prototype.push.apply(flat, inner); else flat.push(s);
+      });
+      return flat;
+    }
+    var groups = [
+      doc.querySelectorAll('body > section, body > main > section, body > div > section'),
+      doc.querySelectorAll('[class~="slide-item"], [class~="page"], [data-slide]'),
+      doc.querySelectorAll('[class*="slide"]:not([class*="slides"]):not([class*="slider"])')
+    ];
+    for (var g = 0; g < groups.length; g++) {
+      var list = Array.prototype.filter.call(groups[g], function (el) {
+        return !el.parentElement || !el.parentElement.closest('section, [class*="slide"]:not([class*="slides"])');
+      });
+      if (list.length >= 2) return list;
+    }
+    return [];
+  }
+
+  function normalizeDeckShape(html) {
+    if (!html || typeof DOMParser === 'undefined') return { html: html, slides: 0 };
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    if (doc.querySelector('.slide')) return { html: html, slides: 0 };
+    var slides = candidateSlides(doc);
+    if (slides.length < 2) return { html: html, slides: 0 };
+
+    slides.forEach(function (s) {
+      s.classList.add('slide');
+      s.classList.remove('active', 'present', 'past', 'future', 'hidden');
+      s.removeAttribute('hidden');
+      s.removeAttribute('aria-hidden');
+      if (s.style) { s.style.removeProperty('display'); s.style.removeProperty('opacity'); s.style.removeProperty('visibility'); s.style.removeProperty('transform'); }
+    });
+    // The slideshow machinery: its script would hide the slides again, its
+    // buttons are not content.
+    Array.prototype.forEach.call(doc.querySelectorAll('script'), function (n) { n.remove(); });
+    Array.prototype.forEach.call(doc.querySelectorAll(NAV_SEL), function (n) {
+      if (!n.closest('.slide') && !n.querySelector('.slide')) n.remove();
+    });
+    Array.prototype.forEach.call(doc.querySelectorAll('body > button'), function (n) { n.remove(); });
+    // Slides become direct children of <body>, in order; wrappers that held
+    // nothing else go away with them.
+    var body = doc.body;
+    var wrappers = [];
+    slides.forEach(function (s) {
+      var p = s.parentElement;
+      if (p && p !== body && wrappers.indexOf(p) === -1) wrappers.push(p);
+      body.appendChild(s);
+    });
+    wrappers.forEach(function (w) {
+      var cur = w;
+      while (cur && cur !== body && !cur.textContent.trim() && !cur.querySelector('img, svg, video, canvas')) {
+        var up = cur.parentElement; cur.remove(); cur = up;
+      }
+    });
+    // vw/vh meant "the screen" when one slide filled it. In the editor the
+    // viewport is the whole tall canvas, so 8vh became a slide's worth of
+    // padding. Pin them to the 1280x720 page each slide now is.
+    var pinUnits = function (css) {
+      return css.replace(/(-?\d*\.?\d+)(vh|vw|vmin|vmax)\b/g, function (m, n, u) {
+        var per = u === 'vh' ? 7.2 : u === 'vw' ? 12.8 : u === 'vmin' ? 7.2 : 12.8;
+        return Math.round(parseFloat(n) * per * 100) / 100 + 'px';
+      });
+    };
+    Array.prototype.forEach.call(doc.querySelectorAll('style'), function (st) { st.textContent = pinUnits(st.textContent); });
+    Array.prototype.forEach.call(doc.querySelectorAll('[style]'), function (el) { el.setAttribute('style', pinUnits(el.getAttribute('style'))); });
+
+    var style = doc.createElement('style');
+    style.setAttribute('data-ve-sniffed', String(slides.length));
+    style.textContent = SNIFF_CSS;
+    doc.head.appendChild(style);
+    return { html: '<!DOCTYPE html>\n' + doc.documentElement.outerHTML, slides: slides.length };
+  }
+
+  window.DeckImporter = { fromWordHtml: fromWordHtml, normalizeDeckShape: normalizeDeckShape };
 })();

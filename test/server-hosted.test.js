@@ -178,6 +178,29 @@ test('one session cannot export another session\'s document', async () => {
   assert.equal(stolen.status, 410, 'a foreign session was handed the model');
 });
 
+test('an HTML deck (no imported PDF) exports as an editable PPTX', { timeout: 180000 }, async () => {
+  // Before this existed the web PowerPoint button only worked for decks rebuilt
+  // from a PDF; a template, an opened lecture or an AI-made deck could not
+  // become PowerPoint at all on the hosted build.
+  const html = fs.readFileSync(path.join(ROOT, 'web', 'templates', 'lesson-intro.html'), 'utf8');
+  const slidesIn = (html.match(/<div class="slide[\s"]/g) || []).length;
+  const res = await fetch(`${BASE}/api/export/pptx`, {
+    method: 'POST',
+    headers: { ...ORIGIN, 'content-type': 'application/json' },
+    body: JSON.stringify({ html, name: 'template' })
+  });
+  assert.equal(res.status, 200);
+  const buf = Buffer.from(await res.arrayBuffer());
+  assert.equal(buf.subarray(0, 2).toString('latin1'), 'PK');
+  const AdmZip = require('adm-zip');
+  const zip = new AdmZip(buf);
+  const slides = zip.getEntries().filter((e) => /^ppt\/slides\/slide\d+\.xml$/.test(e.entryName));
+  assert.equal(slides.length, slidesIn, `${slidesIn} slides in, ${slides.length} out`);
+  const xml = slides.map((e) => e.getData().toString('utf8')).join('');
+  assert.ok(/<a:t>[^<]*[؀-ۿ]/.test(xml), 'no native Arabic text runs — the deck was flattened');
+  assert.ok(/<a:pPr[^>]*rtl="1"/.test(xml), 'Arabic paragraphs lost their RTL direction');
+});
+
 test('an edit made in the editor reaches the exported PPTX', { timeout: 180000 }, async () => {
   // The defect this locks: before engine/apply-edits.js existed, PPTX was
   // written from the stored model while PDF was rendered from the edited HTML,

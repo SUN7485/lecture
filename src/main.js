@@ -812,6 +812,16 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
   // Scene v2 degrades unmappable elements to `renderAs:'bake'` instead of
   // refusing the deck. Their pictures are cropped from the same Chromium that
   // produces the reference render, before Python builds the deck.
+  // Verify at twice the deck's OWN slide size. A fixed 1900x1300 (2 x 950x650)
+  // refused every other canvas: a 16:9 deck — an AI-made one, once the
+  // sniffer turns it into slides — failed at SOURCE_RENDER_ASPECT_MISMATCH
+  // and could never become PowerPoint on desktop.
+  const page = sceneGraph.pageSize || {};
+  const fidelityTarget = {
+    width: 2 * (Number(page.widthPx || page.width) || 950),
+    height: 2 * (Number(page.heightPx || page.height) || 650)
+  };
+
   const bakeRequests = sceneGraph.slides.flatMap((slide) => slide.bakeRequests || []);
   if (bakeRequests.length) {
     if (typeof html !== 'string' || !html.trim()) {
@@ -821,7 +831,7 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
       html,
       baseDir: baseDir || '',
       sourceSize: sceneGraph.pageSize,
-      target: { width: 1900, height: 1300 },
+      target: fidelityTarget,
       requests: bakeRequests,
       workDir,
       outputDir: path.join(workDir, 'bakes')
@@ -857,8 +867,8 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
     baseDir: baseDir || '',
     destinationPath,
     expectedSlideCount: sceneGraph.slides.length,
-    sourceWidth: 1900,
-    sourceHeight: 1300,
+    sourceWidth: fidelityTarget.width,
+    sourceHeight: fidelityTarget.height,
     // The app exports native, editable PowerPoint objects. OCR and visual
     // comparisons remain in the report, but browser-vs-Office raster
     // differences do not veto an otherwise valid editable deck.
@@ -884,7 +894,7 @@ async function runVerifiedPptx({ sceneGraph, html, themeCss, baseDir, destinatio
       html,
       baseDir: baseDir || '',
       sourceSize: graph?.pageSize,
-      target: target || { width: 1900, height: 1300 },
+      target: target || fidelityTarget,
       requests,
       workDir,
       outputDir

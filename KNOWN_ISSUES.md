@@ -1,6 +1,13 @@
 # KNOWN ISSUES — every known-unfixed bug, with its trigger
 <!-- If it bit us once and isn't fixed, it lives here until it is. -->
 
+## From the stress survey, 2026-10-22 (see test/stress/README.md)
+
+- **Short mixed-direction fragments can lose RTL in PPTX** (engine): a reconstructed paragraph like «(±0.1 كجم).» or «الكفاءة = Σt ÷ (N × C) = 90%.» is written as an LTR paragraph — the engine's direction resolution sees mostly neutrals/Latin. Measured 1-7 such paragraphs per deck (0 in most). Visual order mostly survives; the full stop / brackets land on the wrong end. Trigger: a PDF line dominated by numbers, units or a formula with one Arabic word. Fix belongs in engine/src/model/direction.js, with the bidi-deck fixture as the oracle.
+- **Pre-2005 PDFs with unmapped fonts produce U+FFFD** (engine): Feasibility.pdf (Acrobat Distiller 5.0.5, Mac) gives 108 replacement characters in 15 pages; word recall still 0.95. Those fonts carry no ToUnicode map — the characters are not in the file. Candidate: OCR fallback per glyph run (the desktop already bundles Tesseract ara+eng).
+- **Scanned PDFs import as pictures only** (by nature): a CamScanner PDF has no text layer. The user is now told so on import; OCR to editable text is a feature, not a fix.
+- **Arabic word recall vs MuPDF's own extraction understates quality**: measured 0.77-0.86 that way, 0.98-0.99 against the authored HTML for the same files. Judge reconstruction against authored text, never against another extractor.
+
 ## From the PDF-engine merge, 2026-09-01 (see MERGE.md)
 
 ## From the hosted build, 2026-09-02 (see DEPLOY.md)

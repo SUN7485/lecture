@@ -145,6 +145,16 @@
     return download(res, (name || 'lecture') + '.pptx');
   };
 
+  /** PPTX from any HTML deck: the server prints it, rebuilds it and writes it. */
+  api.exportPptxFromHtml = async function exportPptxFromHtml(html, name) {
+    const res = await fetch('/api/export/pptx', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ html, name })
+    });
+    return download(res, (name || 'lecture') + '.pptx');
+  };
+
   api.exportPdf = async function exportPdf(html, name) {
     const res = await fetch('/api/export/pdf', {
       method: 'POST',

@@ -21,8 +21,33 @@
   let imgMode = 'insert';   // what the hidden image input is being used for
   let fileHandle = null;    // File System Access handle (null = plain download fallback)
   let dirty = false;        // unsaved edits since the last successful save
+  // Handle to the server-side model of an IMPORTED PDF (PPTX export uses it).
+  // Owned by loadIntoIframe: every document load sets it, so opening an HTML
+  // file after a PDF can never export the previous PDF under the new name.
+  let currentModelId = null;
+  // A message the next finished load shows instead of the generic «جاهز»
+  // (the import summary used to be overwritten a moment after it appeared).
+  let readyNote = null;
 
   function status(msg) { statusEl.textContent = msg; }
+
+  // Arabic counted nouns: 1 and 2 have their own forms, 3-10 take the plural,
+  // 11-99 the singular (and the same by the last two digits past 100).
+  // «7 شريحة» is how an interface announces it was not written in Arabic.
+  const AR_NOUNS = {
+    slide: ['شريحة واحدة', 'شريحتان', 'شرائح', 'شريحة'],
+    page: ['صفحة واحدة', 'صفحتان', 'صفحات', 'صفحة'],
+    object: ['عنصر واحد', 'عنصران', 'عناصر', 'عنصرًا'],
+    note: ['ملاحظة واحدة', 'ملاحظتان', 'ملاحظات', 'ملاحظة'],
+    spot: ['موضع واحد', 'موضعان', 'مواضع', 'موضعًا']
+  };
+  function arCount(n, noun) {
+    const f = AR_NOUNS[noun];
+    if (n === 1) return f[0];
+    if (n === 2) return f[1];
+    const r = n % 100;
+    return n + ' ' + (r >= 3 && r <= 10 ? f[2] : f[3]);
+  }
 
   // ---------- persistence (019): IndexedDB = autosave (1 record) + recents (<=8) ----------
   const IDB_NAME = 'lve', IDB_VER = 1;
@@ -85,7 +110,7 @@
       const deckHtml = window.DeckImporter.fromWordHtml(result.value, { title });
       saveName = title + '-edited.html';
       loadIntoIframe(deckHtml);
-      status('تم الاستيراد من Word: ' + file.name + (result.messages.length ? ' (' + result.messages.length + ' ملاحظة)' : ''));
+      status('تم الاستيراد من Word: ' + file.name + (result.messages.length ? ' (' + arCount(result.messages.length, 'note') + ')' : ''));
     } catch (e) {
       status('تعذّر استيراد ملف Word: ' + e.message);
     }
@@ -105,8 +130,16 @@
     return out;
   }
 
-  function loadIntoIframe(html) {
+  function loadIntoIframe(html, modelId) {
+    currentModelId = modelId || null;
     html = sanitizeLlmHtml(html);
+    // AI-made decks (sections shown one at a time, reveal.js) become real
+    // slides; a PDF reconstruction is already in the editor's shape.
+    let sniffed = 0;
+    if (!modelId && window.DeckImporter && window.DeckImporter.normalizeDeckShape) {
+      const n = window.DeckImporter.normalizeDeckShape(html);
+      html = n.html; sniffed = n.slides;
+    }
     iframe.onload = () => {
       editor = new window.LectureEditor();
       editor.onChange = ({ canUndo, canRedo }) => {
@@ -128,7 +161,10 @@
       if (window.SlideDoctor) runDoctor(); // seed the 🩺 badge count for this deck
       fitZoom();
       saveRecent(); // 019: remember this deck for the empty-state recents list
-      status('جاهز. انقر مرتين على أي نص لتحريره، واسحب أي عنصر لتحريكه.');
+      const note = readyNote; readyNote = null;
+      status(note ? note : sniffed
+        ? `حُوّل العرض إلى شرائح قابلة للتحرير (عددها ${sniffed})، بعد أن كان يعرض شريحة واحدة في كل مرة. انقر مرتين على أي نص لتحريره.`
+        : 'جاهز. انقر مرتين على أي نص لتحريره، واسحب أي عنصر لتحريكه.');
       // Consumed here, not at click time: the deck has to be on screen before
       // pointing at the button that acts on it.
       if (pendingIntent) { applyIntent(pendingIntent); pendingIntent = null; }
@@ -181,7 +217,9 @@
   let drFixing = false; // async guard: one fix run at a time
   async function fixAll() {
     if (!editor || !drIssues.length || drFixing) return;
-    if (!drIssues.some((i) => i.fix)) { status('لا توجد ملاحظات قابلة للإصلاح تلقائيًا.'); return; }
+    // Slide deletions (destructive) are never part of «إصلاح الكل»: they wait
+    // for a deliberate click on their own card.
+    if (!drIssues.some((i) => i.fix && !i.destructive)) { status('لا توجد ملاحظات قابلة للإصلاح تلقائيًا.'); return; }
     drFixing = true;
     const btn = drDock && drDock.querySelector('.dr-fixall');
     if (btn) btn.disabled = true;
@@ -189,22 +227,30 @@
     const MAX_PASSES = 5;
     let fixed = 0, failed = 0, passes = 0;
     while (passes < MAX_PASSES) {
-      const fixable = drIssues.filter((i) => i.fix);
+      const fixable = drIssues.filter((i) => i.fix && !i.destructive);
       if (!fixable.length) break;
       const before = drIssues.length;
       for (const i of fixable) {
         try { await i.fix(); } catch (_) { failed++; }
       }
       editor.commit();
+      // An embedded font finishes loading AFTER its fix returns, and the real
+      // metrics can push text past the slide. Re-scan the deck as it will be
+      // seen, not the fallback-font layout (fix-all once said «0 left» and an
+      // overflow appeared a second later).
+      try { if (editor.doc && editor.doc.fonts) await editor.doc.fonts.ready; } catch (_) {}
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       runDoctor(); // re-scan; drIssues now reflects what actually remains
       passes++;
       if (drIssues.length >= before) break; // no progress — stop honestly
       fixed += before - drIssues.length;
     }
+    const held = drIssues.filter((i) => i.destructive).length;
     drFixing = false;
     if (btn) btn.disabled = false;
-    status(`أصلحت ${fixed} ملاحظة، المتبقّي ${drIssues.length}.` +
-      (failed ? ` تعذّر ${failed} — تحقق من الاتصال بالإنترنت.` : ''));
+    status(`أُصلحت ${arCount(fixed, 'note')}، والمتبقّي ${drIssues.length}.` +
+      (failed ? ` تعذّر ${failed} — تحقق من الاتصال بالإنترنت.` : '') +
+      (held ? ` تُركت ${held} لقرارك (حذف شرائح) — راجعها في بطاقاتها.` : ''));
   }
 
   function runDoctor() {
@@ -236,7 +282,7 @@
     pill.className = 'dr-score ' + (score >= 90 ? 'ok' : score >= 60 ? 'mid' : 'bad');
     const ignored = editor ? editor.doc.querySelectorAll('[data-ve-dr-ignore]').length : 0;
     const foot = dock.querySelector('.dr-foot');
-    foot.innerHTML = 'فُحصت ' + (editor ? editor.slides().length : 0) + ' شريحة في ' + drScanMs + 'ms' +
+    foot.innerHTML = 'فُحصت ' + arCount(editor ? editor.slides().length : 0, 'slide') + ' في ' + drScanMs + 'ms' +
       (ignored ? ' · <a class="dr-restore" href="#">استعادة ' + ignored + ' متجاهَلة</a>' : '');
     const rst = foot.querySelector('.dr-restore');
     if (rst) rst.addEventListener('click', (e) => {
@@ -256,10 +302,9 @@
     const div = document.createElement('div');
     div.className = 'dr-brand';
     const r = editor.brandReport();
-    if (!r) {
-      div.innerHTML = '<div class="db-row">الهوية غير مطبَّقة — طبّق «✨ MiM» من 🎨 الثيم.</div>';
-      return div;
-    }
+    // No identity applied: say nothing. On the public editor most decks are not
+    // MiM decks, and a permanent «apply MiM» box was a nag about someone else's brand.
+    if (!r) return null;
     const pill = (p) => '<b class="' + (p >= 100 ? 'ok' : p >= 90 ? 'mid' : 'bad') + '">' + p + '٪</b>';
     const names = (l) => l.map((x) => x.name + ' ×' + x.count).join('، ');
     const th = editor.doc.getElementById('ve-theme');
@@ -327,7 +372,7 @@
     if (card.count > 1) {
       const pill = document.createElement('span');
       pill.className = 'dr-count';
-      pill.textContent = `${card.count} موضعًا في ${card.slides.length} شريحة`;
+      pill.textContent = `${arCount(card.count, 'spot')} في ${arCount(card.slides.length, 'slide')}`;
       row.appendChild(pill);
     }
     const msg = document.createElement('div');
@@ -373,7 +418,7 @@
         editor.commit(); // ONE undo step for the whole card
         runDoctor();     // re-scan: card + issues are stale after commit
         drFixing = false;
-        status(failed ? `تعذّر الإصلاح — تحقق من الاتصال بالإنترنت.` : `أصلحت ${card.fixable} موضعًا.`);
+        status(failed ? `تعذّر الإصلاح — تحقق من الاتصال بالإنترنت.` : `أُصلحت ${arCount(card.fixable, 'spot')}.`);
       });
       actions.appendChild(fix);
     }
@@ -1399,7 +1444,6 @@
   // The editor stays a working client-side page on its own; these three are the
   // only jobs a browser cannot do alone. If no backend answers /readyz the
   // buttons stay hidden and nothing below ever runs.
-  let currentModelId = null;   // handle to the server-side model, for PPTX
   let pendingIntent = null;    // the export the chosen job was actually about
 
   /** Point the user at the export their chosen job was about, once the deck is
@@ -1411,6 +1455,12 @@
     btn.addEventListener('click', function () { btn.classList.remove('suggest'); }, { once: true });
   }
 
+  // A scan has pages but (almost) no text layer: the rebuild is pictures.
+  function scannedPdf(html, pages) {
+    const text = String(html || '').replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, '');
+    return pages > 0 && text.length < 15 * pages;
+  }
+
   async function importPdfFile(file) {
     if (!file) return;
     if (file.size > 25 * 1024 * 1024) {
@@ -1420,20 +1470,31 @@
     status('جارٍ إعادة بناء ' + file.name + ' — قد يستغرق ذلك بضع ثوانٍ…');
     try {
       const r = await window.StudioApi.convertPdf(file);
-      currentModelId = r.modelId;
       saveName = r.name + '-edited.html';
-      loadIntoIframe(r.html);
       const s = r.stats || {};
-      status('تمت إعادة بناء ' + file.name + ': ' + s.pages + ' شريحة و' + s.objects +
-             ' عنصرًا في ' + ((s.ms || 0) / 1000).toFixed(1) + ' ث. عدّلها ثم صدّرها PDF أو PowerPoint.');
+      readyNote = (scannedPdf(r.html, s.pages)
+        ? 'هذا الملف صفحات ممسوحة ضوئيًا (صور بلا نص)، فلا يمكن تحرير كلماته — تبقى كل صفحة صورة. للحصول على نص قابل للتحرير استخدم ملف PDF الأصلي لا المسح الضوئي. '
+        : '') +
+        'تمت إعادة بناء ' + file.name + ': ' + arCount(s.pages, 'page') + ' و' + arCount(s.objects, 'object') +
+        ' في ' + ((s.ms || 0) / 1000).toFixed(1) + ' ث. عدّلها ثم صدّرها PDF أو PowerPoint.';
+      loadIntoIframe(r.html, r.modelId);
     } catch (e) {
       status('تعذّر استيراد ملف PDF: ' + e.message);
     }
   }
 
   async function exportPptxViaServer() {
+    if (!editor) { status('افتح محاضرة أو استوردها أولًا.'); return; }
+    // An HTML deck (opened, template, AI-made) has no server model: the server
+    // prints it, rebuilds it and writes PowerPoint from that.
     if (!currentModelId) {
-      status('تصدير PowerPoint يحتاج عرضًا أُعيد بناؤه من PDF — استخدم «استيراد PDF» أولًا.');
+      status('جارٍ بناء ملف PowerPoint من العرض… قد يستغرق ذلك بضع ثوانٍ.');
+      try {
+        await window.StudioApi.exportPptxFromHtml(editor.getCleanHtml(), saveName.replace(/-edited\.html$/, ''));
+        status('تم تنزيل ملف PowerPoint.');
+      } catch (e) {
+        status('تعذّر تصدير PowerPoint: ' + e.message);
+      }
       return;
     }
     status('جارٍ بناء ملف PowerPoint…');

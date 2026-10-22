@@ -17,6 +17,27 @@
 
   let editor = null;
   let currentFile = null;   // { filePath, dir, content }
+  // A message the next finished load shows instead of the generic «جاهز»
+  // (the import summary used to be overwritten a moment after it appeared).
+  let readyNote = null;
+
+  // Arabic counted nouns: 1 and 2 have their own forms, 3-10 take the plural,
+  // 11-99 the singular (and the same by the last two digits past 100).
+  // «7 شريحة» is how an interface announces it was not written in Arabic.
+  const AR_NOUNS = {
+    slide: ['شريحة واحدة', 'شريحتان', 'شرائح', 'شريحة'],
+    page: ['صفحة واحدة', 'صفحتان', 'صفحات', 'صفحة'],
+    object: ['عنصر واحد', 'عنصران', 'عناصر', 'عنصرًا'],
+    note: ['ملاحظة واحدة', 'ملاحظتان', 'ملاحظات', 'ملاحظة'],
+    spot: ['موضع واحد', 'موضعان', 'مواضع', 'موضعًا']
+  };
+  function arCount(n, noun) {
+    const f = AR_NOUNS[noun];
+    if (n === 1) return f[0];
+    if (n === 2) return f[1];
+    const r = n % 100;
+    return n + ' ' + (r >= 3 && r <= 10 ? f[2] : f[3]);
+  }
   let assets = [];          // { url, name, path }
   let brandFonts = null;    // cached [{ name, b64 }] from main, loaded on first use
   let zoom = 1;
@@ -62,7 +83,7 @@
       currentFile = { filePath: dir + '\\' + name + '.html', dir, content: deckHtml };
       window.__currentFile = currentFile;
       loadIntoIframe(deckHtml, dir);
-      status('تم الاستيراد من Word: ' + name + (result.messages.length ? ' (' + result.messages.length + ' ملاحظة)' : ''));
+      status('تم الاستيراد من Word: ' + name + (result.messages.length ? ' (' + arCount(result.messages.length, 'note') + ')' : ''));
     } catch (e) {
       status('تعذّر استيراد Word: ' + e.message);
     }
@@ -91,14 +112,17 @@
 
     currentFile = { filePath: res.filePath, dir: res.dir, content: res.content };
     window.__currentFile = currentFile;
+    const text = String(res.content || '').replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, '');
+    const scanned = res.stats.pages > 0 && text.length < 15 * res.stats.pages;
+    readyNote = (scanned
+      ? 'هذا الملف صفحات ممسوحة ضوئيًا (صور بلا نص)، فلا يمكن تحرير كلماته — تبقى كل صفحة صورة. للحصول على نص قابل للتحرير استخدم ملف PDF الأصلي لا المسح الضوئي. '
+      : '') +
+      `تم استيراد ${name}: ${arCount(res.stats.pages, 'page')} و${arCount(res.stats.objects, 'object')} ` +
+      `في ${(res.stats.ms / 1000).toFixed(1)} ث. عدّلها ثم صدّرها PDF أو PowerPoint.`;
     loadIntoIframe(res.content, res.dir);
     // AFTER the load: loadIntoIframe clears this, and it is what marks the open
     // deck as PDF-sourced (test hook today, export routing tomorrow).
     window.__importedPdf = res.sourcePdf;
-    status(
-      `تم استيراد ${name}: ${res.stats.pages} صفحة و${res.stats.objects} عنصرًا ` +
-      `في ${(res.stats.ms / 1000).toFixed(1)} ث. عدّلها ثم صدّرها PDF أو PowerPoint.`
-    );
   }
 
   // LLM chats hand users HTML wrapped in a markdown fence or with prose
@@ -122,6 +146,12 @@
     // (the planned "PDF-in uses the reconstruction exporter" rule).
     window.__importedPdf = null;
     html = sanitizeLlmHtml(html);
+    // AI-made decks (sections shown one at a time, reveal.js) become real slides.
+    let sniffed = 0;
+    if (window.DeckImporter && window.DeckImporter.normalizeDeckShape) {
+      const n = window.DeckImporter.normalizeDeckShape(html);
+      html = n.html; sniffed = n.slides;
+    }
     const baseHref = 'file:///' + dir.replace(/\\/g, '/') + '/';
     const htmlWithBase = injectBase(html, baseHref);
 
@@ -161,7 +191,10 @@
       refreshSlideList();
       updateSlideInfo();
       updateBrandBtn(); // reflect whether the opened file already carries the theme
-      status('جاهز. انقر مرتين على أي نص (أو حدّده واضغط ✏ تحرير النص) لتغيير الكلمات. اسحب الصور، وأضف الشرائح، وكبّر العرض لتعمل براحة.');
+      const note = readyNote; readyNote = null;
+      status(note ? note : sniffed
+        ? `حُوّل العرض إلى شرائح قابلة للتحرير (عددها ${sniffed})، بعد أن كان يعرض شريحة واحدة في كل مرة. انقر مرتين على أي نص لتحريره.`
+        : 'جاهز. انقر مرتين على أي نص (أو حدّده واضغط ✏ تحرير النص) لتغيير الكلمات. اسحب الصور، وأضف الشرائح، وكبّر العرض لتعمل براحة.');
       // Consumed here rather than at click time: the deck has to be on screen
       // before pointing at the button that acts on it.
       if (pendingIntent) { applyIntent(pendingIntent); pendingIntent = null; }
@@ -477,7 +510,7 @@
       const afterSlide = pos === 'after' ? (cur || destSlides.slice(-1)[0]) : destSlides.slice(-1)[0];
       editor.importSlides(chosen.map(s => s.html), afterSlide, data.heads, name);
       closeImportModal();
-      status(`استُوردت ${chosen.length} شريحة من ${name}.`);
+      status(`استُوردت ${arCount(chosen.length, 'slide')} من ${name}.`);
     });
     updateConfirm();
   }
@@ -752,7 +785,7 @@
     if (!editor) { status('افتح محاضرة أولًا.'); return; }
     status('جارٍ تصدير PDF…');
     const { html, pageSize, slideCount } = buildPdfHtml();
-    if (slideCount) status(`جارٍ تصدير PDF — ${slideCount} شريحة، كل شريحة في صفحة…`);
+    if (slideCount) status(`جارٍ تصدير PDF — ${arCount(slideCount, 'slide')}، كل شريحة في صفحة…`);
     const suggested = baseName(currentFile?.filePath, '.pdf');
     const res = await window.api.exportPdf({ html, suggestedName: suggested, pageSize });
     if (res.ok) status('تم تصدير PDF: ' + res.filePath);
@@ -779,9 +812,9 @@
     const bakedNote = baked ? ` — ${baked} عنصر مطبوخ` : '';
     switch (report.verificationState) {
       case 'verified':
-        return `تم التصدير — تم التحقق من ${verified} شريحة مطابقة${bakedNote}: ${res.filePath}`;
+        return `تم التصدير — طابقت ${arCount(verified, 'slide')} أصلها في PowerPoint${bakedNote}: ${res.filePath}`;
       case 'partial':
-        return `تم التصدير — ${failed} شريحة غير مطابقة، راجع المعاينة${bakedNote}: ${res.filePath}`;
+        return `تم التصدير — ${arCount(failed, 'slide')} غير مطابقة، راجع المعاينة${bakedNote}: ${res.filePath}`;
       default:
         return `تم التصدير بدون تحقق (PowerPoint غير متوفر)${bakedNote}: ${res.filePath}`;
     }
@@ -805,8 +838,8 @@
     if (!editor) { status('افتح محاضرة أولًا.'); return; }
     const sceneGraph = editor.serializeForPptx();
     const slideCount = sceneGraph?.slides?.length || 0;
-    if (slideCount) status(`جارٍ التصدير — ${slideCount} شريحة…`);
-    watchPptxProgress(`جارٍ التصدير (${slideCount} شريحة) —`);
+    if (slideCount) status(`جارٍ التصدير — ${arCount(slideCount, 'slide')}…`);
+    watchPptxProgress(`جارٍ التصدير (${arCount(slideCount, 'slide')}) —`);
     const suggested = baseName(currentFile?.filePath, '.pptx');
     const res = await window.api.exportPptx({
       sceneGraph,
@@ -1103,7 +1136,9 @@
   let drFixing = false; // async guard: one fix run at a time
   async function fixAll() {
     if (!editor || !drIssues.length || drFixing) return;
-    if (!drIssues.some((i) => i.fix)) { status('لا توجد ملاحظات قابلة للإصلاح تلقائيًا.'); return; }
+    // Slide deletions (destructive) are never part of «إصلاح الكل»: they wait
+    // for a deliberate click on their own card.
+    if (!drIssues.some((i) => i.fix && !i.destructive)) { status('لا توجد ملاحظات قابلة للإصلاح تلقائيًا.'); return; }
     drFixing = true;
     const btn = drDock && drDock.querySelector('.dr-fixall');
     if (btn) btn.disabled = true;
@@ -1111,22 +1146,30 @@
     const MAX_PASSES = 5;
     let fixed = 0, failed = 0, passes = 0;
     while (passes < MAX_PASSES) {
-      const fixable = drIssues.filter((i) => i.fix);
+      const fixable = drIssues.filter((i) => i.fix && !i.destructive);
       if (!fixable.length) break;
       const before = drIssues.length;
       for (const i of fixable) {
         try { await i.fix(); } catch (_) { failed++; }
       }
       editor.commit();
+      // An embedded font finishes loading AFTER its fix returns, and the real
+      // metrics can push text past the slide. Re-scan the deck as it will be
+      // seen, not the fallback-font layout (fix-all once said «0 left» and an
+      // overflow appeared a second later).
+      try { if (editor.doc && editor.doc.fonts) await editor.doc.fonts.ready; } catch (_) {}
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       runDoctor(); // re-scan; drIssues now reflects what actually remains
       passes++;
       if (drIssues.length >= before) break; // no progress — stop honestly
       fixed += before - drIssues.length;
     }
+    const held = drIssues.filter((i) => i.destructive).length;
     drFixing = false;
     if (btn) btn.disabled = false;
-    status(`أصلحت ${fixed} ملاحظة، المتبقّي ${drIssues.length}.` +
-      (failed ? ` تعذّر ${failed} — تحقق من الاتصال بالإنترنت.` : ''));
+    status(`أُصلحت ${arCount(fixed, 'note')}، والمتبقّي ${drIssues.length}.` +
+      (failed ? ` تعذّر ${failed} — تحقق من الاتصال بالإنترنت.` : '') +
+      (held ? ` تُركت ${held} لقرارك (حذف شرائح) — راجعها في بطاقاتها.` : ''));
   }
 
   function runDoctor() {
@@ -1158,7 +1201,7 @@
     pill.className = 'dr-score ' + (score >= 90 ? 'ok' : score >= 60 ? 'mid' : 'bad');
     const ignored = editor ? editor.doc.querySelectorAll('[data-ve-dr-ignore]').length : 0;
     const foot = dock.querySelector('.dr-foot');
-    foot.innerHTML = 'فُحصت ' + (editor ? editor.slides().length : 0) + ' شريحة في ' + drScanMs + 'ms' +
+    foot.innerHTML = 'فُحصت ' + arCount(editor ? editor.slides().length : 0, 'slide') + ' في ' + drScanMs + 'ms' +
       (ignored ? ' · <a class="dr-restore" href="#">استعادة ' + ignored + ' متجاهَلة</a>' : '');
     const rst = foot.querySelector('.dr-restore');
     if (rst) rst.addEventListener('click', (e) => {
@@ -1244,7 +1287,7 @@
     if (card.count > 1) {
       const pill = document.createElement('span');
       pill.className = 'dr-count';
-      pill.textContent = `${card.count} موضعًا في ${card.slides.length} شريحة`;
+      pill.textContent = `${arCount(card.count, 'spot')} في ${arCount(card.slides.length, 'slide')}`;
       row.appendChild(pill);
     }
     const msg = document.createElement('div');
@@ -1290,7 +1333,7 @@
         editor.commit(); // ONE undo step for the whole card
         runDoctor();     // re-scan: card + issues are stale after commit
         drFixing = false;
-        status(failed ? `تعذّر الإصلاح — تحقق من الاتصال بالإنترنت.` : `أصلحت ${card.fixable} موضعًا.`);
+        status(failed ? `تعذّر الإصلاح — تحقق من الاتصال بالإنترنت.` : `أُصلحت ${arCount(card.fixable, 'spot')}.`);
       });
       actions.appendChild(fix);
     }
@@ -1544,7 +1587,7 @@
     heading.textContent = failures.length
       ? `تعذّر تصدير PowerPoint عند مرحلة ${report.stage}. لم يُكتب أي ملف.`
       : warnings.length
-        ? `اكتمل ملف PowerPoint القابل للتحرير مع ${warnings.length} ملاحظة في التعرّف الضوئي أو المطابقة البصرية.`
+        ? `اكتمل ملف PowerPoint القابل للتحرير مع ${arCount(warnings.length, 'note')} في التعرّف الضوئي أو المطابقة البصرية.`
         : 'اكتمل ملف PowerPoint القابل للتحرير دون فروق مسجّلة في المطابقة.';
     container.appendChild(heading);
     (report.slides || []).forEach((slide, index) => {
